@@ -5,8 +5,6 @@
     </picture>
 </p>
 
-<p align="center">One agent runs the crew. You approve the PRs.</p>
-
 ## Problem Statement
 
 Building and deploying software takes a team of engineers. Those engineers need a manager to coordinate and review their work. That manager needs a leader to set the vision. That leader is you.
