@@ -151,7 +151,7 @@ export function deliver(repo: Repo, id: string, opts: { dryRun?: boolean; title?
   const decisions = loadDecisions(repo)
     .filter((d) => d.by === id || verdict.decisions_touched.some((t) => t.includes(d.id)))
     .map((d) => `${d.id} ${d.title} (${d.status}${d.adr ? `, ADR ${d.adr.number}` : ""})`);
-  const title = opts.title ?? loadPlan(repo)?.tasks.find((t) => t.id === id)?.title ?? "";
+  const title = opts.title ?? loadPlan(repo)?.tasks.find((t) => t.id === id)?.title ?? task.title ?? "";
   if (!CONVENTIONAL.test(title)) throw new Error(`PR titles must be conventional commits. Rerun with --title "<type>: <summary>", like --title "feat: add tags to notes"`);
 
   const origin = run(["git", "-C", repo.root, "remote", "get-url", "origin"]).code === 0;

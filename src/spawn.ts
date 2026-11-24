@@ -6,10 +6,11 @@ import { loadConfig } from "./config.ts";
 import { findContext, writeIndex } from "./decisions.ts";
 import { pluginArgs, socketPath, taskDir, worktreeDir, type Repo } from "./paths.ts";
 import type { Rex } from "./rex.ts";
+import { CONVENTIONAL } from "./plan.ts";
 import { setTrust } from "./trust.ts";
 import { loadTasks, withTasks, type Task } from "./state.ts";
 
-export type SpawnOptions = { id: string; brief: string; owns: string[]; base: string; session: string; claudeConfig?: string };
+export type SpawnOptions = { id: string; title?: string; brief: string; owns: string[]; base: string; session: string; claudeConfig?: string };
 
 export function ensureForeman(repo: Repo): void {
   mkdirSync(join(repo.foreman, "tasks"), { recursive: true });
@@ -32,6 +33,7 @@ export function spawn(repo: Repo, opts: SpawnOptions, rex: Rex): Task {
   if (!/^[A-Za-z0-9][A-Za-z0-9-]*$/.test(id)) throw new Error(`task id must be letters, digits and dashes: ${id}`);
   if (loadTasks(repo).some((t) => t.id === id)) throw new Error(`task ${id} already exists`);
   if (!owns.length) throw new Error("a task needs at least one --owns path");
+  if (opts.title !== undefined && !CONVENTIONAL.test(opts.title)) throw new Error(`a task's title becomes its PR title, so it must be a conventional commit, like "feat: add tags to notes"`);
   const briefText = readFileSync(opts.brief, "utf8");
   checkBrief(briefText);
 
@@ -67,12 +69,20 @@ export function spawn(repo: Repo, opts: SpawnOptions, rex: Rex): Task {
     "--",
     `Your brief is ${briefPath}. Read it and start. This repo's Foreman workflow explicitly allows you to commit and rebase on ${branch}, so commit there as you go, and never on any other branch.`,
   ];
-  const task: Task = { id, status: "running", branch, base, worktree, owns, socket, startSha, createdAt: new Date().toISOString() };
+  const task: Task = { id, ...(opts.title ? { title: opts.title } : {}), status: "running", branch, base, worktree, owns, socket, startSha, createdAt: new Date().toISOString() };
   withTasks(repo, (tasks) => tasks.push(task));
-  task.rex = rex.open(opts.session, id, worktree, cmd);
+  task.rex = rex.open(opts.session, tabLabel(task), worktree, cmd);
   withTasks(repo, (tasks) => Object.assign(tasks.find((t) => t.id === id)!, { rex: task.rex }));
   return task;
 }
+
+// Ids like T1 mean nothing to someone glancing across tabs, so the label carries the start of the task's title.
+export function tabLabel(task: Pick<Task, "id" | "title">, prefix = ""): string {
+  const summary = task.title?.replace(CONVENTIONAL_TYPE, "").split(/\s+/).filter(Boolean).slice(0, 4).join(" ");
+  return `${prefix}${task.id}${summary ? `: ${summary}` : ""}`;
+}
+
+const CONVENTIONAL_TYPE = /^\w+(\([\w./-]+\))?!?:\s*/;
 
 type Header = { id: string; worktree: string; branch: string; base: string; owns: string[]; index: string; context?: string };
 
