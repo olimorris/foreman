@@ -5,13 +5,13 @@
     </picture>
 </p>
 
-## Problem Statement
+## :firecracker: Problem Statement
 
 Building and deploying software takes a team of engineers. Those engineers need a manager to coordinate and review their work. That manager needs a leader to set the vision. That leader is you.
 
 Foreman gives you the team and the manager, right inside Claude Code.
 
-## What is Foreman?
+## :construction_worker: What is Foreman?
 
 Foreman is a Claude Code plugin that turns one Claude session into the manager of a small engineering team.
 
@@ -40,7 +40,7 @@ You talk to Foreman. Foreman runs the crew:
 
 It's Claude Code only and works on one repo at a time. That's deliberate - fewer moving parts, less to break.
 
-## Install
+## :package: Install
 
 Foreman runs on macOS inside Rex. You need:
 
@@ -59,7 +59,7 @@ foreman doctor
 
 `foreman doctor` checks every requirement and says what's missing.
 
-## Usage
+## :rocket: Usage
 
 Open Rex in your repo and start Foreman:
 
