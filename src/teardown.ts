@@ -18,6 +18,23 @@ export function unmergedWork(repo: Repo, branch: string, base: string, worktree:
   return { commits, dirty };
 }
 
+// Workers start dev servers to check their work, and an orphaned one keeps its port after the tab closes.
+export function stopProcessesIn(dir: string): number[] {
+  const out = run(["lsof", "-d", "cwd", "-F", "pn"]).stdout.split("\n");
+  const pids: number[] = [];
+  let pid = 0;
+  for (const line of out) {
+    if (line.startsWith("p")) pid = Number(line.slice(1));
+    else if (line.startsWith("n") && (line.slice(1) === dir || line.slice(1).startsWith(dir + "/")) && pid !== process.pid) pids.push(pid);
+  }
+  for (const p of pids) {
+    try {
+      process.kill(p, "SIGTERM");
+    } catch {}
+  }
+  return pids;
+}
+
 export type TeardownResult = { removed: boolean; message: string };
 
 export function teardown(repo: Repo, id: string, discard: boolean, rex: Rex, claudeConfig?: string): TeardownResult {
@@ -30,6 +47,7 @@ export function teardown(repo: Repo, id: string, discard: boolean, rex: Rex, cla
     };
   }
   if (task.rex) rex.close(task.rex);
+  stopProcessesIn(task.worktree);
   if (existsSync(task.worktree)) {
     const r = run(["git", "-C", repo.root, "worktree", "remove", ...(discard ? ["--force"] : []), task.worktree]);
     if (r.code !== 0) return { removed: false, message: `git worktree remove failed: ${r.stderr.trim()}` };
