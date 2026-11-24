@@ -98,9 +98,9 @@ test("concurrent task updates don't lose writes", async () => {
   await Promise.all(
     Array.from({ length: 8 }, (_, i) =>
       Bun.spawn(["bun", "-e", `
-        const { updateTask, findTask } = await import("${join(import.meta.dir, "..", "src", "state.ts")}");
+        const { withTasks } = await import("${join(import.meta.dir, "..", "src", "state.ts")}");
         const repo = ${JSON.stringify(repo)};
-        updateTask(repo, "T1", { owns: [...findTask(repo, "T1").owns, "f${i}"] });
+        withTasks(repo, (tasks) => tasks[0].owns.push("f${i}"));
       `]).exited,
     ),
   );

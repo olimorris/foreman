@@ -40,6 +40,10 @@ Write `.foreman/plan.md`:
 ```markdown
 # Plan: <short title>
 Deadline: <the user's deadline, as they said it>
+Calls:
+- <each call you made that changes what the user sees or uses>
+Cut:
+- <each backlog item you cut, and why>
 
 ## T1: <PR title as a conventional commit, like "feat: add tags to notes">
 - Owns: src/types.ts, src/data.ts
@@ -59,7 +63,7 @@ Deadline: <the user's deadline, as they said it>
 - <name>: <route or launch arguments>
 ```
 
-Each task's `###` sections become its brief, so follow the dispatch skill's rules for Intent, Spec and Screens.
+Leave out `Calls:` or `Cut:` when there are none. Both appear again in the run summary at the end. Each task's `###` sections become its brief, so follow the dispatch skill's rules for Intent, Spec and Screens.
 
 ## 5. Check it, then start or ask
 

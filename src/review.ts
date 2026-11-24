@@ -2,7 +2,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node
 import { join } from "node:path";
 import { loadConfig } from "./config.ts";
 import { indexPath, writeIndex } from "./decisions.ts";
-import { appendEvent } from "./events.ts";
+import { appendEvent, lastDone } from "./events.ts";
 import { must, run } from "./exec.ts";
 import { pluginRoot, taskDir, worktreeDir, type Repo } from "./paths.ts";
 import type { Rex } from "./rex.ts";
@@ -65,7 +65,7 @@ export async function runReview(repo: Repo, id: string): Promise<string> {
     writeFileSync(diff, must(["git", "-C", task.worktree, "diff", `${base}...HEAD`]));
     const stat = must(["git", "-C", task.worktree, "diff", "--shortstat", `${base}...HEAD`]).trim();
     const dirty = must(["git", "-C", task.worktree, "status", "--porcelain"]).trim();
-    const prompt = reviewPrompt({ task, round, diff, stat, dirty, shots, index: writeIndex(repo, task.base), previous: lastVerdict(repo, id, round), brief: join(taskDir(repo, id), "brief.md") });
+    const prompt = reviewPrompt({ task, round, diff, stat, dirty, shots, index: writeIndex(repo, task.base), previous: lastVerdict(repo, id, round), done: lastDone(repo, id), brief: join(taskDir(repo, id), "brief.md") });
     writeFileSync(join(dir, "prompt.md"), prompt);
 
     const r = run(
@@ -183,7 +183,13 @@ async function screenshots(repo: Repo, task: Task, dir: string): Promise<Capture
   return { files: shot.files, errors: [...errors, ...shot.errors.map((e) => `after: ${e}`)], before, after };
 }
 
+const handover = (id: string, done?: { test?: string[]; assumptions?: string[] }) => [
+  `- How ${id}'s worker says the user should test it:`, ...(done?.test?.length ? done.test.map((s) => `  - ${s}`) : ["  - (no steps given)"]),
+  `- Assumptions the worker made:`, ...(done?.assumptions?.length ? done.assumptions.map((s) => `  - ${s}`) : ["  - (none given)"]),
+];
+
 type PromptInput = {
+  done?: { test?: string[]; assumptions?: string[] };
   task: Task; round: number; diff: string; stat: string; dirty: string; index: string; brief: string; previous?: string;
   shots: Capture & { before?: string; after?: string; note?: string };
 };
@@ -202,6 +208,7 @@ function reviewPrompt(p: PromptInput): string {
     `- Uncommitted changes in the worktree: ${p.dirty ? `\n${p.dirty}` : "none"}`,
     ...shots,
     ...(p.previous ? [`- Previous review: ${p.previous}. Check each of its issues was fixed.`] : []),
+    ...handover(p.task.id, p.done),
     `- Owned paths: ${p.task.owns.join(", ")}`,
     "",
     "Return the verdict.",

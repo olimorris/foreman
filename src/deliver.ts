@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } fro
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "./config.ts";
-import { readEvents } from "./events.ts";
+import { lastDone } from "./events.ts";
 import { must, run } from "./exec.ts";
 import { loadDecisions } from "./ledger.ts";
 import { taskDir, type Repo } from "./paths.ts";
@@ -14,7 +14,7 @@ import { loadSessions, sessionsFile, taskCost, transcriptDir } from "./cost.ts";
 
 export type Shot = { name: string; before?: string; after?: string };
 export type PacketInput = {
-  task: Task; intent: string; doneNote?: string; stat: string; verdict: Verdict; round: number;
+  task: Task; intent: string; doneNote?: string; test?: string[]; assumptions?: string[]; stat: string; verdict: Verdict; round: number;
   decisions: string[]; shots: Shot[]; shotsNote?: string;
 };
 
@@ -45,6 +45,14 @@ export function renderPacket(p: PacketInput & { models: Models; cost?: number })
     "",
     ...(p.doneNote ? [p.doneNote, ""] : []),
     p.stat ? "```\n" + p.stat + "\n```" : "No committed changes.",
+    "",
+    "## How to test",
+    "",
+    ...(p.test?.length ? p.test.map((s, i) => `${i + 1}. ${s}`) : ["The worker gave no steps."]),
+    "",
+    "## Assumptions",
+    "",
+    ...(p.assumptions?.length ? p.assumptions.map((s) => `- ${s}`) : ["None: the brief settled every choice."]),
     "",
     "## Decisions",
     "",
@@ -141,7 +149,8 @@ export function deliver(repo: Repo, id: string, opts: { dryRun?: boolean; title?
   const task = findTask(repo, id);
   const { verdict, round } = approvedRound(repo, task);
   const brief = readFileSync(join(taskDir(repo, id), "brief.md"), "utf8");
-  const doneNote = readEvents(repo, id).filter((e) => e.type === "done").at(-1)?.note;
+  const done = lastDone(repo, id);
+  const doneNote = done?.note;
   const stat = run(["git", "-C", repo.root, "diff", "--stat", `${baseRef(repo, task.base)}...${task.branch}`]).stdout.trimEnd();
   const decisions = loadDecisions(repo)
     .filter((d) => d.by === id || verdict.decisions_touched.some((t) => t.includes(d.id)))
@@ -161,7 +170,7 @@ export function deliver(repo: Repo, id: string, opts: { dryRun?: boolean; title?
     shotsNote = undefined;
   }
   const packet = join(taskDir(repo, id), "pr.md");
-  writeFileSync(packet, renderPacket({ task, intent: section(brief, "Intent"), doneNote, stat, verdict, round, decisions, shots, shotsNote, models: { worker: workerModels(repo, task), reviewer: reviewerModels(repo, task) }, cost: taskCost(repo, task).total }));
+  writeFileSync(packet, renderPacket({ task, intent: section(brief, "Intent"), doneNote, test: done?.test, assumptions: done?.assumptions, stat, verdict, round, decisions, shots, shotsNote, models: { worker: workerModels(repo, task), reviewer: reviewerModels(repo, task) }, cost: taskCost(repo, task).total }));
 
   if (opts.dryRun) return { packet, note: `wrote the PR packet to ${packet}` };
   if (!origin) return { packet, note: `this repo has no origin remote, so nothing was pushed. The PR packet is at ${packet}` };

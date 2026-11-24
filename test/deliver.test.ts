@@ -44,13 +44,15 @@ test("section reads one Markdown section", () => {
 test("the packet carries intent, change, screenshots, verdict and risk", () => {
   const { repo } = setup(["T1"]);
   const md = renderPacket({
-    task: findTask(repo, "T1"), intent: "Greet.", doneNote: "Added a greeting", stat: "1 file changed", verdict: approve, round: 2,
+    task: findTask(repo, "T1"), intent: "Greet.", doneNote: "Added a greeting", test: ["Open the app. It says hi."], assumptions: ["Hi, not hello."], stat: "1 file changed", verdict: approve, round: 2,
     decisions: ["D-1 Notes carry tags (accepted)"], shots: [{ name: "home", before: "https://x/b.png", after: "https://x/a.png" }],
     models: { worker: ["claude-opus-5-5", "claude-sonnet-5-5"], reviewer: ["claude-opus-5-5"] },
   });
   expect(md).toContain("Worker: Opus 5.5 and Sonnet 5.5. Reviewer: Opus 5.5.");
   expect(md).toContain("checked the diff and before and after screenshots against the intent above. It approved in round 2: Matches the intent.");
   expect(md).toContain("## Description\n\nGreet.");
+  expect(md).toContain("## How to test\n\n1. Open the app. It says hi.");
+  expect(md).toContain("## Assumptions\n\n- Hi, not hello.");
   expect(md).toContain("- D-1 Notes carry tags (accepted)");
   expect(md).toContain('| home | <img src="https://x/b.png" width="400"> | <img src="https://x/a.png" width="400"> |');
   expect(md).toContain("**low**: Copy change only.");

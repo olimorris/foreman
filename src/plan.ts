@@ -7,7 +7,7 @@ import { checkBrief } from "./spawn.ts";
 import { writeJson, type Task } from "./state.ts";
 
 export type PlanTask = { id: string; title: string; owns: string[]; deps: string[]; contract: boolean; brief: string };
-export type Plan = { title: string; deadline?: string; approvedAt?: string; tasks: PlanTask[] };
+export type Plan = { title: string; deadline?: string; approvedAt?: string; calls?: string[]; cut?: string[]; tasks: PlanTask[] };
 
 const list = (v: string) => v.split(",").map((s) => s.trim().replace(/^`|`$/g, "")).filter((s) => s && !/^(none|-)$/i.test(s));
 
@@ -16,6 +16,9 @@ export function parsePlan(md: string): Plan {
   const [head = "", ...sections] = md.split(/^## /m);
   const title = head.match(/^# (?:Plan:\s*)?(.+)$/m)?.[1]?.trim() ?? "Plan";
   const deadline = head.match(/^Deadline:\s*(.+)$/im)?.[1]?.trim();
+  const listAfter = (label: string) => head.match(new RegExp(`^${label}:\\s*\\n((?:\\s*-\\s+.+\\n?)+)`, "im"))?.[1]?.split("\n").map((l) => l.replace(/^\s*-\s+/, "").trim()).filter(Boolean) ?? [];
+  const calls = listAfter("Calls");
+  const cut = listAfter("Cut");
   const tasks = sections.map((section) => {
     const [first = "", ...rest] = section.split("\n");
     const m = first.match(/^([A-Za-z0-9][A-Za-z0-9-]*):\s*(.+)$/);
@@ -33,7 +36,7 @@ export function parsePlan(md: string): Plan {
       brief: fieldsEnd < 0 ? "" : body.slice(fieldsEnd).replace(/^### /gm, "## ").trim() + "\n",
     };
   });
-  return { title, ...(deadline ? { deadline } : {}), tasks };
+  return { title, ...(deadline ? { deadline } : {}), ...(calls.length ? { calls } : {}), ...(cut.length ? { cut } : {}), tasks };
 }
 
 export const CONVENTIONAL = /^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([\w./-]+\))?!?: \S/;
