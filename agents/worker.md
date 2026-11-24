@@ -23,7 +23,9 @@ You are a Foreman worker. You build exactly one task, described in your brief, i
 
 Report sparingly, one line each, only when the state changes:
 
-- `foreman report done "<what you built, one line>"` when the intent is met and checks pass.
+- `foreman report done "<what you built, one line>" --test "<step>" --assume "<assumption>"` when the intent is met and checks pass. The user reads these when deciding which PR to review first:
+  - `--test`, once per step: how the user checks your work by hand, in the words they see on screen, with what to look for. "Select the work tag on the list. Only work notes show." Not "call filterByTag()".
+  - `--assume`, once per assumption: each choice you made that the brief didn't settle, such as a default, a wording, an edge case or something left out. Leave it out only when you made none.
 - `foreman report blocked "<what stops you>"` when you can't continue.
 - `foreman report needs-decision "<question for the user>"` for a question that isn't a cross-cutting decision.
 - `foreman report rebased "<one line>"` after a rebase the orchestrator asked for.

@@ -22,6 +22,7 @@ import { setTrust } from "./trust.ts";
 import { deliver } from "./deliver.ts";
 import { describePlan, loadPlan, maxWorkers, parsePlan, planBrief, readyTasks, savePlan, validatePlan } from "./plan.ts";
 import { sync } from "./sync.ts";
+import { writeSummary } from "./summary.ts";
 import { budgetOf, orchestratorCost, recordSession, sessionsFile, taskCost, usd } from "./cost.ts";
 import { watch, watcherArmed } from "./watch.ts";
 
@@ -30,7 +31,8 @@ const USAGE = `usage:
   foreman up
   foreman spawn <id> --brief <file> --owns <path-or-glob>... [--base <branch>]
   foreman send <id> <message>          (reads stdin when no message)
-  foreman report <done|blocked|needs-decision|rebased> <one line>
+  foreman report done <one line> --test <step>... [--assume <assumption>]...
+  foreman report <blocked|needs-decision|rebased> <one line>
   foreman propose <decision> (--body <text> | --body-file <file>) [--paths <glob>]... [--supersedes <adr number>]... [--slug <name>]
   foreman accept <D-n> [--title <text>] [--body-file <file>] [--paths <glob>]... [--supersedes <n>]... [--slug <name>]
   foreman reject <D-n> --reason <text>
@@ -40,6 +42,7 @@ const USAGE = `usage:
   foreman next [--max <n>]
   foreman sync
   foreman cost
+  foreman summary
   foreman budget [<id>] <usd> | budget --plan <usd>
   foreman pause <id>
   foreman deliver <id> [--title "<type>: <summary>"] [--dry-run]
@@ -117,7 +120,10 @@ async function main(argv: string[]): Promise<number> {
       const [type, ...words] = positional;
       if (!id) throw new Error("FOREMAN_TASK isn't set: only workers report");
       if (!REPORT_TYPES.includes(type as ReportType) || !words.length) throw new Error(USAGE);
-      appendEvent(repo, id, type as ReportType, words.join(" "));
+      if (type === "done" && !opts.test?.length) {
+        throw new Error('done needs at least one --test "<step>": how the user checks this by hand, in the words they see on screen. Add --assume "<assumption>" for each choice the brief didn\'t settle');
+      }
+      appendEvent(repo, id, type as ReportType, words.join(" "), { test: opts.test, assumptions: opts.assume });
       if (type !== "rebased") updateTask(repo, id, { status: type as Exclude<ReportType, "rebased"> });
       console.log(`reported ${type} for ${id}`);
       return 0;
@@ -226,6 +232,9 @@ async function main(argv: string[]): Promise<number> {
       if (r.failed.length) console.log(`couldn't reach: ${r.failed.join(", ")}`);
       return 0;
     }
+    case "summary":
+      console.log(`wrote ${writeSummary(findRepo())}`);
+      return 0;
     case "cost": {
       const repo = findRepo();
       const budget = budgetOf(repo);

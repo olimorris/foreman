@@ -87,7 +87,7 @@ function briefHeader({ id, worktree, branch, base, owns, index, context }: Heade
     `- Decisions: ${index} (one line each; open a full record only when your work touches it)`,
     ...(context ? [`- Domain terms: ${context}`] : []),
     '- Cross-cutting choices: `foreman propose "<decision>" --body "<why, and what was rejected>" --paths <glob>`',
-    '- Report with: `foreman report done|blocked|needs-decision|rebased "<one line>"`',
+    '- Report with: `foreman report done "<one line>" --test "<step>"... --assume "<assumption>"...`, or `foreman report blocked|needs-decision|rebased "<one line>"`',
     "",
     "",
   ].join("\n");
