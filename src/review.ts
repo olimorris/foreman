@@ -10,7 +10,8 @@ import { sendToTask } from "./send.ts";
 import { capture, parseScreens, type Capture } from "./shots.ts";
 import { tabLabel } from "./spawn.ts";
 import { baseRef } from "./snapshot.ts";
-import { findTask, updateTask, type Task } from "./state.ts";
+import { findTask, loadTasks, updateTask, type Task } from "./state.ts";
+import { budgetLeft } from "./cost.ts";
 
 export const MAX_REVISIONS = 2;
 
@@ -59,6 +60,8 @@ export async function runReview(repo: Repo, id: string): Promise<string> {
   const dir = roundDir(repo, id, round);
   mkdirSync(dir, { recursive: true });
   try {
+    const left = budgetLeft(repo, loadTasks(repo), id);
+    if (left.reason) throw new Error(left.reason);
     const shots = await screenshots(repo, task, dir);
     // The user's local base branch lags behind merged PRs, which would put other tasks' work in this diff.
     const base = baseRef(repo, task.base);
@@ -72,6 +75,7 @@ export async function runReview(repo: Repo, id: string): Promise<string> {
     const r = run(
       // Not --agent: with it, --json-schema leaves structured_output empty.
       ["claude", "-p", "--output-format", "json", "--json-schema", JSON.stringify(VERDICT_SCHEMA),
+        ...(left.usd !== undefined ? ["--max-budget-usd", left.usd.toFixed(2)] : []),
         "--append-system-prompt-file", join(pluginRoot, "prompts", "reviewer.md"),
         "--tools", "Read,Grep,Glob", "--allowedTools", "Read,Grep,Glob", "--add-dir", taskDir(repo, id), join(repo.foreman, "decisions")],
       { cwd: task.worktree, stdin: prompt, env: { FOREMAN_ROLE: "reviewer" } },

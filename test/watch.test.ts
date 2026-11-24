@@ -44,6 +44,13 @@ test("reports main moving and a worker exiting, once each", () => {
   expect(scan([task("T1"), task("T2")], first.cursor, p).reasons).toEqual([]);
 });
 
+test("reports a resumed worker exiting again, and never a worker Foreman stopped", () => {
+  const first = scan([task("T1")], { ...empty, main: "aaa" }, probes({}, "aaa", ["T1"]));
+  const resumed = scan([task("T1")], first.cursor, probes({}));
+  expect(scan([task("T1")], resumed.cursor, probes({}, "aaa", ["T1"])).reasons).toEqual(["exited T1"]);
+  expect(scan([task("T2", { status: "over-budget" })], { ...empty, main: "aaa" }, probes({}, "aaa", ["T2"])).reasons).toEqual([]);
+});
+
 test("reports new PR comments and a merge once each, only when gh was polled", () => {
   const prs = [{ key: "T1", number: 41 }];
   const p = (state: string, comments: number): Probes => ({ ...probes({}), pr: () => ({ state, comments }) });

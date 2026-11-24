@@ -7,7 +7,8 @@ import type { Repo } from "./paths.ts";
 import type { Rex } from "./rex.ts";
 import { notifyOrchestrator } from "./send.ts";
 import { baseRef } from "./snapshot.ts";
-import { budgetOf, orchestratorCost, overBudget, taskCost } from "./cost.ts";
+import { budgetOf, overBudget, planSpend, taskCost } from "./cost.ts";
+import { stopWorker } from "./stop.ts";
 import { inFlight, loadTasks, type Task } from "./state.ts";
 
 export type PrState = { state: string; comments: number };
@@ -32,7 +33,11 @@ export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: Tracked
     }
     next.events[task.id] = events.length;
 
-    if (task.rex && task.status !== "exited" && !next.exited.includes(task.id) && !probes.alive(task)) {
+    if (!task.rex || task.status === "exited" || task.status === "over-budget") continue;
+    const alive = probes.alive(task);
+    // A resumed worker can exit again, and that exit must be reported too.
+    if (alive) next.exited = next.exited.filter((id) => id !== task.id);
+    else if (!next.exited.includes(task.id)) {
       reasons.push(`exited ${task.id}`);
       next.exited.push(task.id);
     }
@@ -108,14 +113,14 @@ export async function watch(repo: Repo, base: string, rex: Rex): Promise<number>
       const prs = trackedPrs(tasks, loadDecisions(repo)).filter((p) => !["MERGED", "CLOSED"].includes(cursor.prs?.[`${p.number}`]?.state ?? ""));
       const result = scan(tasks, cursor, { ...probes, pr: ghDue ? (n) => ghPr(repo.root, n) : undefined }, prs);
       cursor = result.cursor;
-      const budget = budgetOf(repo);
       {
-        const all = loadTasks(repo);
-        const costs = tasks.map((t) => taskCost(repo, t));
-        const planTotal = all.reduce((sum, t) => sum + taskCost(repo, t).total, 0) + orchestratorCost(repo).usd;
-        const over = overBudget(costs, planTotal, budget, cursor.budget ?? {});
+        const over = overBudget(tasks.map((t) => taskCost(repo, t)), planSpend(repo, loadTasks(repo)), budgetOf(repo), cursor.budget ?? {});
         result.reasons.push(...over.reasons);
         cursor.budget = over.alerted;
+        for (const id of over.stop) {
+          const task = tasks.find((t) => t.id === id)!;
+          if (stopWorker(repo, task, rex)) result.reasons.push(`stopped ${id}`);
+        }
       }
       writeFileSync(cursorFile, JSON.stringify(cursor));
       if (result.reasons.length) {

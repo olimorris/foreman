@@ -108,20 +108,45 @@ export const budgetOf = (repo: Repo): Budget => ({ ...DEFAULT_BUDGET, ...loadCon
 
 export const taskLimit = (b: Budget | undefined, id: string) => b?.tasks?.[id] ?? b?.perTask;
 
-// One line per limit crossed, each only once per limit, so a raised limit can alert again.
-export function overBudget(costs: TaskCost[], planTotal: number, budget: Budget | undefined, alerted: Record<string, number>): { reasons: string[]; alerted: Record<string, number> } {
+// Alerts fire once per limit, so a raised limit can alert again, but stop lists every task over its limit on every pass.
+export function overBudget(costs: TaskCost[], planTotal: number, budget: Budget | undefined, alerted: Record<string, number>): { reasons: string[]; alerted: Record<string, number>; stop: string[] } {
   const next = { ...alerted };
   const reasons: string[] = [];
+  const stop: string[] = [];
   for (const c of costs) {
     const limit = taskLimit(budget, c.id);
-    if (limit !== undefined && c.total > limit && next[c.id] !== limit) {
+    if (limit === undefined || c.total <= limit) continue;
+    stop.push(c.id);
+    if (next[c.id] !== limit) {
       reasons.push(`over-budget ${c.id}: ${usd(c.total)} of ${usd(limit)}`);
       next[c.id] = limit;
     }
   }
-  if (budget?.plan !== undefined && planTotal > budget.plan && next["plan"] !== budget.plan) {
-    reasons.push(`over-budget plan: ${usd(planTotal)} of ${usd(budget.plan)}`);
-    next["plan"] = budget.plan;
+  if (budget?.plan !== undefined && planTotal > budget.plan) {
+    stop.push(...costs.map((c) => c.id).filter((id) => !stop.includes(id)));
+    if (next["plan"] !== budget.plan) {
+      reasons.push(`over-budget plan: ${usd(planTotal)} of ${usd(budget.plan)}`);
+      next["plan"] = budget.plan;
+    }
   }
-  return { reasons, alerted: next };
+  return { reasons, alerted: next, stop };
+}
+
+export function planSpend(repo: Repo, tasks: Task[]): number {
+  return tasks.reduce((sum, t) => sum + taskCost(repo, t).total, 0) + orchestratorCost(repo).usd;
+}
+
+export function budgetLeft(repo: Repo, tasks: Task[], id?: string): { usd?: number; reason?: string } {
+  const budget = budgetOf(repo);
+  const spent = planSpend(repo, tasks);
+  if (budget.plan !== undefined && spent >= budget.plan) {
+    return { usd: 0, reason: `the plan has spent ${usd(spent)} of its ${usd(budget.plan)} budget. Ask the user to raise it with foreman budget --plan <usd>` };
+  }
+  const planLeft = budget.plan === undefined ? undefined : budget.plan - spent;
+  const task = id ? tasks.find((t) => t.id === id) : undefined;
+  const limit = id ? taskLimit(budget, id) : undefined;
+  if (!task || limit === undefined) return { usd: planLeft };
+  const taskSpent = taskCost(repo, task).total;
+  if (taskSpent >= limit) return { usd: 0, reason: `${id} has spent ${usd(taskSpent)} of its ${usd(limit)} budget. Ask the user to raise it with foreman budget ${id} <usd>` };
+  return { usd: Math.min(limit - taskSpent, planLeft ?? Infinity) };
 }

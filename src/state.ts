@@ -4,7 +4,7 @@ import type { Repo } from "./paths.ts";
 import type { Tab } from "./rex.ts";
 import { withLock } from "./store.ts";
 
-export type TaskStatus = "running" | "done" | "blocked" | "needs-decision" | "exited" | "pr-open" | "merged" | "torn-down";
+export type TaskStatus = "running" | "over-budget" | "done" | "blocked" | "needs-decision" | "exited" | "pr-open" | "merged" | "torn-down";
 
 export type Task = {
   id: string;
@@ -20,6 +20,7 @@ export type Task = {
   startSha?: string;
   mergedAt?: string;
   rebaseAsked?: string;
+  pausedFrom?: TaskStatus;
   reviews?: number;
   revisions?: number;
   createdAt: string;

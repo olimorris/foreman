@@ -34,3 +34,11 @@ test("overBudget alerts once per limit, and again after the limit is raised", ()
   expect(overBudget(costs, 6.5, { perTask: 5, plan: 6 }, first.alerted).reasons).toEqual([]);
   expect(overBudget(costs, 6.5, { perTask: 5, plan: 6, tasks: { T1: 6 } }, first.alerted).reasons).toEqual(["over-budget T1: $6.50 of $6.00"]);
 });
+
+test("overBudget names every task to stop on every pass, and every task once the plan is over", () => {
+  const costs = [{ id: "T1", worker: 6, review: 0, total: 6, unpriced: [] }, { id: "T2", worker: 1, review: 0, total: 1, unpriced: [] }];
+  const first = overBudget(costs, 7, { perTask: 5, plan: 40 }, {});
+  expect(first.stop).toEqual(["T1"]);
+  expect(overBudget(costs, 7, { perTask: 5, plan: 40 }, first.alerted).stop).toEqual(["T1"]);
+  expect(overBudget(costs, 7, { perTask: 5, plan: 6 }, {}).stop).toEqual(["T1", "T2"]);
+});
