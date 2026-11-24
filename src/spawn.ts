@@ -61,7 +61,7 @@ export function spawn(repo: Repo, opts: SpawnOptions, rex: Rex): Task {
     // Auto mode's classifier weighs the user's global "never commit" rule, but this workflow allows commits on the task branch.
     // Allow rules only reach plain Bash calls: in code mode the classifier judges the whole script first.
     "--allowedTools", "Bash(git add *)", "Bash(git commit *)", "Bash(git rebase *)", "Bash(foreman *)",
-    "--settings", JSON.stringify({ env: { CLAUDE_CODE_EXPERIMENTAL_CODE_MODE: "0" } }),
+    "--settings", JSON.stringify({ env: { CLAUDE_CODE_EXPERIMENTAL_CODE_MODE: "0" }, includeCoAuthoredBy: false }),
     "--messaging-socket-path", socket,
     "-n", `foreman ${id}`,
     "--",
