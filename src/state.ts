@@ -8,6 +8,7 @@ export type TaskStatus = "running" | "done" | "blocked" | "needs-decision" | "ex
 
 export type Task = {
   id: string;
+  title?: string;
   status: TaskStatus;
   branch: string;
   base: string;

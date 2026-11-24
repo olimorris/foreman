@@ -17,13 +17,15 @@ export function tempRepo(): Repo {
   return findRepo(dir);
 }
 
-export function fakeRex(alive = true): Rex & { sent: string[]; closed: string[] } {
+export function fakeRex(alive = true): Rex & { sent: string[]; closed: string[]; labels: string[] } {
   const sent: string[] = [];
+  const labels: string[] = [];
   const closed: string[] = [];
   return {
     sent,
     closed,
-    open: (session) => ({ session, window: "window:1", block: "block:1" }),
+    labels,
+    open: (session, label) => (labels.push(label), { session, window: "window:1", block: "block:1" }),
     newSession: () => "session:1",
     findSession: () => undefined,
     alive: () => alive,

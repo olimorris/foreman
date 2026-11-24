@@ -29,7 +29,7 @@ import { watch, watcherArmed } from "./watch.ts";
 const USAGE = `usage:
   foreman doctor
   foreman up
-  foreman spawn <id> --brief <file> --owns <path-or-glob>... [--base <branch>]
+  foreman spawn <id> --title "<type>: <summary>" --brief <file> --owns <path-or-glob>... [--base <branch>]
   foreman send <id> <message>          (reads stdin when no message)
   foreman report done <one line> --test <step>... [--assume <assumption>]...
   foreman report <blocked|needs-decision|rebased> <one line>
@@ -102,7 +102,7 @@ async function main(argv: string[]): Promise<number> {
       const session = process.env.REX_SESSION;
       if (!id || !opts.brief?.[0]) throw new Error(USAGE);
       if (!session) throw new Error("REX_SESSION isn't set: run spawn from inside Rex");
-      const task = spawn(repo, { id, brief: opts.brief[0], owns: opts.owns ?? [], base: opts.base?.[0] ?? defaultBase(repo), session }, rex);
+      const task = spawn(repo, { id, title: opts.title?.[0], brief: opts.brief[0], owns: opts.owns ?? [], base: opts.base?.[0] ?? defaultBase(repo), session }, rex);
       console.log(`spawned ${task.id}: ${task.worktree} on ${task.branch}, Rex tab ${task.rex?.window}`);
       return 0;
     }
@@ -214,7 +214,7 @@ async function main(argv: string[]): Promise<number> {
       const max = maxWorkers(repo, opts.max?.[0]);
       const { start, waiting } = readyTasks(p, loadTasks(repo), max);
       for (const t of start) {
-        spawn(repo, { id: t.id, brief: planBrief(repo, t.id), owns: t.owns, base: defaultBase(repo), session }, rex);
+        spawn(repo, { id: t.id, title: t.title, brief: planBrief(repo, t.id), owns: t.owns, base: defaultBase(repo), session }, rex);
         console.log(`spawned ${t.id}: ${t.title}`);
       }
       for (const w of waiting) console.log(`waiting ${w.id}: ${w.reason}`);

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendEvent, readEvents } from "../src/events.ts";
 import { must, run } from "../src/exec.ts";
-import { checkBrief, spawn } from "../src/spawn.ts";
+import { checkBrief, spawn, tabLabel } from "../src/spawn.ts";
 import { findTask, loadTasks, updateTask } from "../src/state.ts";
 import { teardown } from "../src/teardown.ts";
 import { fakeRex, tempRepo } from "./helpers.ts";
@@ -35,6 +35,18 @@ describe("spawn", () => {
     expect(readFileSync(join(repo.root, ".git", "info", "exclude"), "utf8")).toContain(".foreman/");
     expect(projects()[task.worktree]).toEqual({ hasTrustDialogAccepted: true });
     expect(projects()["/keep"]).toEqual({ hasTrustDialogAccepted: true });
+  });
+
+  test("labels the tab with the id and the start of the title", () => {
+    const { rex } = spawned();
+    expect(rex.labels).toEqual(["T1"]);
+    expect(tabLabel({ id: "T2", title: "feat(settings)!: add an export button to the settings pane" })).toBe("T2: add an export button");
+    expect(tabLabel({ id: "T3", title: "fix: crash" }, "review ")).toBe("review T3: crash");
+  });
+
+  test("refuses a title that isn't a conventional commit", () => {
+    const { repo, rex } = spawned();
+    expect(() => spawn(repo, { id: "T2", title: "add tags", brief: "/dev/null", owns: ["x"], base: "main", session: "s" }, rex)).toThrow("conventional commit");
   });
 
   test("refuses a duplicate id or a brief without intent and spec", () => {

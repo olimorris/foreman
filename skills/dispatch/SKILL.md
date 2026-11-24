@@ -43,10 +43,10 @@ Add `## Screens` only for UI changes. The reviewer compares before and after scr
 ## 3. Spawn
 
 ```sh
-foreman spawn <id> --brief .foreman/tasks/<id>/brief.in.md --owns 'src/settings/**' --owns docs/settings.md
+foreman spawn <id> --title "feat: add an export button to settings" --brief .foreman/tasks/<id>/brief.in.md --owns 'src/settings/**' --owns docs/settings.md
 ```
 
-Use short ids such as `T1` or `settings-pane`. The worker starts in a new Rex tab named after the id. Tell the user the id and that they can open the tab to watch.
+Use short ids such as `T1` or `settings-pane`. The title is a conventional commit that becomes the PR title, and its first few words label the tab, such as `T1: add an export button`. Tell the user the id and that they can open the tab to watch.
 
 ## 4. Arm the watcher
 

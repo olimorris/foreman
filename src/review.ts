@@ -8,6 +8,7 @@ import { pluginRoot, taskDir, worktreeDir, type Repo } from "./paths.ts";
 import type { Rex } from "./rex.ts";
 import { sendToTask } from "./send.ts";
 import { capture, parseScreens, type Capture } from "./shots.ts";
+import { tabLabel } from "./spawn.ts";
 import { baseRef } from "./snapshot.ts";
 import { findTask, updateTask, type Task } from "./state.ts";
 
@@ -48,7 +49,7 @@ export function startReview(repo: Repo, id: string, rex: Rex, session = process.
   const task = findTask(repo, id);
   const target = session ?? task.rex?.session;
   if (!target) throw new Error("REX_SESSION isn't set and the task has no Rex tab");
-  rex.open(target, `review ${id}`, task.worktree, [join(pluginRoot, "bin", "foreman"), "review-run", id], false);
+  rex.open(target, tabLabel(task, "review "), task.worktree, [join(pluginRoot, "bin", "foreman"), "review-run", id], false);
 }
 
 export async function runReview(repo: Repo, id: string): Promise<string> {
