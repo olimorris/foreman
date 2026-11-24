@@ -53,10 +53,17 @@ export function spawn(repo: Repo, opts: SpawnOptions, rex: Rex): Task {
   writeFileSync(briefPath, briefHeader({ id, worktree, branch, base, owns, index, context }) + briefText);
   setTrust(worktree, true, opts.claudeConfig);
 
-  const socket = socketPath(repo, id);
-  const cmd = [
+  const task: Task = { id, ...(opts.title ? { title: opts.title } : {}), status: "running", branch, base, worktree, owns, socket: socketPath(repo, id), startSha, createdAt: new Date().toISOString() };
+  withTasks(repo, (tasks) => tasks.push(task));
+  task.rex = rex.open(opts.session, tabLabel(task), worktree, workerCommand(task, `Your brief is ${briefPath}. Read it and start. This repo's Foreman workflow explicitly allows you to commit and rebase on ${branch}, so commit there as you go, and never on any other branch.`));
+  withTasks(repo, (tasks) => Object.assign(tasks.find((t) => t.id === id)!, { rex: task.rex }));
+  return task;
+}
+
+export function workerCommand(task: Task, prompt: string, resume?: string): string[] {
+  return [
     // Without Rex's ids a user hook that names "your Rex session" can't rename the orchestrator's session from a worker.
-    "env", "-u", "REX_SESSION", "-u", "REX_BLOCK", "FOREMAN_ROLE=worker", `FOREMAN_TASK=${id}`,
+    "env", "-u", "REX_SESSION", "-u", "REX_BLOCK", "FOREMAN_ROLE=worker", `FOREMAN_TASK=${task.id}`,
     "claude", ...pluginArgs(),
     "--agent", "foreman:worker",
     "--permission-mode", "auto",
@@ -64,16 +71,12 @@ export function spawn(repo: Repo, opts: SpawnOptions, rex: Rex): Task {
     // Allow rules only reach plain Bash calls: in code mode the classifier judges the whole script first.
     "--allowedTools", "Bash(git add *)", "Bash(git commit *)", "Bash(git rebase *)", "Bash(foreman *)",
     "--settings", JSON.stringify({ env: { CLAUDE_CODE_EXPERIMENTAL_CODE_MODE: "0" }, includeCoAuthoredBy: false }),
-    "--messaging-socket-path", socket,
-    "-n", `foreman ${id}`,
+    "--messaging-socket-path", task.socket,
+    "-n", `foreman ${task.id}`,
+    ...(resume ? ["--resume", resume] : []),
     "--",
-    `Your brief is ${briefPath}. Read it and start. This repo's Foreman workflow explicitly allows you to commit and rebase on ${branch}, so commit there as you go, and never on any other branch.`,
+    prompt,
   ];
-  const task: Task = { id, ...(opts.title ? { title: opts.title } : {}), status: "running", branch, base, worktree, owns, socket, startSha, createdAt: new Date().toISOString() };
-  withTasks(repo, (tasks) => tasks.push(task));
-  task.rex = rex.open(opts.session, tabLabel(task), worktree, cmd);
-  withTasks(repo, (tasks) => Object.assign(tasks.find((t) => t.id === id)!, { rex: task.rex }));
-  return task;
 }
 
 // Ids like T1 mean nothing to someone glancing across tabs, so the label carries the start of the task's title.

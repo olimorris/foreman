@@ -23,7 +23,8 @@ import { deliver } from "./deliver.ts";
 import { describePlan, loadPlan, maxWorkers, parsePlan, planBrief, readyTasks, savePlan, validatePlan } from "./plan.ts";
 import { sync } from "./sync.ts";
 import { writeSummary } from "./summary.ts";
-import { budgetOf, orchestratorCost, recordSession, sessionsFile, taskCost, usd } from "./cost.ts";
+import { budgetLeft, budgetOf, orchestratorCost, recordSession, sessionsFile, taskCost, usd } from "./cost.ts";
+import { resume, stopWorker } from "./stop.ts";
 import { watch, watcherArmed } from "./watch.ts";
 
 const USAGE = `usage:
@@ -45,6 +46,7 @@ const USAGE = `usage:
   foreman summary
   foreman budget [<id>] <usd> | budget --plan <usd>
   foreman pause <id>
+  foreman resume <id>
   foreman deliver <id> [--title "<type>: <summary>"] [--dry-run]
   foreman status [--json]
   foreman watch
@@ -102,6 +104,8 @@ async function main(argv: string[]): Promise<number> {
       const session = process.env.REX_SESSION;
       if (!id || !opts.brief?.[0]) throw new Error(USAGE);
       if (!session) throw new Error("REX_SESSION isn't set: run spawn from inside Rex");
+      const left = budgetLeft(repo, loadTasks(repo));
+      if (left.reason) throw new Error(`no new tasks start: ${left.reason}`);
       const task = spawn(repo, { id, title: opts.title?.[0], brief: opts.brief[0], owns: opts.owns ?? [], base: opts.base?.[0] ?? defaultBase(repo), session }, rex);
       console.log(`spawned ${task.id}: ${task.worktree} on ${task.branch}, Rex tab ${task.rex?.window}`);
       return 0;
@@ -206,11 +210,8 @@ async function main(argv: string[]): Promise<number> {
       if (!p?.approvedAt) throw new Error("no approved plan. Write one with the intake skill, then run foreman plan approve once the user agrees");
       const session = process.env.REX_SESSION;
       if (!session) throw new Error("REX_SESSION isn't set: run next from inside Rex");
-      const budget = budgetOf(repo);
-      if (budget?.plan !== undefined) {
-        const spent = loadTasks(repo).reduce((sum, t) => sum + taskCost(repo, t).total, 0) + orchestratorCost(repo).usd;
-        if (spent > budget.plan) throw new Error(`the plan has spent ${usd(spent)} of its ${usd(budget.plan)} budget, so no new tasks start. Ask the user to raise it with foreman budget --plan <usd>`);
-      }
+      const room = budgetLeft(repo, loadTasks(repo));
+      if (room.reason) throw new Error(`no new tasks start: ${room.reason}`);
       const max = maxWorkers(repo, opts.max?.[0]);
       const { start, waiting } = readyTasks(p, loadTasks(repo), max);
       for (const t of start) {
@@ -267,8 +268,17 @@ async function main(argv: string[]): Promise<number> {
       const repo = findRepo();
       const [id] = positional;
       if (!id) throw new Error(USAGE);
-      sendToTask(repo, findTask(repo, id), "Stop now: this task has reached its budget. Commit what you have, then wait. Don't start anything else until a message tells you to carry on.", rex);
-      console.log(`asked ${id} to stop and wait`);
+      console.log(stopWorker(repo, findTask(repo, id), rex) ? `stopped ${id}'s worker. Its work so far is in its worktree` : `${id} had no worker running`);
+      return 0;
+    }
+    case "resume": {
+      const repo = findRepo();
+      const [id] = positional;
+      const session = process.env.REX_SESSION;
+      if (!id) throw new Error(USAGE);
+      if (!session) throw new Error("REX_SESSION isn't set: run resume from inside Rex");
+      resume(repo, id, rex, session);
+      console.log(`resumed ${id}'s worker in a new tab`);
       return 0;
     }
     case "deliver": {

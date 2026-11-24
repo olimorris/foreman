@@ -7,6 +7,8 @@ import { must, run } from "../src/exec.ts";
 import { checkBrief, spawn, tabLabel } from "../src/spawn.ts";
 import { findTask, loadTasks, updateTask } from "../src/state.ts";
 import { teardown } from "../src/teardown.ts";
+import { resume, stopWorker } from "../src/stop.ts";
+import { recordSession, sessionsFile } from "../src/cost.ts";
 import { fakeRex, tempRepo } from "./helpers.ts";
 
 process.env.CLAUDE_CONFIG_DIR = mkdtempSync(join(tmpdir(), "foreman-claude-"));
@@ -61,6 +63,32 @@ test("events append and read back in order", () => {
   appendEvent(repo, "T1", "blocked", "need the API shape");
   appendEvent(repo, "T1", "done", "greeting added");
   expect(readEvents(repo, "T1").map((e) => e.type)).toEqual(["blocked", "done"]);
+});
+
+describe("stop and resume", () => {
+  test("stopping closes the worker's tab and resuming reopens its last session", () => {
+    const { repo } = spawned();
+    const rex = { ...fakeRex(), opened: [] as string[][] };
+    rex.open = (session, _label, _cwd, cmd) => (rex.opened.push(cmd), { session, window: "window:2", block: "block:2" });
+    updateTask(repo, "T1", { status: "done" });
+    expect(stopWorker(repo, findTask(repo, "T1"), rex)).toBe(true);
+    expect(rex.closed).toEqual(["window:1"]);
+    expect(findTask(repo, "T1").status).toBe("over-budget");
+
+    expect(() => resume(repo, "T1", rex, "session:1")).toThrow("still running");
+    rex.alive = () => false;
+    recordSession(sessionsFile(repo, "T1"), "sess-1");
+    resume(repo, "T1", rex, "session:1");
+    expect(rex.opened[0]).toContain("sess-1");
+    expect(findTask(repo, "T1")).toMatchObject({ status: "done", rex: { window: "window:2" } });
+    expect(findTask(repo, "T1").pausedFrom).toBeUndefined();
+  });
+
+  test("stopping a worker whose tab is already closed changes nothing", () => {
+    const { repo } = spawned();
+    expect(stopWorker(repo, findTask(repo, "T1"), fakeRex(false))).toBe(false);
+    expect(findTask(repo, "T1").status).toBe("running");
+  });
 });
 
 describe("teardown", () => {

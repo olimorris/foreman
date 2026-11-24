@@ -105,13 +105,16 @@ Foreman keeps an eye on what the crew costs. Every task has a limit, and so does
 - **$5 per task**, covering the worker and its reviews
 - **$40 per plan**, covering every task plus Foreman itself
 
-When a task goes over, Foreman pauses its worker and asks whether to raise the limit or stop. When the plan goes over, no new tasks start until you say so.
+These are hard limits. Foreman checks spend at least every 30 seconds while the watcher runs. When a task goes over, Foreman closes its worker's tab, which ends the session, and asks whether to raise the limit. When the plan goes over, it stops every worker that's running and starts no new tasks. A reviewer is never allowed to spend more than its task has left.
+
+Committed work stays on the task's branch, and anything uncommitted stays in its worktree. Once you raise the limit, `foreman resume` reopens the worker's session where it left off.
 
 ```sh
 foreman cost              # what each task and Foreman have cost so far
 foreman budget 10         # $10 per task
 foreman budget --plan 80  # $80 for the plan
 foreman budget T3 15      # $15 for one task
+foreman resume T3         # restart a stopped worker once its limit is raised
 ```
 
 Costs are worked out at Anthropic's list prices from each session's token use, so on a subscription treat them as a guide to how much work was done. Each PR's AI Usage section includes its task's cost.
