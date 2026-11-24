@@ -7,8 +7,8 @@ on:
 
 jobs:
   test:
-    # Foreman is macOS-only, and its tests rely on macOS paths and tools.
-    runs-on: macos-latest
+    # Linux runners use a tenth of the Actions minutes that macOS ones do, and the tests don't need macOS.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
