@@ -1,0 +1,145 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { loadConfig } from "./config.ts";
+import { overlaps } from "./decisions.ts";
+import type { Repo } from "./paths.ts";
+import { checkBrief } from "./spawn.ts";
+import { writeJson, type Task } from "./state.ts";
+
+export type PlanTask = { id: string; title: string; owns: string[]; deps: string[]; contract: boolean; brief: string };
+export type Plan = { title: string; deadline?: string; approvedAt?: string; tasks: PlanTask[] };
+
+const list = (v: string) => v.split(",").map((s) => s.trim().replace(/^`|`$/g, "")).filter((s) => s && !/^(none|-)$/i.test(s));
+
+// The plan is one Markdown file the user reads and approves, so its task fields are plain "- Key: value" lines.
+export function parsePlan(md: string): Plan {
+  const [head = "", ...sections] = md.split(/^## /m);
+  const title = head.match(/^# (?:Plan:\s*)?(.+)$/m)?.[1]?.trim() ?? "Plan";
+  const deadline = head.match(/^Deadline:\s*(.+)$/im)?.[1]?.trim();
+  const tasks = sections.map((section) => {
+    const [first = "", ...rest] = section.split("\n");
+    const m = first.match(/^([A-Za-z0-9][A-Za-z0-9-]*):\s*(.+)$/);
+    if (!m) throw new Error(`plan section "## ${first}" must be "## <id>: <title>"`);
+    const body = rest.join("\n");
+    const fieldsEnd = body.search(/^### /m);
+    const fields = fieldsEnd < 0 ? body : body.slice(0, fieldsEnd);
+    const field = (name: string) => fields.match(new RegExp(`^\\s*-\\s*${name}:\\s*(.*)$`, "im"))?.[1] ?? "";
+    return {
+      id: m[1]!,
+      title: m[2]!.trim(),
+      owns: list(field("Owns")),
+      deps: list(field("Depends on")),
+      contract: /^(yes|true)$/i.test(field("Contract").trim()),
+      brief: fieldsEnd < 0 ? "" : body.slice(fieldsEnd).replace(/^### /gm, "## ").trim() + "\n",
+    };
+  });
+  return { title, ...(deadline ? { deadline } : {}), tasks };
+}
+
+export const CONVENTIONAL = /^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([\w./-]+\))?!?: \S/;
+
+export function validatePlan(plan: Plan): string[] {
+  const errors: string[] = [];
+  const ids = new Set<string>();
+  for (const t of plan.tasks) {
+    if (ids.has(t.id)) errors.push(`${t.id} appears twice`);
+    ids.add(t.id);
+    if (!t.owns.length) errors.push(`${t.id} owns no paths`);
+    if (!CONVENTIONAL.test(t.title)) errors.push(`${t.id}'s title becomes its PR title, so it must be a conventional commit, like "feat: add tags to notes"`);
+    try {
+      checkBrief(t.brief);
+    } catch (err) {
+      errors.push(`${t.id}: ${(err as Error).message.replace("brief is", "its brief is")}`);
+    }
+  }
+  for (const t of plan.tasks) for (const d of t.deps) if (!ids.has(d)) errors.push(`${t.id} depends on ${d}, which isn't in the plan`);
+  if (!errors.length) {
+    try {
+      waves(plan);
+    } catch (err) {
+      errors.push((err as Error).message);
+    }
+  }
+  return errors;
+}
+
+// Dependencies only: tasks in one wave can still be serialised when their owned paths overlap.
+export function waves(plan: Plan): string[][] {
+  const left = new Map(plan.tasks.map((t) => [t.id, t]));
+  const placed = new Set<string>();
+  const out: string[][] = [];
+  while (left.size) {
+    const wave = [...left.values()].filter((t) => t.deps.every((d) => placed.has(d))).sort(byPriority(plan)).map((t) => t.id);
+    if (!wave.length) throw new Error(`dependency cycle among ${[...left.keys()].join(", ")}`);
+    for (const id of wave) placed.add(id), left.delete(id);
+    out.push(wave);
+  }
+  return out;
+}
+
+const byPriority = (plan: Plan) => (a: PlanTask, b: PlanTask) =>
+  Number(b.contract) - Number(a.contract) || plan.tasks.indexOf(a) - plan.tasks.indexOf(b);
+
+export function sharedPaths(plan: Plan): string[] {
+  const notes: string[] = [];
+  const before = (a: string, b: string): boolean => {
+    const t = plan.tasks.find((x) => x.id === b);
+    return !!t && t.deps.some((d) => d === a || before(a, d));
+  };
+  plan.tasks.forEach((a, i) => plan.tasks.slice(i + 1).forEach((b) => {
+    if (overlaps(a.owns, b.owns) && !before(a.id, b.id) && !before(b.id, a.id)) notes.push(`${a.id} and ${b.id} own overlapping paths, so they run one after the other`);
+  }));
+  return notes;
+}
+
+export const merged = (t: Task) => !!t.mergedAt;
+export const active = (tasks: Task[]) => tasks.filter((t) => t.status !== "torn-down" && !merged(t));
+
+export type Waiting = { id: string; reason: string };
+
+export function readyTasks(plan: Plan, tasks: Task[], max: number): { start: PlanTask[]; waiting: Waiting[] } {
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const busy = active(tasks);
+  const start: PlanTask[] = [];
+  const waiting: Waiting[] = [];
+  for (const t of [...plan.tasks].sort(byPriority(plan))) {
+    if (byId.has(t.id)) continue;
+    const blockers = t.deps.filter((d) => !byId.get(d) || !merged(byId.get(d)!));
+    const clash = [...busy.map((b) => ({ id: b.id, owns: b.owns })), ...start].find((b) => overlaps(b.owns, t.owns));
+    if (blockers.length) waiting.push({ id: t.id, reason: `waits for ${blockers.join(", ")} to merge` });
+    else if (clash) waiting.push({ id: t.id, reason: `shares paths with ${clash.id}` });
+    else if (busy.length + start.length >= max) waiting.push({ id: t.id, reason: `all ${max} worker slots are busy` });
+    else start.push(t);
+  }
+  return { start, waiting };
+}
+
+export function maxWorkers(repo: Repo, flag?: string): number {
+  const n = Number(flag ?? loadConfig(repo).maxWorkers ?? process.env.CLAUDE_PLUGIN_OPTION_MAXWORKERS ?? 3);
+  return Number.isInteger(n) && n > 0 ? n : 3;
+}
+
+const planPath = (repo: Repo) => join(repo.foreman, "plan.json");
+
+export function loadPlan(repo: Repo): Plan | undefined {
+  return existsSync(planPath(repo)) ? JSON.parse(readFileSync(planPath(repo), "utf8")) : undefined;
+}
+
+export function savePlan(repo: Repo, plan: Plan): void {
+  mkdirSync(join(repo.foreman, "plan"), { recursive: true });
+  for (const t of plan.tasks) writeFileSync(planBrief(repo, t.id), `# ${t.id}: ${t.title}\n\n${t.brief}`);
+  writeJson(planPath(repo), plan);
+}
+
+export const planBrief = (repo: Repo, id: string) => join(repo.foreman, "plan", `${id}.md`);
+
+export function describePlan(plan: Plan): string {
+  return [
+    `${plan.title}${plan.deadline ? ` (deadline: ${plan.deadline})` : ""}, ${plan.tasks.length} task(s)`,
+    ...waves(plan).map((w, i) => `wave ${i + 1}: ${w.map((id) => {
+      const t = plan.tasks.find((x) => x.id === id)!;
+      return `${id}${t.contract ? " (contract)" : ""}`;
+    }).join(", ")}`),
+    ...sharedPaths(plan),
+  ].join("\n");
+}

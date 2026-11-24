@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 1280 800" xmlns="http://www.w3.org/2000/svg" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <style>
+    .title { font-size: 22px; font-weight: 700; fill: #15171A; }
+    .sub { font-size: 16px; font-weight: 500; fill: #45484D; }
+    .label { font-size: 15px; font-weight: 500; fill: #45484D; }
+    .loop { font-size: 15px; font-weight: 600; fill: #8F5B00; }
+  </style>
+  <defs>
+    <pattern id="dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="12" cy="12" r="1.2" fill="#E4E0D8"/></pattern>
+    <marker id="head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="#9EA3A9"/></marker>
+    <marker id="headAccent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="#E5A22A"/></marker>
+  </defs>
+  <rect width="1280" height="800" fill="#FAF8F4"/>
+  <rect width="1280" height="800" fill="url(#dots)"/>
+  <rect width="1280" height="6" fill="#E5A22A"/>
+  <text x="80" y="76" font-size="15" font-weight="600" letter-spacing="2.1" fill="#8F5B00">HOW FOREMAN WORKS</text>
+
+  <rect x="80" y="130" width="260" height="96" rx="14" fill="#FFFFFF" stroke="#15171A" stroke-width="2"/>
+  <text x="210" y="160" text-anchor="middle" class="title">You</text>
+  <text x="210" y="186" text-anchor="middle" class="sub">Hand over a backlog</text>
+  <text x="210" y="208" text-anchor="middle" class="sub">and a deadline</text>
+  <rect x="480" y="120" width="320" height="116" rx="14" fill="#E5A22A" fill-opacity="0.12" stroke="#E5A22A" stroke-width="2"/>
+  <text x="640" y="160" text-anchor="middle" class="title">Foreman</text>
+  <text x="640" y="186" text-anchor="middle" class="sub">Plans the work, runs the crew</text>
+  <text x="640" y="208" text-anchor="middle" class="sub">and never writes code</text>
+  <rect x="940" y="130" width="260" height="96" rx="14" fill="#FFFFFF" stroke="#D9D5CC" stroke-width="1.5"/>
+  <text x="1070" y="160" text-anchor="middle" class="title">Decisions</text>
+  <text x="1070" y="186" text-anchor="middle" class="sub">Workers propose, Foreman</text>
+  <text x="1070" y="208" text-anchor="middle" class="sub">accepts and tells everyone</text>
+  <path d="M340 178 L476 178" fill="none" stroke="#9EA3A9" stroke-width="2" marker-end="url(#head)" />
+  <path d="M804 178 L936 178" fill="none" stroke="#9EA3A9" stroke-width="2" marker-end="url(#head)" marker-start="url(#head)"/>
+
+  <path d="M640 236 L640 280 M330 280 L950 280" fill="none" stroke="#9EA3A9" stroke-width="2"/>
+  <path d="M330 280 L330 316" fill="none" stroke="#9EA3A9" stroke-width="2" marker-end="url(#head)" />
+  <path d="M640 280 L640 316" fill="none" stroke="#9EA3A9" stroke-width="2" marker-end="url(#head)" />
+  <path d="M950 280 L950 316" fill="none" stroke="#9EA3A9" stroke-width="2" marker-end="url(#head)" />
+  <text x="652" y="264" class="label">briefs</text>
+
+  <rect x="200" y="320" width="260" height="96" rx="14" fill="#FFFFFF" stroke="#D9D5CC" stroke-width="1.5"/>
+  <text x="330" y="361" text-anchor="middle" class="title">Worker T1</text>
+  <text x="330" y="387" text-anchor="middle" class="sub">Own worktree and tab</text>
+  <rect x="510" y="320" width="260" height="96" rx="14" fill="#FFFFFF" stroke="#D9D5CC" stroke-width="1.5"/>
+  <text x="640" y="361" text-anchor="middle" class="title">Worker T2</text>
+  <text x="640" y="387" text-anchor="middle" class="sub">Own worktree and tab</text>
+  <rect x="820" y="320" width="260" height="96" rx="14" fill="#FFFFFF" stroke="#D9D5CC" stroke-width="1.5"/>
+  <text x="950" y="361" text-anchor="middle" class="title">Worker T3</text>
+  <text x="950" y="387" text-anchor="middle" class="sub">Own worktree and tab</text>
+
+  <path d="M330 416 L330 456 M640 416 L640 456 M950 416 L950 456 M330 456 L950 456" fill="none" stroke="#9EA3A9" stroke-width="2"/>
+  <path d="M640 456 L640 492" fill="none" stroke="#9EA3A9" stroke-width="2" marker-end="url(#head)" />
+  <text x="652" y="482" class="label">done</text>
+
+  <rect x="480" y="496" width="320" height="104" rx="14" fill="#FFFFFF" stroke="#D9D5CC" stroke-width="1.5"/>
+  <text x="640" y="530" text-anchor="middle" class="title">Reviewer</text>
+  <text x="640" y="556" text-anchor="middle" class="sub">Checks the diff and screenshots</text>
+  <text x="640" y="578" text-anchor="middle" class="sub">against your intent</text>
+  <path d="M480 548 L120 548 L120 368 L196 368" fill="none" stroke="#E5A22A" stroke-width="2" stroke-dasharray="7 6" marker-end="url(#headAccent)"/>
+  <text x="140" y="580" class="loop">Changes go back to the same</text>
+  <text x="140" y="600" class="loop">worker, up to 2 rounds</text>
+
+  <path d="M640 600 L640 646" fill="none" stroke="#9EA3A9" stroke-width="2" marker-end="url(#head)" />
+  <text x="652" y="630" class="label">approved</text>
+
+  <rect x="480" y="650" width="320" height="104" rx="14" fill="#FFFFFF" stroke="#D9D5CC" stroke-width="1.5"/>
+  <text x="640" y="684" text-anchor="middle" class="title">Pull request</text>
+  <text x="640" y="710" text-anchor="middle" class="sub">Intent, decisions, screenshots,</text>
+  <text x="640" y="732" text-anchor="middle" class="sub">verdict and risk</text>
+  <rect x="940" y="650" width="260" height="104" rx="14" fill="#FFFFFF" stroke="#15171A" stroke-width="2"/>
+  <text x="1070" y="695" text-anchor="middle" class="title">You</text>
+  <text x="1070" y="721" text-anchor="middle" class="sub">Review and merge</text>
+  <path d="M800 702 L936 702" fill="none" stroke="#9EA3A9" stroke-width="2" marker-end="url(#head)" />
+
+  <path d="M1200 702 L1240 702 L1240 256 L760 256 L760 240" fill="none" stroke="#E5A22A" stroke-width="2" stroke-dasharray="7 6" marker-end="url(#headAccent)"/>
+  <text x="1226" y="530" text-anchor="end" class="loop">Merged: the others rebase</text>
+  <text x="1226" y="552" text-anchor="end" class="loop">and waiting tasks start</text>
+</svg>

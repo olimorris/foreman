@@ -1,0 +1,4 @@
+#!/bin/sh
+# Resolve symlinks first, so a link in ~/.local/bin still finds the source next to the real script.
+root="$(cd "$(dirname "$(realpath "$0")")/.." && pwd -P)"
+exec bun "$root/src/cli.ts" "$@"

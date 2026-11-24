@@ -1,0 +1,160 @@
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { readEvents, type TaskEvent } from "./events.ts";
+import { loadDecisions, type Decision } from "./ledger.ts";
+import { run } from "./exec.ts";
+import type { Repo } from "./paths.ts";
+import type { Rex } from "./rex.ts";
+import { notifyOrchestrator } from "./send.ts";
+import { baseRef } from "./snapshot.ts";
+import { budgetOf, orchestratorCost, overBudget, taskCost } from "./cost.ts";
+import { inFlight, loadTasks, type Task } from "./state.ts";
+
+export type PrState = { state: string; comments: number };
+export type TrackedPr = { key: string; number: number };
+export type Cursor = { events: Record<string, number>; main?: string; exited: string[]; prs?: Record<string, PrState>; budget?: Record<string, number> };
+
+export type Probes = {
+  events(id: string): TaskEvent[];
+  mainSha(): string | undefined;
+  alive(task: Task): boolean;
+  pr?(number: number): PrState | undefined;
+};
+
+export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: TrackedPr[] = []): { reasons: string[]; cursor: Cursor } {
+  const next: Cursor = { events: { ...cursor.events }, main: cursor.main, exited: [...cursor.exited], prs: { ...cursor.prs } };
+  const reasons: string[] = [];
+
+  for (const task of tasks) {
+    const events = probes.events(task.id);
+    for (const e of events.slice(next.events[task.id] ?? 0)) {
+      reasons.push(e.note ? `${e.type} ${task.id}: ${clip(e.note)}` : `${e.type} ${task.id}`);
+    }
+    next.events[task.id] = events.length;
+
+    if (task.rex && task.status !== "exited" && !next.exited.includes(task.id) && !probes.alive(task)) {
+      reasons.push(`exited ${task.id}`);
+      next.exited.push(task.id);
+    }
+  }
+
+  for (const { key, number } of prs) {
+    const now = probes.pr?.(number);
+    if (!now) continue;
+    const seen = next.prs![`${number}`];
+    if (seen && now.comments > seen.comments) reasons.push(`pr-comments ${key} #${number} (+${now.comments - seen.comments})`);
+    if (now.state === "MERGED" && seen?.state !== "MERGED") reasons.push(`merged ${key} #${number}`);
+    if (now.state === "CLOSED" && seen?.state !== "CLOSED") reasons.push(`closed ${key} #${number}`);
+    next.prs![`${number}`] = now;
+  }
+
+  const sha = probes.mainSha();
+  if (sha && next.main && sha !== next.main) reasons.push(`main-moved ${sha.slice(0, 8)}`);
+  if (sha) next.main = sha;
+
+  return { reasons, cursor: next };
+}
+
+const clip = (s: string) => (s.length > 100 ? s.slice(0, 97) + "..." : s);
+
+const POLL_MS = 30_000;
+// gh calls cost rate limit, and PR changes are rarely urgent.
+const GH_POLL_MS = 5 * 60_000;
+
+export function trackedPrs(tasks: Task[], decisions: Decision[]): TrackedPr[] {
+  const prs: TrackedPr[] = tasks.filter((t) => t.pr).map((t) => ({ key: t.id, number: t.pr! }));
+  for (const n of new Set(decisions.flatMap((d) => (d.adr?.pr ? [d.adr.pr] : [])))) prs.push({ key: "decisions", number: n });
+  return prs;
+}
+
+function ghPr(root: string, number: number): PrState | undefined {
+  const r = run(["gh", "pr", "view", String(number), "--json", "state,comments,reviews"], { cwd: root });
+  if (r.code !== 0) return undefined;
+  const pr = JSON.parse(r.stdout);
+  return { state: pr.state, comments: pr.comments.length + pr.reviews.filter((x: { body: string }) => x.body).length };
+}
+
+export async function watch(repo: Repo, base: string, rex: Rex): Promise<number> {
+  const pidFile = join(repo.foreman, "watch.pid");
+  const other = readPid(pidFile);
+  if (other && pidAlive(other)) {
+    console.log(`watcher: already armed (pid ${other})`);
+    return 0;
+  }
+  mkdirSync(join(repo.foreman, "tasks"), { recursive: true });
+  writeFileSync(pidFile, String(process.pid));
+  const release = () => rmSync(pidFile, { force: true });
+  process.on("SIGTERM", () => (release(), process.exit(143)));
+  process.on("SIGINT", () => (release(), process.exit(130)));
+
+  const cursorFile = join(repo.foreman, "watch.cursor");
+  let cursor: Cursor = existsSync(cursorFile) ? JSON.parse(readFileSync(cursorFile, "utf8")) : { events: {}, exited: [] };
+  const probes: Probes = {
+    events: (id) => readEvents(repo, id),
+    mainSha: () => run(["git", "-C", repo.root, "rev-parse", baseRef(repo, base)]).stdout.trim() || undefined,
+    alive: (task) => (task.rex ? rex.alive(task.rex) : true),
+  };
+  let lastGh = 0;
+  const watched = [join(repo.foreman, "tasks"), join(repo.root, ".git", "refs"), join(repo.root, ".git", "packed-refs")].filter(existsSync);
+  const hasOrigin = run(["git", "-C", repo.root, "remote", "get-url", "origin"]).code === 0;
+
+  try {
+    for (;;) {
+      const tasks = inFlight(loadTasks(repo));
+      const ghDue = Date.now() - lastGh >= GH_POLL_MS;
+      if (ghDue) lastGh = Date.now();
+      // Merges happen on GitHub, so origin's base only moves here when it's fetched.
+      if (ghDue && hasOrigin) run(["git", "-C", repo.root, "fetch", "-q", "origin", base]);
+      const prs = trackedPrs(tasks, loadDecisions(repo)).filter((p) => !["MERGED", "CLOSED"].includes(cursor.prs?.[`${p.number}`]?.state ?? ""));
+      const result = scan(tasks, cursor, { ...probes, pr: ghDue ? (n) => ghPr(repo.root, n) : undefined }, prs);
+      cursor = result.cursor;
+      const budget = budgetOf(repo);
+      {
+        const all = loadTasks(repo);
+        const costs = tasks.map((t) => taskCost(repo, t));
+        const planTotal = all.reduce((sum, t) => sum + taskCost(repo, t).total, 0) + orchestratorCost(repo).usd;
+        const over = overBudget(costs, planTotal, budget, cursor.budget ?? {});
+        result.reasons.push(...over.reasons);
+        cursor.budget = over.alerted;
+      }
+      writeFileSync(cursorFile, JSON.stringify(cursor));
+      if (result.reasons.length) {
+        const line = result.reasons.join("; ");
+        console.log(line);
+        notifyOrchestrator(repo, `[foreman watcher] ${line}. Handle it, then re-arm with \`foreman watch\` in the background.`);
+        return 0;
+      }
+      await waitForChange(watched, POLL_MS);
+    }
+  } finally {
+    release();
+  }
+}
+
+async function waitForChange(paths: string[], ms: number): Promise<void> {
+  const proc = Bun.spawn(["fswatch", "-1", "-r", "-l", "0.5", ...paths], { stdout: "ignore", stderr: "ignore" });
+  let timer: Timer | undefined;
+  await Promise.race([proc.exited, new Promise((r) => (timer = setTimeout(r, ms)))]);
+  clearTimeout(timer);
+  proc.kill();
+}
+
+export function readPid(file: string): number | undefined {
+  if (!existsSync(file)) return undefined;
+  const pid = Number(readFileSync(file, "utf8").trim());
+  return Number.isInteger(pid) && pid > 0 ? pid : undefined;
+}
+
+export function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+export function watcherArmed(repo: Repo): boolean {
+  const pid = readPid(join(repo.foreman, "watch.pid"));
+  return pid !== undefined && pidAlive(pid);
+}
