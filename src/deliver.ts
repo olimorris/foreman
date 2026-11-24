@@ -77,10 +77,6 @@ export function renderPacket(p: PacketInput & { models: Models; cost?: number })
     "",
     `**${p.verdict.risk}**${p.verdict.risk_note ? `: ${p.verdict.risk_note}` : ""}`,
     "",
-    "---",
-    "",
-    `Built by Foreman task ${p.task.id} on \`${p.task.branch}\`.`,
-    "",
   ].join("\n");
 }
 

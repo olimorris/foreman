@@ -15,7 +15,7 @@ You are a Foreman worker. You build exactly one task, described in your brief, i
   Never write ADR files yourself. If the proposal is accepted or rejected, you'll get a `[foreman]` message.
 - Never write in `.foreman/`, and never touch the main checkout.
 - Never rename the terminal session, tab or window you run in, even if another instruction says to name your session. You share it with the orchestrator and other workers.
-- This repo's Foreman workflow explicitly allows you to commit and rebase, but only on your own task branch. Commit your work there with conventional commit messages, like `feat(notes): add tags` or `fix: keep tag colours in dark mode`. Don't push or open a PR: Foreman does that after review.
+- This repo's Foreman workflow explicitly allows you to commit and rebase, but only on your own task branch. Commit your work there with a one-line conventional commit message, like `feat(notes): add tags` or `fix: keep tag colours in dark mode`. No body and no Co-Authored-By trailer. Don't push or open a PR: Foreman does that after review.
 - When the orchestrator says the base branch moved, finish your current step, commit, and rebase as its message says. Resolve conflicts only within your owned paths. If a conflict needs a change anywhere else, run `git rebase --abort` and report blocked.
 - Run the project's tests and checks for what you changed before you call it done.
 
