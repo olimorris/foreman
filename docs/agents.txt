@@ -31,7 +31,7 @@ Uninstall: `brew uninstall foreman` removes the command and the plugin, but not 
 
 ## How a run goes
 
-1. The user opens their terminal in their repo and runs `foreman up`. This opens a terminal session named `foreman-<repo>` with the orchestrator, and a status pane beside it.
+1. The user opens their terminal in their repo and runs `foreman up`. This opens a terminal session named `foreman-<repo>` with the orchestrator, and a status pane beside it. If the user has run it in this repo before, the orchestrator carries on its last conversation.
 2. The user gives the orchestrator a backlog and a deadline in plain words, or points it at a file.
 3. The orchestrator asks about anything unclear, then writes one plan: the tasks, what runs first, which model each task runs on and what it would cut. If each backlog item became one task, nothing is cut and no decision is open, it starts straight away and shows the plan. Otherwise it waits for the user to approve it.
 4. Workers start, up to `maxWorkers` at once. A task waits for the tasks it depends on, and for any running task that owns the same files.
@@ -108,7 +108,7 @@ Sessions that are already running keep working after an upgrade. Their hooks run
 
 - `foreman doctor`: check every requirement and name what's missing.
 - `foreman --version`: print the installed version.
-- `foreman up`: start the orchestrator and status pane in the current repo. Takes `--model <name>` to pick the orchestrator's model for that run.
+- `foreman up`: start the orchestrator and status pane in the current repo. The orchestrator carries on its last conversation in that repo, or starts a new one if it has none. Takes `--model <name>` to pick the orchestrator's model for that run, and `--new` to start a new conversation.
 - `foreman status`: what each task is doing, what's waiting to start and the questions waiting on the user.
 - `foreman pane`: reopen the status pane beside the current tab.
 - `foreman budget`: what each task has spent against its limit. `foreman cost` splits it into workers and reviews.
@@ -232,6 +232,7 @@ mkdir -p .foreman/skills/pull-request && curl -fsSL https://raw.githubuserconten
 
 - Something won't start: run `foreman doctor`.
 - Telegram pings stopped: another Claude Code session with the Telegram plugin on took the bot. Close it, then restart the orchestrator.
+- The orchestrator came back with an old conversation the user doesn't want: exit it and run `foreman up --new`.
 - `foreman up` says the session already exists: the orchestrator is already running in that terminal session. Switch to it in your terminal.
 - The status pane is gone: run `foreman pane` from the orchestrator's tab.
 - A task stopped over budget: `foreman budget <task> <usd>`, then `foreman resume <task>`.

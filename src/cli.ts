@@ -18,7 +18,7 @@ import { requireSession } from "./terminal.ts";
 import { ensureForeman } from "./spawn.ts";
 import { budgetOverview } from "./overview.ts";
 import { findTask, loadTasks } from "./state.ts";
-import { orchestratorCommand, orchestratorModel, orchestratorPlugins } from "./up.ts";
+import { lastOrchestratorSession, orchestratorCommand, orchestratorModel, orchestratorPlugins } from "./up.ts";
 import { setTrust } from "./trust.ts";
 import { workers } from "./plan.ts";
 import { forTerminal, page, summaryText, writeSummary } from "./summary.ts";
@@ -44,7 +44,7 @@ function flags(args: string[]): { positional: string[]; opts: Record<string, str
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!;
     if (!a.startsWith("--")) positional.push(a);
-    else if (["--json", "--once", "--live", "--discard"].includes(a)) opts[a.slice(2)] = ["true"];
+    else if (["--json", "--once", "--live", "--discard", "--new"].includes(a)) opts[a.slice(2)] = ["true"];
     else (opts[a.slice(2)] ??= []).push(args[++i] ?? "");
   }
   return { positional, opts };
@@ -90,8 +90,9 @@ async function main(argv: string[]): Promise<number> {
       if (existing) return console.log(`${term.name} session ${name} already exists (${existing})`), 0;
       // Claude Code's trust prompt would otherwise swallow the user's first message and exit.
       setTrust(repo.root, true);
-      const session = term.newSession(name, repo.root, orchestratorCommand([...orchestratorPlugins(repo), ...mcpArgs("orchestrator")], socketPath(repo, "orchestrator"), model));
-      console.log(`Started the orchestrator in ${term.name} session ${name} (${session})${onModel({ model })}`);
+      const last = opts.new ? undefined : lastOrchestratorSession(repo);
+      const session = term.newSession(name, repo.root, orchestratorCommand([...orchestratorPlugins(repo), ...mcpArgs("orchestrator")], socketPath(repo, "orchestrator"), model, undefined, last));
+      console.log(`Started the orchestrator in ${term.name} session ${name} (${session})${onModel({ model })}, ${last ? "carrying on its last conversation" : "in a new conversation"}`);
       try {
         openPane(repo, term, session);
       } catch (err) {

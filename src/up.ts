@@ -1,4 +1,7 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { channelPlugin, loadConfig, telegramPlugins } from "./config.ts";
+import { loadSessions, sessionsFile, transcriptDir } from "./cost.ts";
 import { checkModel } from "./spawn.ts";
 import { findRepo, pluginArgs, type Repo } from "./paths.ts";
 import { skillsPluginArgs } from "./skills.ts";
@@ -44,11 +47,17 @@ export function orchestratorAllowedTools(tools: Tool[] = TOOLS): string[] {
   ];
 }
 
-export function orchestratorCommand(plugin: string[], socket: string, model?: string, telegram: string[] | false = orchestratorTelegram(findRepo())): string[] {
+// claude --resume with an id it has no transcript for exits at once, which would leave the user an empty tab.
+export function lastOrchestratorSession(repo: Repo, hasTranscript = (id: string) => existsSync(join(transcriptDir(repo.root), `${id}.jsonl`))): string | undefined {
+  return loadSessions(sessionsFile(repo)).findLast(hasTranscript);
+}
+
+export function orchestratorCommand(plugin: string[], socket: string, model?: string, telegram: string[] | false = orchestratorTelegram(findRepo()), resume?: string): string[] {
   const channel = telegram && channelPlugin(telegram);
   return [
     "env", "FOREMAN_ROLE=orchestrator",
     "claude", ...plugin,
+    ...(resume ? ["--resume", resume] : []),
     "--agent", "foreman:orchestrator",
     ...(model ? ["--model", model] : []),
     "--allowedTools", ...orchestratorAllowedTools(),
