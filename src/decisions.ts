@@ -90,7 +90,7 @@ export function writeIndex(repo: Repo, base = defaultBase(repo)): string {
   const lines = [
     "# Decisions",
     "",
-    "One line each. Open a full record only when your work touches it. Propose a new one with `foreman propose`.",
+    "One line each. Open a full record only when your work touches it. Propose a new one with Foreman's `propose` tool.",
     ...(config.context ? ["", `Domain terms: ${config.context}`] : []),
     "",
     `## In the repo${adrDir ? ` (${adrDir})` : ""}`,

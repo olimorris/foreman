@@ -93,7 +93,7 @@ const INLINE_CHARS = 600;
 
 export function briefNotes(repo: Repo): string[] {
   const notes = loadNotes(repo);
-  const add = '`foreman note "<fact>"` once you find a way past a hang or a failure that isn\'t yours';
+  const add = "the note tool once you find a way past a hang or a failure that isn't yours";
   if (!notes.length) return [`- Notes about the setup: none yet. Add one with ${add}`];
   const head = `- Notes about the setup: ${notesDoc(repo)}. Check them before assuming a failing test is yours. Add one with ${add}`;
   const inline = notes.reduce((s, n) => s + n.text.length, 0) <= INLINE_CHARS;

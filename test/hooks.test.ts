@@ -29,7 +29,7 @@ describe("areaLock for workers", () => {
   });
 
   test("denies edits in the worktree outside owned paths and points at propose", () => {
-    expect(areaLock(edit("src/app/Main.swift"), worker)).toContain("foreman propose");
+    expect(areaLock(edit("src/app/Main.swift"), worker)).toContain("propose tool");
   });
 
   test("denies edits in the main checkout and in .foreman", () => {
@@ -44,7 +44,7 @@ describe("areaLock for workers", () => {
   });
 
   test("checks bash redirects but allows scratch files outside the repo", () => {
-    expect(areaLock(bash("echo x > src/app/a.txt"), worker)).toContain("foreman propose");
+    expect(areaLock(bash("echo x > src/app/a.txt"), worker)).toContain("propose tool");
     expect(areaLock(bash("make test > /private/tmp/log.txt 2>&1"), worker)).toBeUndefined();
     expect(areaLock(bash("swift test"), worker)).toBeUndefined();
   });

@@ -42,10 +42,10 @@ export function areaLock(input: HookInput, ctx: LockContext, scratch = scratchDi
     if (isInside(p, task.worktree)) {
       const rel = relative(task.worktree, p);
       if (!owned(rel, task.owns)) {
-        return `${rel} is outside this task's owned paths (${task.owns.join(", ")}). Don't change it. If the task needs it, propose the change with: foreman propose "<decision>" --body "<why>" --paths <glob>`;
+        return `${rel} is outside this task's owned paths (${task.owns.join(", ")}). Don't change it. If the task needs it, propose the change with the propose tool, saying why and listing the paths it covers.`;
       }
     } else if (isInside(p, repo.foreman)) {
-      return ".foreman/ holds Foreman's state. Use the foreman CLI instead of writing there.";
+      return ".foreman/ holds Foreman's state. Use Foreman's tools instead of writing there.";
     } else if (isInside(p, repo.root)) {
       return `${p} is outside your worktree (${task.worktree}).`;
     } else if (!isBash && !scratch.some((dir) => isInside(p, dir))) {

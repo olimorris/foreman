@@ -24,9 +24,9 @@ const list = async (role: Role) => {
   return r.result.tools.map((t) => t.name);
 };
 
-test("the orchestrator gets the commands it shares with the CLI, and a worker doesn't", async () => {
+test("the orchestrator gets the commands it shares with the CLI, and a worker gets its own four", async () => {
   expect(await list("orchestrator")).toEqual(["status", "timeline", "summary", "cost", "budget"]);
-  expect(await list("worker")).toEqual([]);
+  expect(await list("worker")).toEqual(["report", "propose", "note", "tidy"]);
 });
 
 test("status reads the same through the CLI and through foreman mcp", async () => {
