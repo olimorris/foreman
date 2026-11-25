@@ -76,7 +76,7 @@ This opens a `foreman-<repo>` session with the orchestrator in it, and the statu
 
 From there:
 
-1. Foreman asks about anything unclear, then shows you one plan: tasks, what runs first, and what it would cut to meet the deadline. Approve it or ask for changes.
+1. Foreman asks about anything unclear, then shows you one plan: tasks, what runs first, and what it would cut to meet the deadline. Approve it or ask for changes. Small tasks with a clear spec, such as a docs change, may run on a cheaper model to stretch the budget. Foreman tells you which when it shows you the plan.
 2. Workers open in their own tabs, named like `W1 · T1: add tags to notes`: the worker, then the task it's building. Open one to watch or steer it.
 3. When a worker proposes a decision that affects others, Foreman asks you before accepting it. If you don't answer in time, it can make the call itself. See [Questions while you're away](#questions-while-youre-away).
 4. Each finished task gets a review. Approved work arrives as a PR with its review packet. You merge it.
@@ -212,4 +212,6 @@ Foreman never makes a call about money or lost work. It always waits for you bef
 - `test`: the command that runs the repo's tests, like `swift test`. Foreman uses it for the baseline run and to check the open PRs together, both in a fresh checkout, so include any setup, like `bun install && bun test`. Foreman works it out when it plans the work
 - `testMinutes`: how long one test run can take before Foreman stops it as hung (default 15)
 - `answerMinutes`: how long Foreman waits for your answer before it goes ahead with its own call (default 30). `0` makes it always wait for you
+- `workerModel`: the model workers run on when the plan doesn't name one for a task, such as `"sonnet"` or a full model id. Without it, workers use Claude Code's default model
+- `reviewerModel`: the model the reviewer runs on. Without it, the reviewer uses Claude Code's default model
 - `prScreenshots`: `"local"` keeps screenshots on your machine and lists their paths in the PR. `"branch"` pushes them to a `foreman-screenshots` branch so they show in the PR on GitHub

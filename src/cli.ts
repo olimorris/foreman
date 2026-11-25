@@ -52,6 +52,8 @@ function flags(args: string[]): { positional: string[]; opts: Record<string, str
   return { positional, opts };
 }
 
+const onModel = (task: { model?: string }) => (task.model ? `, on ${task.model}` : ", on Claude Code's default model");
+
 async function main(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv;
   const term = terminal();
@@ -106,8 +108,8 @@ async function main(argv: string[]): Promise<number> {
       const session = requireSession(term, "spawn");
       const left = budgetLeft(repo, loadTasks(repo));
       if (left.reason) throw new Error(`no new tasks start: ${left.reason}`);
-      const task = spawn(repo, { id, title: opts.title?.[0], brief: opts.brief[0], owns: opts.owns ?? [], base: opts.base?.[0] ?? defaultBase(repo), session }, term);
-      console.log(`spawned ${task.id}: ${task.worktree} on ${task.branch}, ${term.name} tab ${task.tab?.window}`);
+      const task = spawn(repo, { id, title: opts.title?.[0], model: opts.model?.[0], brief: opts.brief[0], owns: opts.owns ?? [], base: opts.base?.[0] ?? defaultBase(repo), session }, term);
+      console.log(`spawned ${task.id}: ${task.worktree} on ${task.branch}, ${term.name} tab ${task.tab?.window}${onModel(task)}`);
       return 0;
     }
     case "send": {
@@ -239,8 +241,8 @@ async function main(argv: string[]): Promise<number> {
       const max = maxWorkers(repo, opts.max?.[0]);
       const { start, waiting } = readyTasks(p, loadTasks(repo), max, stackable(repo));
       for (const t of start) {
-        spawn(repo, { id: t.id, title: t.title, brief: planBrief(repo, t.id), owns: t.owns, base: defaultBase(repo), session, stackedOn: t.stackedOn }, term);
-        console.log(`spawned ${t.id}: ${t.title}${t.stackedOn ? ` (on top of ${t.stackedOn}'s branch, which isn't merged yet)` : ""}`);
+        const task = spawn(repo, { id: t.id, title: t.title, model: t.model, brief: planBrief(repo, t.id), owns: t.owns, base: defaultBase(repo), session, stackedOn: t.stackedOn }, term);
+        console.log(`spawned ${t.id}: ${t.title}${t.stackedOn ? ` (on top of ${t.stackedOn}'s branch, which isn't merged yet)` : ""}${onModel(task)}`);
       }
       for (const w of waiting) console.log(`waiting ${w.id}: ${w.reason}`);
       const left = p.tasks.filter((t) => !loadTasks(repo).some((x) => x.id === t.id)).length;
@@ -280,11 +282,13 @@ async function main(argv: string[]): Promise<number> {
     case "cost": {
       const repo = findRepo();
       const budget = budgetOf(repo);
-      const costs = loadTasks(repo).map((t) => taskCost(repo, t));
+      const tasks = loadTasks(repo);
+      const costs = tasks.map((t) => taskCost(repo, t));
       const orch = orchestratorCost(repo);
-      for (const c of costs) {
+      for (const [i, c] of costs.entries()) {
         const limit = budget?.tasks?.[c.id] ?? budget?.perTask;
-        console.log(`${c.id.padEnd(8)} ${usd(c.total).padStart(8)}  worker ${usd(c.worker)}, reviews ${usd(c.review)}${limit !== undefined ? `, limit ${usd(limit)}` : ""}`);
+        const model = tasks[i]!.model;
+        console.log(`${c.id.padEnd(8)} ${usd(c.total).padStart(8)}  worker ${usd(c.worker)}${model ? ` on ${model}` : ""}, reviews ${usd(c.review)}${limit !== undefined ? `, limit ${usd(limit)}` : ""}`);
       }
       const total = costs.reduce((s, c) => s + c.total, 0) + orch.usd;
       console.log(`${"foreman".padEnd(8)} ${usd(orch.usd).padStart(8)}  orchestrator`);
@@ -320,9 +324,9 @@ async function main(argv: string[]): Promise<number> {
       const [id] = positional;
       if (!id) throw usageError("restart");
       const session = requireSession(term, "restart");
-      restartWorker(repo, findTask(repo, id), term, session);
+      const task = restartWorker(repo, findTask(repo, id), term, session, opts.model?.[0]);
       logRun(repo, id, "restarted");
-      console.log(`restarted ${id}'s worker in a new tab, carrying on its last session`);
+      console.log(`restarted ${id}'s worker in a new tab, carrying on its last session${onModel(task)}`);
       return 0;
     }
     case "resume": {
@@ -330,9 +334,9 @@ async function main(argv: string[]): Promise<number> {
       const [id] = positional;
       if (!id) throw usageError("resume");
       const session = requireSession(term, "resume");
-      resume(repo, id, term, session);
+      const task = resume(repo, id, term, session, opts.model?.[0]);
       logRun(repo, id, "resumed");
-      console.log(`resumed ${id}'s worker in a new tab`);
+      console.log(`resumed ${id}'s worker in a new tab${onModel(task)}`);
       return 0;
     }
     case "deliver": {
@@ -427,7 +431,7 @@ function plan(sub: string | undefined): number {
   if (sub === "show" || !sub) {
     const p = loadPlan(repo);
     if (!p) return console.log("no plan"), 1;
-    console.log(describePlan(p) + (p.approvedAt ? `\napproved ${p.approvedAt}` : "\nnot approved yet"));
+    console.log(describePlan(p, loadConfig(repo).workerModel) + (p.approvedAt ? `\napproved ${p.approvedAt}` : "\nnot approved yet"));
     return 0;
   }
   const p = parsePlan(readFileSync(sub, "utf8"));
@@ -437,7 +441,7 @@ function plan(sub: string | undefined): number {
     return 1;
   }
   savePlan(repo, p);
-  console.log(describePlan(p));
+  console.log(describePlan(p, loadConfig(repo).workerModel));
   console.log("Saved as a draft. Show the user, and once they approve run: foreman plan approve");
   return 0;
 }

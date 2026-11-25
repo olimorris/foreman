@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { MAX_REVISIONS, parseVerdict, renderFeedback, roundDir, sendFeedback, verdictLine, type Verdict } from "../src/review.ts";
+import { MAX_REVISIONS, parseVerdict, renderFeedback, reviewerCommand, roundDir, runReview, sendFeedback, startReview, verdictLine, type Verdict } from "../src/review.ts";
+import { saveConfig } from "../src/config.ts";
+import { readEvents } from "../src/events.ts";
 import { fill, parseScreens, splitArgs } from "../src/shots.ts";
 import { findTask, withTasks, type Task } from "../src/state.ts";
 import { fakeTerminal, tempRepo } from "./helpers.ts";
@@ -36,6 +38,26 @@ test("parseVerdict prefers structured output and falls back to the reply's last 
   expect(parseVerdict(JSON.stringify({ result: reply }))).toMatchObject({ verdict: "approve", risk: "low", decisions_touched: [] });
   expect(parseVerdict(JSON.stringify({ result: "no json here" }))).toBeUndefined();
   expect(parseVerdict("not json")).toBeUndefined();
+});
+
+test("the reviewer runs on reviewerModel when it's set, and Claude Code's default otherwise", () => {
+  const repo = tempRepo();
+  const cmd = reviewerCommand(repo, "T1", 2, "sonnet");
+  expect(cmd.slice(cmd.indexOf("--model"), cmd.indexOf("--model") + 2)).toEqual(["--model", "sonnet"]);
+  expect(cmd).toContain("2.00");
+  expect(reviewerCommand(repo, "T1")).not.toContain("--model");
+});
+
+test("a bad reviewerModel fails before the review opens or a round is counted", async () => {
+  const repo = tempRepo();
+  withTasks(repo, (ts) => ts.push({ id: "T1", status: "done", branch: "foreman/T1", base: "main", worktree: repo.root, owns: ["src/"], socket: "/nonexistent.sock", createdAt: "" }));
+  saveConfig(repo, { reviewerModel: "sonet" });
+  const term = fakeTerminal();
+  expect(() => startReview(repo, "T1", term)).toThrow('reviewerModel in .foreman/config.json: "sonet" isn\'t a model name');
+  expect(term.labels).toEqual([]);
+  expect(await runReview(repo, "T1")).toStartWith("failed before round 1: reviewerModel");
+  expect(findTask(repo, "T1").reviews).toBeUndefined();
+  expect(readEvents(repo, "T1").at(-1)).toMatchObject({ type: "reviewed" });
 });
 
 test("verdict lines say when to escalate", () => {

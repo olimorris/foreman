@@ -1,3 +1,4 @@
+import { loadConfig } from "./config.ts";
 import { budgetOf, orchestratorCost, taskCost, taskLimit, usd } from "./cost.ts";
 import type { Repo } from "./paths.ts";
 import { loadPlan } from "./plan.ts";
@@ -8,9 +9,21 @@ import { PLAIN, type Style } from "./style.ts";
 
 const TITLE_WIDTH = 44;
 
+const MODEL_WIDTH = 14;
+
+// Capped, so a provider id like "arn:aws:bedrock:...:inference-profile/..." can't squeeze the title out of the table.
+export function shortModel(model: string): string {
+  const id = model.match(/claude-([a-z]+)-(\d+)-(\d+)/);
+  const short = id ? `${id[1]} ${id[2]}.${id[3]}` : model;
+  return short.length > MODEL_WIDTH ? short.slice(0, MODEL_WIDTH - 3) + "..." : short;
+}
+
+// A model other than workerModel goes beside the title, since it explains why the task cost more or less than the rest.
 export function taskTitle(repo: Repo, task: Task, width = TITLE_WIDTH): string {
   const title = task.title ?? loadPlan(repo)?.tasks.find((t) => t.id === task.id)?.title;
-  return title ? clip(plainTitle(title), width) : "";
+  const model = task.model && task.model !== loadConfig(repo).workerModel ? `(${shortModel(task.model)})` : "";
+  if (!title) return model;
+  return [clip(plainTitle(title), width - (model ? model.length + 1 : 0)), model].filter(Boolean).join(" ");
 }
 
 export const clip = (s: string, width: number) => (s.length > width ? s.slice(0, width - 3).trimEnd() + "..." : s);

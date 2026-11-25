@@ -4,10 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendEvent, readEvents, readRunLog } from "../src/events.ts";
 import { must, run } from "../src/exec.ts";
-import { checkBrief, spawn, tabLabel } from "../src/spawn.ts";
+import { checkBrief, spawn, tabLabel, workerCommand } from "../src/spawn.ts";
+import { saveConfig } from "../src/config.ts";
 import { findTask, loadTasks, nextWorker, updateTask, type Task } from "../src/state.ts";
 import { teardown } from "../src/teardown.ts";
-import { resume, stopWorker } from "../src/stop.ts";
+import { restartWorker, resume, stopWorker } from "../src/stop.ts";
 import { recordSession, sessionsFile } from "../src/cost.ts";
 import { fakeTerminal, tempRepo } from "./helpers.ts";
 
@@ -18,14 +19,16 @@ const projects = () => JSON.parse(readFileSync(config, "utf8")).projects;
 
 const BRIEF = "## Intent\n\nAdd a greeting.\n\n## Spec\n\nWrite hello.txt.\n";
 
-function spawned(id = "T1") {
-  const repo = tempRepo();
+function spawned(id = "T1", model?: string, repo = tempRepo()) {
   const briefFile = join(repo.root, "..", `brief-${id}-${Date.now()}.md`);
   writeFileSync(briefFile, BRIEF);
-  const term = fakeTerminal();
-  const task = spawn(repo, { id, brief: briefFile, owns: ["hello.txt"], base: "main", session: "session:1" }, term);
+  const term = { ...fakeTerminal(), opened: [] as string[][] };
+  term.open = (session, label, _cwd, cmd) => (term.labels.push(label), term.opened.push(cmd), { session, window: "window:1", pane: "block:1" });
+  const task = spawn(repo, { id, model, brief: briefFile, owns: ["hello.txt"], base: "main", session: "session:1" }, term);
   return { repo, task, term };
 }
+
+const modelFlag = (cmd: string[]) => (cmd.includes("--model") ? cmd[cmd.indexOf("--model") + 1] : undefined);
 
 describe("spawn", () => {
   test("creates the worktree, branch, brief and task record", () => {
@@ -63,6 +66,64 @@ test("Foreman's own steps go to the run log, so the watcher doesn't wake the orc
   teardown(repo, "T1", false, term);
   expect(readRunLog(repo).map((e) => [e.task, e.what, e.note])).toEqual([["T1", "started", "W1"], ["T1", "torn-down", undefined]]);
   expect(readEvents(repo, "T1")).toEqual([]);
+});
+
+describe("models", () => {
+  test("a task starts its worker on the model it was given, before the prompt", () => {
+    const { repo, term } = spawned("T1", "haiku");
+    expect(findTask(repo, "T1").model).toBe("haiku");
+    const cmd = term.opened[0]!;
+    expect(modelFlag(cmd)).toBe("haiku");
+    expect(cmd.indexOf("--model")).toBeLessThan(cmd.indexOf("--"));
+  });
+
+  test("a task with no model takes workerModel, and with neither the flag is left out", () => {
+    expect(modelFlag(spawned().term.opened[0]!)).toBeUndefined();
+    expect("model" in spawned().task).toBe(false);
+    const repo = tempRepo();
+    saveConfig(repo, { workerModel: "sonnet" });
+    expect(spawned("T1", undefined, repo).task.model).toBe("sonnet");
+    expect(spawned("T2", "opus", repo).task.model).toBe("opus");
+  });
+
+  test("a resumed worker keeps its task's model", () => {
+    const { repo, term } = spawned("T1", "haiku");
+    term.alive = () => false;
+    resume(repo, "T1", term, "session:1");
+    expect(modelFlag(term.opened[1]!)).toBe("haiku");
+  });
+
+  test("resume and restart can switch a task's model, so a bad one isn't stuck on the task", () => {
+    const { repo, term } = spawned("T1", "haiku");
+    term.alive = () => false;
+    resume(repo, "T1", term, "session:1", "sonnet");
+    expect(modelFlag(term.opened[1]!)).toBe("sonnet");
+    expect(findTask(repo, "T1").model).toBe("sonnet");
+    restartWorker(repo, findTask(repo, "T1"), term, "session:1", "opus");
+    expect(modelFlag(term.opened[2]!)).toBe("opus");
+    expect(findTask(repo, "T1").model).toBe("opus");
+  });
+
+  test("restarting with a bad model leaves the running worker alone", () => {
+    const { repo, term } = spawned("T1", "haiku");
+    expect(() => restartWorker(repo, findTask(repo, "T1"), term, "session:1", "sonet")).toThrow("isn't a model name");
+    expect(term.closed).toEqual([]);
+    expect(findTask(repo, "T1").model).toBe("haiku");
+  });
+
+  test("a bare --model is refused rather than quietly skipping workerModel", () => {
+    const repo = tempRepo();
+    saveConfig(repo, { workerModel: "sonnet" });
+    expect(() => spawned("T1", "", repo)).toThrow("the model is empty");
+    expect(loadTasks(repo)).toEqual([]);
+  });
+
+  test("a model name that would break the command is refused before anything is made", () => {
+    const repo = tempRepo();
+    expect(() => spawned("T1", "--dangerously-skip-permissions", repo)).toThrow("isn't a model name");
+    expect(loadTasks(repo)).toEqual([]);
+    expect(workerCommand({ ...spawned().task, model: undefined }, fakeTerminal(), "go")).not.toContain("--model");
+  });
 });
 
 test("events append and read back in order", () => {

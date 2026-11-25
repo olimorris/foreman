@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { parsePlan, readyTasks, sharedPaths, validatePlan, waves, type Plan } from "../src/plan.ts";
+import { checkModel } from "../src/spawn.ts";
+import { describePlan, parsePlan, readyTasks, sharedPaths, validatePlan, waves, type Plan } from "../src/plan.ts";
 import type { Task } from "../src/state.ts";
 
 const PLAN = `# Plan: Notes, tags and polish
@@ -39,6 +40,7 @@ Add a box.
 
 ## T4: feat(layout): footer count
 - Owns: src/views/layout.ts
+- Model: \`haiku\`
 
 ### Intent
 Show the count.
@@ -58,6 +60,8 @@ describe("parsePlan", () => {
     expect(p.tasks.map((t) => t.id)).toEqual(["T1", "T2", "T3", "T4"]);
     expect(p.tasks[0]).toMatchObject({ title: "feat: notes carry tags", owns: ["src/types.ts", "src/data.ts"], deps: [], contract: true });
     expect(p.tasks[1]!.deps).toEqual(["T1"]);
+    expect(p.tasks[3]!.model).toBe("haiku");
+    expect("model" in p.tasks[0]!).toBe(false);
     expect(p.tasks[1]!.brief).toContain("## Intent\nFilter by tag.");
     expect(p.tasks[1]!.brief).toContain("## Screens\n- tagged: /?tag=work");
     expect(validatePlan(p)).toEqual([]);
@@ -102,7 +106,27 @@ describe("readyTasks", () => {
   });
 });
 
+test("a task's model shows in the plan, and a line that isn't a model name is refused", () => {
+  expect(describePlan(parsePlan(PLAN))).toContain("wave 1: T1 (contract), T3, T4 (haiku)");
+  expect(describePlan(parsePlan(PLAN))).toContain("tasks with no Model line run on Claude Code's default model");
+  const withDefault = describePlan(parsePlan(PLAN), "sonnet");
+  expect(withDefault).toContain("wave 1: T1 (contract, sonnet), T3 (sonnet), T4 (haiku)");
+  expect(withDefault).toContain("tasks with no Model line run on sonnet, from workerModel in .foreman/config.json");
+  const plan = (model: string) => validatePlan(parsePlan(`# P\n\n## A: fix: a\n- Owns: x\n- Model: ${model}\n\n### Intent\ni\n\n### Spec\ns\n`));
+  expect(plan("sonnet, it's small")).toEqual([`A: "sonnet, it's small" isn't a model name. Use sonnet, opus, haiku, fable, opusplan or default, or a full id like claude-sonnet-5-5`]);
+  expect(plan("sonet")).toHaveLength(1);
+  expect(plan("us.anthropic.claude-sonnet-5-5-v1:0")).toEqual([]);
+});
+
 test("task titles must be conventional commits, because they become PR titles", () => {
   const p = parsePlan("# P\n\n## A: Add tags\n- Owns: x\n\n### Intent\ni\n\n### Spec\ns\n");
   expect(validatePlan(p)).toEqual(['A\'s title becomes its PR title, so it must be a conventional commit, like "feat: add tags to notes"']);
+});
+
+test("checkModel takes Claude Code's aliases and full ids, and nothing that looks like a typo", () => {
+  for (const ok of ["sonnet", "opus", "haiku", "fable", "opusplan", "default", "sonnet[1m]", "claude-sonnet-5-5", "claude-opus-5-5[1m]", "us.anthropic.claude-sonnet-5-5-v1:0", "arn:aws:bedrock:us-east-1:123:inference-profile/x"]) {
+    expect(() => checkModel(ok)).not.toThrow();
+  }
+  for (const bad of ["sonet", "Sonnet please", "gpt-5", "-x", "sonnet[2m]"]) expect(() => checkModel(bad)).toThrow("isn't a model name");
+  expect(() => checkModel("")).toThrow("the model is empty");
 });
