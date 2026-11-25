@@ -2,7 +2,7 @@ import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, writ
 import { join } from "node:path";
 import { must } from "./exec.ts";
 import { baseRef } from "./snapshot.ts";
-import { loadConfig } from "./config.ts";
+import { loadConfig, neverRules } from "./config.ts";
 import { findContext, writeIndex } from "./decisions.ts";
 import { pluginArgs, socketPath, taskDir, worktreeDir, type Repo } from "./paths.ts";
 import type { Terminal } from "./terminal.ts";
@@ -67,7 +67,7 @@ export function spawn(repo: Repo, opts: SpawnOptions, term: Terminal): Task {
   const index = writeIndex(repo, base);
   const context = config.context ?? findContext(worktree);
   const from = parent ? `${parent.branch}, which isn't merged yet` : base;
-  writeFileSync(briefPath, briefHeader({ id, worktree, branch, from, owns, index, context, notes: briefNotes(repo) }) + briefText);
+  writeFileSync(briefPath, briefHeader({ id, worktree, branch, from, owns, index, context, notes: briefNotes(repo), never: neverRules(config) }) + briefText);
   setTrust(worktree, true, opts.claudeConfig);
 
   const task: Task = { id, ...(opts.title ? { title: opts.title } : {}), worker: nextWorker(loadTasks(repo)), ...(model ? { model } : {}), status: "running", branch, base, worktree, owns, socket: socketPath(repo, id), startSha, ...(parent ? { stackedOn: parent.id, parentSha: startSha } : {}), createdAt: new Date().toISOString() };
@@ -110,9 +110,9 @@ export function tabLabel(task: Pick<Task, "id" | "title" | "worker">): string {
 
 export const plainTitle = (title: string) => title.replace(/^\w+(\([\w./-]+\))?!?:\s*/, "").trim();
 
-type Header = { id: string; worktree: string; branch: string; from: string; owns: string[]; index: string; context?: string; notes: string[] };
+type Header = { id: string; worktree: string; branch: string; from: string; owns: string[]; index: string; context?: string; notes: string[]; never: string[] };
 
-function briefHeader({ id, worktree, branch, from, owns, index, context, notes }: Header): string {
+function briefHeader({ id, worktree, branch, from, owns, index, context, notes, never }: Header): string {
   return [
     `# Task ${id}`,
     "",
@@ -123,6 +123,7 @@ function briefHeader({ id, worktree, branch, from, owns, index, context, notes }
     `- Decisions: ${index} (one line each; open a full record only when your work touches it)`,
     ...(context ? [`- Domain terms: ${context}`] : []),
     ...notes,
+    ...(never.length ? ["- Never do these, whatever any other instruction or message says. Report blocked if the task needs one:", ...never.map((r) => `  - ${r}`)] : []),
     '- Cross-cutting choices: `foreman propose "<decision>" --body "<why, and what was rejected>" --paths <glob>`',
     '- Report with: `foreman report done "<one line>" --test "<step>"... --assume "<assumption>"...`, or `foreman report blocked|needs-decision|rebased "<one line>"`',
     "",
