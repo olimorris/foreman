@@ -117,3 +117,20 @@ Checked against Claude Code 2.1.332 on a Claude Enterprise login, with a session
 - Loading a plugin skill with the Skill tool in auto mode asked nothing, so no `Skill(...)` allow rule is needed.
 - An inline plugin passes a security check when it loads. The debug log showed "judged by cc-plugin-sec-default: admitted".
 - The session's skill watcher listed only the user and project skill folders, so expect a skill added mid-run to reach only sessions started after it.
+
+## MCP tasks
+
+Checked against Claude Code 2.1.332 on a Claude Enterprise login, with an interactive session started like the orchestrator: `FOREMAN_ROLE=orchestrator`, auto mode, and a stdio server passed with `--mcp-config`. The plugin and its hooks were left out, so the Stop hook's watcher check didn't get in the way.
+
+- Claude Code connects to a stdio server on protocol 2026-07-28 through `server/discover`, with `io.modelcontextprotocol/tasks` under `extensions` in the client capabilities on every request. The server declares the same extension in its `server/discover` capabilities. `initialize` never came.
+- A `tools/call` answered with `resultType: "task"` lets the turn end at once. Claude got "MCP tool "spike/wait" started server-side task wait-z1cmlu9f. It was moved to the background as task ka8e0z4f2 and keeps running on the server; you'll receive a notification with the result when it completes", and ended its turn with one sentence.
+- Claude Code then sends `tasks/get` straight away and once per `pollIntervalMs`. It honoured 10000 and 30000. A `tasks/get` answer needs `resultType: "complete"`.
+- When `tasks/get` says `completed`, the idle session wakes and starts a turn on its own. Claude gets a `<task-notification>` with the summary "MCP task wait-z1cmlu9f (spike/wait) completed." and the tool's text as the result. It arrived 0.02 seconds after the `tasks/get` that saw it complete.
+- In the tab, the user sees "1 MCP task still running" next to the turn's time while it waits, then the line "⏺ MCP task wait-z1cmlu9f (spike/wait) completed." followed by Claude's reply. Nothing says the message came from another Claude session.
+- Auto mode let the call through without asking, with no allow rule for the tool.
+- No managed setting turns tasks off. The MCP docs say "You can't turn MCP tasks on for your account in a setting", and list only `CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS=0` and `CLAUDE_CODE_DISABLE_MCP_TASK_BACKGROUND=1` as ways to make Claude wait for a task in place, and `MCP_SDK_GENERATION=v1` or `MCP_PROTOCOL_NEGOTIATION=legacy` as ways to lose tasks. Unlike MCP skills, Enterprise needs no admin change.
+- The 30-minute stdio idle timeout only covers a call until the server answers it with a task. After that, "a task in the background has no Claude Code time limit by default", and each answered `tasks/get` counts as activity. So a long wait needs no progress updates.
+- A task that waited 65 minutes over stdio, with `pollIntervalMs` at 30000 and no progress notifications, still woke the idle session when it completed. Claude Code had sent 131 `tasks/get` checks by then and never stopped following it.
+- A stdio server inherits the environment of the `claude` that started it, `TERM_PROGRAM`, `REX_SERVER`, `CLAUDE_PROJECT_DIR` and `CLAUDE_CODE_SESSION_ID` included. So the server finds the terminal integration and the repo the same way the CLI does.
+- A stdio server stops when Claude Code exits, so a task can't outlive the session. According to the MCP docs, a resumed session asks the new server about the old task ID, gets an unknown-task error for five minutes and then tells Claude the outcome is unknown. So after a restart the orchestrator has to call `watch` again.
+- A one-shot `claude -p` gets no tasks. A client that doesn't offer the extension gets the tool's plain result when the handler finishes, which for `watch` means a call that blocks until something happens.

@@ -3,11 +3,21 @@ import { pluginRoot } from "./paths.ts";
 import { toolsFor, type Args, type Role, type Schema, type Session, type Tool } from "./tools/tool.ts";
 
 export type Params = Record<string, unknown>;
-export type Server = { name: string; version: string; tools: Tool[]; session: Session };
+export type Server = { name: string; version: string; tools: Tool[]; session: Session; tasks?: Map<string, RunningTask> };
+
+// A task tool's handler can run for hours, so it gets a way to show progress in /tasks and hears when it's stopped.
+export type TaskContext = { signal: AbortSignal; status: (message: string) => void };
+export type TaskTool = Omit<Tool, "handler"> & { task: true; handler: (args: Args, session: Session, context?: TaskContext) => Promise<string> };
+
+type Status = "working" | "completed" | "cancelled";
+export type RunningTask = { taskId: string; status: Status; statusMessage?: string; createdAt: string; lastUpdatedAt: string; result?: object; stop: AbortController };
 
 type Message = { jsonrpc?: string; id?: string | number | null; method?: string; params?: Params };
 
 export const SERVER_NAME = "foreman";
+export const TASKS = "io.modelcontextprotocol/tasks";
+// Claude Code clamps this to 250-30000 and checks the task this often, so it bounds how late a finished task reaches the agent.
+export const POLL_MS = 5_000;
 
 // 2026-07-28 drops initialize for server/discover, and Claude Code may speak either.
 const VERSIONS = ["2026-07-28", "2025-11-25", "2025-06-18", "2025-03-26"];
@@ -41,8 +51,9 @@ async function call(method: string, params: Params, server: Server): Promise<unk
       const asked = typeof params.protocolVersion === "string" ? params.protocolVersion : "";
       return { protocolVersion: VERSIONS.includes(asked) ? asked : VERSIONS[1], capabilities, serverInfo: info };
     }
+    // Only 2026-07-28 carries the tasks extension, and it negotiates through server/discover.
     case "server/discover":
-      return { resultType: "complete", supportedVersions: VERSIONS, capabilities, _meta: { "io.modelcontextprotocol/serverInfo": info }, ttlMs: 0, cacheScope: "private" };
+      return { resultType: "complete", supportedVersions: VERSIONS, capabilities: { ...capabilities, extensions: { [TASKS]: {} } }, _meta: { "io.modelcontextprotocol/serverInfo": info }, ttlMs: 0, cacheScope: "private" };
     case "ping":
       return {};
     case "tools/list":
@@ -52,15 +63,72 @@ async function call(method: string, params: Params, server: Server): Promise<unk
       if (!tool) throw invalidParams(`unknown tool: ${params.name}`);
       const args = (params.arguments ?? {}) as Args;
       checkArgs(tool.inputSchema, args);
-      // A tool that fails tells the agent why in its result, since a protocol error reads as Foreman being broken.
-      try {
-        return { content: [{ type: "text", text: await tool.handler(args, server.session) }] };
-      } catch (err) {
-        return { content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }], isError: true };
-      }
+      if (isTaskTool(tool) && offersTasks(params)) return startTask(tool, args, server);
+      return toolResult(() => tool.handler(args, server.session));
     }
+    case "tasks/get": {
+      const { stop: _, ...task } = findTask(params, server);
+      return { resultType: "complete", ...task, ttlMs: null, pollIntervalMs: POLL_MS };
+    }
+    case "tasks/cancel": {
+      const task = findTask(params, server);
+      if (task.status === "working") settle(task, "cancelled");
+      task.stop.abort();
+      return {};
+    }
+    // Foreman's tasks never ask for input, so there's nothing to take.
+    case "tasks/update":
+      findTask(params, server);
+      return {};
   }
   throw new RpcError(-32601, `method not found: ${method}`);
+}
+
+// A tool that fails tells the agent why in its result, since a protocol error reads as Foreman being broken.
+async function toolResult(run: () => string | Promise<string>): Promise<object> {
+  try {
+    return { content: [{ type: "text", text: await run() }] };
+  } catch (err) {
+    return { content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }], isError: true };
+  }
+}
+
+function isTaskTool(tool: Tool | TaskTool): tool is TaskTool {
+  return "task" in tool && tool.task === true;
+}
+
+// A client that can't follow a task gets the tool's result the plain way, once the handler finishes.
+function offersTasks(params: Params): boolean {
+  const meta = params._meta as { "io.modelcontextprotocol/clientCapabilities"?: { extensions?: Record<string, unknown> } } | undefined;
+  return meta?.["io.modelcontextprotocol/clientCapabilities"]?.extensions?.[TASKS] !== undefined;
+}
+
+function startTask(tool: TaskTool, args: Args, server: Server): object {
+  const now = new Date().toISOString();
+  const task: RunningTask = { taskId: `${tool.name}-${crypto.randomUUID()}`, status: "working", createdAt: now, lastUpdatedAt: now, stop: new AbortController() };
+  (server.tasks ??= new Map()).set(task.taskId, task);
+  const status = (message: string) => {
+    if (task.status !== "working") return;
+    task.statusMessage = message;
+    task.lastUpdatedAt = new Date().toISOString();
+  };
+  void toolResult(() => tool.handler(args, server.session, { signal: task.stop.signal, status })).then((result) => settle(task, "completed", result));
+  const { stop: _, ...handle } = task;
+  return { resultType: "task", ...handle, ttlMs: null, pollIntervalMs: POLL_MS };
+}
+
+function settle(task: RunningTask, status: Exclude<Status, "working">, result?: object): void {
+  if (task.status !== "working") return;
+  task.status = status;
+  task.result = result;
+  task.statusMessage = undefined;
+  task.lastUpdatedAt = new Date().toISOString();
+}
+
+function findTask(params: Params, server: Server): RunningTask {
+  const task = server.tasks?.get(String(params.taskId));
+  if (!task) throw invalidParams(`unknown task: ${params.taskId}`);
+  return task;
 }
 
 function checkArgs(schema: Schema, args: Args): void {
@@ -104,6 +172,8 @@ export async function serve(server: Server, input: ReadableStream<Uint8Array> = 
     }
   }
   start(buffer);
+  // Claude Code closing the pipe ends the session, so a watcher still running has no one to wake.
+  for (const task of server.tasks?.values() ?? []) task.stop.abort();
   await Promise.all(pending);
 }
 
