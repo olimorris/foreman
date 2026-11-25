@@ -7,6 +7,9 @@ import { loadTasks, type Task } from "./state.ts";
 import { activeLimit, resetPhrase } from "./limits.ts";
 import type { Style } from "./style.ts";
 import { blockSummary, openBlocks, type PermissionBlock } from "./permissions.ts";
+import { baselineStatus } from "./baseline.ts";
+import { answerMs, loadQuestions, waitingLines } from "./questions.ts";
+import { watcherArmed } from "./watch.ts";
 
 export type Row = { cells: string[]; tone: (s: Style) => (s: string) => string; toneAt?: number; dim?: boolean; notes?: string[] };
 export type Section = { title: string; rows: Row[] };
@@ -94,4 +97,13 @@ export function sectionLines(sections: Section[], style: Style, rightAligned: (r
     return (r.notes ?? []).map((n) => `${" ".repeat(indent)}${style.red(n)}`);
   };
   return sections.flatMap((s) => ["", style.heading(s.title), ...s.rows.flatMap((r) => [line(r), ...notes(r)])]);
+}
+
+export function statusText(repo: Repo, style: Style): string {
+  const lines = [statusView(repo, style, watcherArmed(repo))];
+  const tested = baselineStatus(repo);
+  if (tested) lines.push(tested);
+  const asking = waitingLines(loadQuestions(repo), Date.now(), answerMs(repo));
+  if (asking.length) lines.push("", "Questions waiting on you", ...asking.map((l) => `  ${l}`));
+  return lines.join("\n");
 }

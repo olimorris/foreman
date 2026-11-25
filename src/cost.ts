@@ -5,7 +5,7 @@ import { StringDecoder } from "node:string_decoder";
 import { loadConfig } from "./config.ts";
 import type { Repo } from "./paths.ts";
 import { roundDir } from "./review.ts";
-import type { Task } from "./state.ts";
+import { loadTasks, type Task } from "./state.ts";
 
 // Dollars per million tokens at list price; other models go in config.json's "prices". Cache writes cost 1.25x input for 5 minutes and 2x for an hour.
 export type Price = { input: number; output: number; cacheRead: number };
@@ -215,4 +215,22 @@ export function budgetLeft(repo: Repo, tasks: Task[], id?: string): { usd?: numb
   const taskSpent = taskCost(repo, task).total;
   if (taskSpent >= limit) return { usd: 0, reason: `${id} has spent ${usd(taskSpent)} of its ${usd(limit)} budget. Ask the user to raise it with foreman budget ${id} <usd>` };
   return { usd: Math.min(limit - taskSpent, planLeft ?? Infinity) };
+}
+
+export function costText(repo: Repo): string {
+  const budget = budgetOf(repo);
+  const tasks = loadTasks(repo);
+  const costs = tasks.map((t) => taskCost(repo, t));
+  const orch = orchestratorCost(repo);
+  const lines = costs.map((c, i) => {
+    const limit = taskLimit(budget, c.id);
+    const model = tasks[i]!.model;
+    return `${c.id.padEnd(8)} ${usd(c.total).padStart(8)}  worker ${usd(c.worker)}${model ? ` on ${model}` : ""}, reviews ${usd(c.review)}${limit !== undefined ? `, limit ${usd(limit)}` : ""}`;
+  });
+  const total = costs.reduce((s, c) => s + c.total, 0) + orch.usd;
+  lines.push(`${"foreman".padEnd(8)} ${usd(orch.usd).padStart(8)}  orchestrator`);
+  lines.push(`${"total".padEnd(8)} ${usd(total).padStart(8)}${budget.plan !== undefined ? `  of ${usd(budget.plan)}` : ""}  at list prices`);
+  const unpriced = [...new Set([...costs.flatMap((c) => c.unpriced), ...orch.unpriced])];
+  if (unpriced.length) lines.push(`not counted: ${unpriced.join(", ")} has no price. Add it under "prices" in .foreman/config.json`);
+  return lines.join("\n");
 }

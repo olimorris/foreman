@@ -8,10 +8,13 @@ import { accept, findContext, reject, writeIndex } from "./decisions.ts";
 import { doctor } from "./doctor.ts";
 import { printBanner } from "./banner.ts";
 import { helpText, usageError, UsageError } from "./help.ts";
-import { statusView } from "./status.ts";
+import { statusText } from "./status.ts";
+import { mcpArgs, serve, SERVER_NAME } from "./mcp.ts";
+import { TOOLS } from "./tools/index.ts";
+import { asRole } from "./tools/tool.ts";
 import { styleFor } from "./style.ts";
 import { findDecision, loadDecisions, propose } from "./ledger.ts";
-import { answer, answerMs, ask, loadQuestions, waitingLines } from "./questions.ts";
+import { answer, answerMs, ask } from "./questions.ts";
 import { baseRef, snapshot } from "./snapshot.ts";
 import { runReview, sendFeedback, startReview } from "./review.ts";
 import { capture, parseScreens } from "./shots.ts";
@@ -32,19 +35,27 @@ import { setTrust } from "./trust.ts";
 import { deliver } from "./deliver.ts";
 import { describePlan, loadPlan, maxWorkers, parsePlan, planBrief, readyTasks, savePlan, stackable, validatePlan, workers } from "./plan.ts";
 import { sync } from "./sync.ts";
-import { forTerminal, openPrs, page, writeSummary } from "./summary.ts";
+import { forTerminal, openPrs, page, summaryText, writeSummary } from "./summary.ts";
 import { together } from "./together.ts";
 import { timelineText } from "./timeline.ts";
 import { automerge } from "./automerge.ts";
-import { budgetLeft, budgetOf, orchestratorCost, recordSession, sessionsFile, taskCost, usd } from "./cost.ts";
+import { budgetLeft, budgetOf, costText, recordSession, sessionsFile, usd } from "./cost.ts";
 import { restartWorker, resume, stopWorker } from "./stop.ts";
 import { activeLimit, limitLine } from "./limits.ts";
-import { watch, watcherArmed } from "./watch.ts";
+import { watch } from "./watch.ts";
 import { gatherPane, livePane, openPane, renderPane, spendByTask } from "./pane.ts";
 import { addNote, listNotes, loadNotes, newNoteMessage, removedNoteMessage, removeNote, shareNote } from "./notes.ts";
-import { BASELINE_RUNS, baseline, baselineStatus, TEST_MINUTES } from "./baseline.ts";
+import { BASELINE_RUNS, baseline, TEST_MINUTES } from "./baseline.ts";
 import { names, tidy, unstoppableLine } from "./procs.ts";
 
+
+function version(): string {
+  return JSON.parse(readFileSync(join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8")).version;
+}
+
+function serveMcp(): Promise<void> {
+  return serve({ name: SERVER_NAME, version: version(), tools: TOOLS, session: { role: asRole(process.env.FOREMAN_ROLE), task: process.env.FOREMAN_TASK, repo: findRepo() } });
+}
 
 function flags(args: string[]): { positional: string[]; opts: Record<string, string[]> } {
   const positional: string[] = [];
@@ -62,6 +73,8 @@ const onModel = (task: { model?: string }) => (task.model ? `, on ${task.model}`
 
 async function main(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv;
+  // Claude Code starts the server, and anything else on stdout would break its protocol.
+  if (cmd === "mcp") return await serveMcp(), 0;
   const term = terminal();
   const { positional, opts } = flags(rest);
 
@@ -74,7 +87,7 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     case "version":
     case "--version":
-      console.log(JSON.parse(readFileSync(join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8")).version);
+      console.log(version());
       return 0;
     case "doctor": {
       printBanner();
@@ -96,7 +109,7 @@ async function main(argv: string[]): Promise<number> {
       if (existing) return console.log(`${term.name} session ${name} already exists (${existing})`), 0;
       // Claude Code's trust prompt would otherwise swallow the user's first message and exit.
       setTrust(repo.root, true);
-      const session = term.newSession(name, repo.root, orchestratorCommand(orchestratorPlugins(repo), socketPath(repo, "orchestrator"), model));
+      const session = term.newSession(name, repo.root, orchestratorCommand([...orchestratorPlugins(repo), ...mcpArgs("orchestrator")], socketPath(repo, "orchestrator"), model));
       console.log(`Started the orchestrator in ${term.name} session ${name} (${session})${onModel({ model })}`);
       try {
         openPane(repo, term, session);
@@ -270,10 +283,8 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     }
     case "summary": {
-      const path = writeSummary(findRepo());
-      // The orchestrator runs this too, and a pager would wait forever for a q nobody types.
-      if (!process.stdout.isTTY) return console.log(`wrote ${path}`), 0;
-      const md = readFileSync(path, "utf8");
+      if (!process.stdout.isTTY) return console.log(summaryText(findRepo())), 0;
+      const md = readFileSync(writeSummary(findRepo()), "utf8");
       await page(process.env.NO_COLOR ? md : forTerminal(md));
       return 0;
     }
@@ -287,24 +298,9 @@ async function main(argv: string[]): Promise<number> {
     case "timeline":
       console.log(timelineText(findRepo(), positional[0]));
       return 0;
-    case "cost": {
-      const repo = findRepo();
-      const budget = budgetOf(repo);
-      const tasks = loadTasks(repo);
-      const costs = tasks.map((t) => taskCost(repo, t));
-      const orch = orchestratorCost(repo);
-      for (const [i, c] of costs.entries()) {
-        const limit = budget?.tasks?.[c.id] ?? budget?.perTask;
-        const model = tasks[i]!.model;
-        console.log(`${c.id.padEnd(8)} ${usd(c.total).padStart(8)}  worker ${usd(c.worker)}${model ? ` on ${model}` : ""}, reviews ${usd(c.review)}${limit !== undefined ? `, limit ${usd(limit)}` : ""}`);
-      }
-      const total = costs.reduce((s, c) => s + c.total, 0) + orch.usd;
-      console.log(`${"foreman".padEnd(8)} ${usd(orch.usd).padStart(8)}  orchestrator`);
-      console.log(`${"total".padEnd(8)} ${usd(total).padStart(8)}${budget?.plan !== undefined ? `  of ${usd(budget.plan)}` : ""}  at list prices`);
-      const unpriced = [...new Set([...costs.flatMap((c) => c.unpriced), ...orch.unpriced])];
-      if (unpriced.length) console.log(`not counted: ${unpriced.join(", ")} has no price. Add it under "prices" in .foreman/config.json`);
+    case "cost":
+      console.log(costText(findRepo()));
       return 0;
-    }
     case "budget": {
       const repo = findRepo();
       if (!positional.length && !opts.plan) return console.log(budgetOverview(repo, styleFor())), 0;
@@ -361,13 +357,8 @@ async function main(argv: string[]): Promise<number> {
     }
     case "status": {
       const repo = findRepo();
-      const tasks = loadTasks(repo);
-      if (opts.json) return console.log(JSON.stringify(tasks, null, 2)), 0;
-      console.log(statusView(repo, styleFor(), watcherArmed(repo)));
-      const tested = baselineStatus(repo);
-      if (tested) console.log(tested);
-      const asking = waitingLines(loadQuestions(repo), Date.now(), answerMs(repo));
-      if (asking.length) console.log(["", "Questions waiting on you", ...asking.map((l) => `  ${l}`)].join("\n"));
+      if (opts.json) return console.log(JSON.stringify(loadTasks(repo), null, 2)), 0;
+      console.log(statusText(repo, styleFor()));
       return 0;
     }
     case "pane": {

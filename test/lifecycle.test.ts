@@ -139,6 +139,13 @@ describe("models", () => {
   });
 });
 
+test("a worker starts Foreman's MCP server as a worker on its own task", () => {
+  const { task } = spawned();
+  const cmd = workerCommand(task, fakeTerminal(), "go");
+  const config = JSON.parse(cmd[cmd.indexOf("--mcp-config") + 1]!);
+  expect(config.mcpServers.foreman.env).toEqual({ FOREMAN_ROLE: "worker", FOREMAN_TASK: task.id });
+});
+
 test("a worker starts with every installed Telegram plugin turned off, so it can't take the bot from the orchestrator", () => {
   const { task } = spawned();
   const settings = (telegram: string[]) => {
