@@ -1,5 +1,6 @@
 {
   "name": "foreman",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "scripts": {
