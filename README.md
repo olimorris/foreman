@@ -283,12 +283,12 @@ For a macOS app, `screenshots` builds the app instead of starting a server:
 
 ### Your own skills
 
-Foreman can follow your own skills when it reviews work and opens PRs. Put each one in `.foreman/skills/<name>/SKILL.md`, in [Claude Code's skill format](https://code.claude.com/docs/en/skills): frontmatter with a `name` and a `description`, then the instructions. They stay on your machine, since Foreman keeps `.foreman/` out of git.
+Foreman follows your own skills when it builds, reviews and opens PRs. Put each one in `.foreman/skills/<name>/SKILL.md`, in [Claude Code's skill format](https://code.claude.com/docs/en/skills): frontmatter with a `name` and a `description`, then the instructions. They stay on your machine, since Foreman keeps `.foreman/` out of git.
 
+- The orchestrator and every worker load them as `user-skills:<name>`, like any other skill, so workers build by them. Foreman starts each session with a second plugin folder, `.foreman/skills-plugin`, that links back to `.foreman/skills`, so your skills never land in a worktree a worker commits from.
 - The reviewer reads every skill and checks each change against the ones whose description fits reviewing code, like a code-review skill. Breaking one sends the change back to its worker, with the skill named.
 - A skill named `pull-request` shapes the PRs Foreman opens. The reviewer writes the title and description by it, and Foreman adds the intent, assumptions, decisions, screenshots, verdict and risk below. A title that isn't a conventional commit is dropped for the task's own title.
 - A skill named `adr` shapes the decisions Foreman records. The orchestrator writes each one in its format, and in a repo with no ADR folder yet, the new folder takes the skill's title line, status and a README that describes them. An existing ADR folder keeps its own convention.
-- Workers don't see these skills, so they shape the review and the PR, not how workers build.
 
 Foreman names each skill by its folder, so a skill copied in as `.foreman/skills/adr/` is the `adr` skill whatever its frontmatter says. Foreman's own [pull-request skill](.claude/skills/pull-request/SKILL.md) is a working example. Download it and make it yours:
 
@@ -296,4 +296,4 @@ Foreman names each skill by its folder, so a skill copied in as `.foreman/skills
 mkdir -p .foreman/skills/pull-request && curl -fsSL https://raw.githubusercontent.com/olimorris/foreman/main/.claude/skills/pull-request/SKILL.md -o .foreman/skills/pull-request/SKILL.md
 ```
 
-Skills apply from the next review, so add them before a task reports done. Without `.foreman/skills/`, the review and the PR stay as they are.
+The reviewer reads your skills at every review. The orchestrator and workers load them when their session starts, so a skill you add mid-run reaches the workers started or restarted after it. Without `.foreman/skills/`, everything works as before.

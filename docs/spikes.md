@@ -106,3 +106,14 @@ Checked against Homebrew 7.0.16 and Claude Code 2.1.332, by installing a rendere
 - After an upgrade, a running session's hooks run the new version's code, while its agents, skills and prompts stay as they were when it started.
 - A formula can depend on another tap's formula, like `oven-sh/bun/bun`. It can't depend on a cask, so Claude Code is left to `foreman doctor` and the caveats.
 - `brew audit --strict` and `brew test` pass on the formula. `libexec.install` skips dotfiles unless named, so `.claude-plugin` is listed by name.
+
+## The user's skills in worktree sessions
+
+Checked against Claude Code 2.1.332 on a Claude Enterprise login, with a session started like a worker: from a worktree, in auto mode.
+
+- Claude Code loads skills from an MCP server that declares the `io.modelcontextprotocol/skills` extension. A stdio server passed with `--mcp-config` connected over protocol 2026-07-28 through `server/discover`, but its skills never reached the session. The debug log said: "On the Team and Enterprise plans, this app uses the skills of an MCP server that it connects to directly only if managed settings turn them on. Only an administrator can change that." The setting is `disableDirectMcpSkills: false` in managed settings.
+- MCP skills also don't load in `claude -p`, and need a Fable, Opus 4.8, Sonnet 5 or Haiku 5.5 model or later and a direct connection to Anthropic, according to the MCP docs.
+- A second `--plugin-dir` works on any plan. Foreman's is a folder with `.claude-plugin/plugin.json` and a `skills` symlink to `.foreman/skills`. Claude Code follows the link and names each skill `<plugin>:<folder>`, such as `user-skills:adr`, even when the frontmatter's `name` differs.
+- Loading a plugin skill with the Skill tool in auto mode asked nothing, so no `Skill(...)` allow rule is needed.
+- An inline plugin passes a security check when it loads. The debug log showed "judged by cc-plugin-sec-default: admitted".
+- The session's skill watcher listed only the user and project skill folders, so expect a skill added mid-run to reach only sessions started after it.

@@ -10,7 +10,7 @@ description: Adjudicate Foreman decision proposals, record accepted decisions as
 1. Run `foreman adr detect`. It reads the base branch, not the user's checkout, and saves the convention to `.foreman/config.json`: folder, numbering, title line, status field, superseded handling, README and template. Show the user the result in two lines and ask them to confirm it.
 2. If it finds no ADR folder, ask the user whether to start one in `docs/decisions`. Only on a yes, run `foreman adr init`. The folder and its README arrive with the first decisions PR. When the user has an `adr` skill in `.foreman/skills/adr/SKILL.md`, the new folder takes its title line and status style, and its README describes that format.
 3. If the convention's README or template has writing rules, read them now. Every record you accept must follow them.
-4. If `.foreman/skills/adr/SKILL.md` exists, load it now. It's the user's format for every record you accept. Where it disagrees with an existing ADR folder, the folder's convention wins.
+4. If the `user-skills:adr` skill is listed, load it now. It's the user's format for every record you accept. Where it disagrees with an existing ADR folder, the folder's convention wins.
 
 ## Adjudicate a proposal
 
