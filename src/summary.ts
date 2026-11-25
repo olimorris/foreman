@@ -5,16 +5,18 @@ import { lastDone, type TaskEvent } from "./events.ts";
 import { loadDecisions, type Decision } from "./ledger.ts";
 import type { Repo } from "./paths.ts";
 import { loadPlan, type Plan } from "./plan.ts";
+import { loadQuestions, type Question } from "./questions.ts";
 import { latestVerdict, type Verdict } from "./review.ts";
 import { loadTasks, type Task } from "./state.ts";
 import { run } from "./exec.ts";
 import { loadTogether, renderTogether, staleness, type Together } from "./together.ts";
 
 export type Ready = { task: Task; title: string; verdict?: Verdict; done?: TaskEvent; blocks: string[] };
+export type Away = { question: Question; decision?: Decision };
 export type Unfinished = { id: string; title: string; reason: string };
 export type SummaryInput = {
   title: string; ready: Ready[]; merged: string[]; unfinished: Unfinished[];
-  calls: string[]; cut: string[]; open: Decision[]; spent: number; limit?: number;
+  calls: string[]; away: Away[]; asking: Question[]; cut: string[]; open: Decision[]; spent: number; limit?: number;
   together?: { result: Together; stale: string[] };
 };
 
@@ -65,10 +67,22 @@ export function renderSummary(s: SummaryInput): string {
     ...(s.merged.length ? ["## Already merged", "", list(s.merged), ""] : []),
     ...(s.unfinished.length ? ["## Not finished", "", ...s.unfinished.map((u) => `- **${u.title}** (${u.id}): ${u.reason}`), ""] : []),
     ...(s.calls.length ? ["## Calls Foreman made for you", "", ...s.calls.map((c) => `- ${c}`), ""] : []),
-    ...(s.open.length || s.cut.length
-      ? ["## Still open", "", ...s.open.map((d) => `- ${d.id}: ${d.title}. Proposed by ${d.by} and not decided yet.`), ...s.cut.map((c) => `- Cut: ${c}`), ""]
+    ...(s.away.length ? ["## Calls Foreman made while you were away", "", ...s.away.map(awayCall), ""] : []),
+    ...(s.open.length || s.asking.length || s.cut.length
+      ? [
+        "## Still open", "",
+        ...s.asking.map((q) => `- ${q.id}${q.task ? ` (${q.task})` : ""}: ${q.question} Waiting for your answer.`),
+        ...s.open.map((d) => `- ${d.id}: ${d.title}. Proposed by ${d.by} and not decided yet.`),
+        ...s.cut.map((c) => `- Cut: ${c}`), "",
+      ]
       : []),
   ].join("\n");
+}
+
+function awayCall({ question: q, decision: d }: Away): string {
+  const undo = !d ? "" : d.status === "accepted" ? ` This accepted ${d.id}. To undo it, tell Foreman to overrule ${d.id}.` : ` This rejected ${d.id}. To undo it, tell Foreman to propose it again.`;
+  const late = q.userAnswer ? ` You answered later: "${q.userAnswer}".` : "";
+  return `- ${q.task ? `${q.task}: ` : ""}${q.question} Foreman went with: ${q.call.replace(/\.$/, "")}.${undo}${late}`;
 }
 
 const UNFINISHED: Record<string, string> = {
@@ -96,10 +110,17 @@ export function gather(repo: Repo, plan: Plan | undefined): SummaryInput {
   const result = loadTogether(repo);
   const prs = tasks.filter(hasOpenPr)
     .map((t) => ({ id: t.id, pr: t.pr!, branch: t.branch, sha: run(["git", "-C", repo.root, "rev-parse", "--verify", "-q", t.branch]).stdout.trim() }));
+  const decisions = loadDecisions(repo);
+  const questions = loadQuestions(repo);
   const spent = tasks.reduce((sum, t) => sum + taskCost(repo, t).total, 0) + orchestratorCost(repo).usd;
   return {
     title: plan?.title ?? "Foreman tasks", ready, merged, unfinished, calls: plan?.calls ?? [], cut: plan?.cut ?? [],
-    open: loadDecisions(repo).filter((d) => d.status === "proposed"), spent, limit: budgetOf(repo).plan,
+    // A question about a decision already shows as that open decision.
+    asking: questions.filter((q) => !q.answeredAt && !q.decision),
+    // An overruled decision is the user's answer now, so it's no longer a call to check.
+    away: questions.filter((q) => q.by === "foreman").map((q) => ({ question: q, decision: decisions.find((d) => d.id === q.decision) }))
+      .filter((a) => !(a.decision?.status === "rejected" && a.decision.decidedBy)),
+    open: decisions.filter((d) => d.status === "proposed"), spent, limit: budgetOf(repo).plan,
     ...(result && prs.length ? { together: { result, stale: staleness(result, prs) } } : {}),
   };
 }

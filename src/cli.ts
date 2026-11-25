@@ -9,7 +9,8 @@ import { printBanner } from "./banner.ts";
 import { helpText, usageError, UsageError } from "./help.ts";
 import { statusView } from "./status.ts";
 import { styleFor } from "./style.ts";
-import { loadDecisions, propose } from "./ledger.ts";
+import { findDecision, loadDecisions, propose } from "./ledger.ts";
+import { answer, answerMs, ask, loadQuestions, waitingLines } from "./questions.ts";
 import { baseRef, snapshot } from "./snapshot.ts";
 import { runReview, sendFeedback, startReview } from "./review.ts";
 import { capture, parseScreens } from "./shots.ts";
@@ -45,7 +46,7 @@ function flags(args: string[]): { positional: string[]; opts: Record<string, str
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!;
     if (!a.startsWith("--")) positional.push(a);
-    else if (["--json", "--discard", "--all", "--dry-run", "--no-push", "--once", "--live"].includes(a)) opts[a.slice(2)] = ["true"];
+    else if (["--json", "--discard", "--all", "--dry-run", "--no-push", "--once", "--live", "--by-foreman"].includes(a)) opts[a.slice(2)] = ["true"];
     else (opts[a.slice(2)] ??= []).push(args[++i] ?? "");
   }
   return { positional, opts };
@@ -161,10 +162,31 @@ async function main(argv: string[]): Promise<number> {
       console.log(`rejected ${id}. Told: ${r.sent.join(", ") || "nobody"}`);
       return 0;
     }
+    case "ask": {
+      const repo = findRepo();
+      if (process.env.FOREMAN_TASK) throw new Error("only the orchestrator records questions. Report needs-decision instead");
+      if (!positional.length || !opts.call?.[0]) throw usageError("ask");
+      const decision = opts.decision?.[0];
+      const proposer = decision ? findDecision(repo, decision).by : undefined;
+      const task = opts.task?.[0] ?? (proposer !== "orchestrator" ? proposer : undefined);
+      if (task) findTask(repo, task);
+      const q = ask(repo, { question: positional.join(" "), call: opts.call[0], ...(task ? { task } : {}), ...(decision ? { decision } : {}) });
+      const minutes = answerMs(repo) / 60_000;
+      console.log(`recorded ${q.id}. Ask the user in your own words. ${minutes ? `If they don't answer within ${minutes} min, the watcher wakes you to go ahead with your call` : "answerMinutes is 0, so it waits for the user"}`);
+      return 0;
+    }
+    case "answer": {
+      const repo = findRepo();
+      const [id, ...words] = positional;
+      if (!id || (!words.length && !opts["by-foreman"])) throw usageError("answer");
+      const q = answer(repo, id, opts["by-foreman"] ? { byForeman: true } : { answer: words.join(" ") });
+      console.log(q.by === "foreman" ? `recorded that Foreman went ahead with ${id}. It shows in the run summary so the user can check it` : `recorded the user's answer to ${id}`);
+      return 0;
+    }
     case "decisions": {
       const repo = findRepo();
       const ds = loadDecisions(repo).filter((d) => opts.all || d.status === "proposed" || (d.status === "accepted" && !d.adr));
-      for (const d of ds) console.log(`${d.id.padEnd(6)} ${d.status.padEnd(9)} ${d.by.padEnd(12)} ${d.title}`);
+      for (const d of ds) console.log(`${d.id.padEnd(6)} ${d.status.padEnd(9)} ${d.by.padEnd(12)} ${d.title}${d.decidedBy ? " (decided by Foreman)" : ""}`);
       if (!ds.length) console.log("no open decisions");
       return 0;
     }
@@ -326,6 +348,8 @@ async function main(argv: string[]): Promise<number> {
       console.log(statusView(repo, styleFor(), watcherArmed(repo)));
       const tested = baselineStatus(repo);
       if (tested) console.log(tested);
+      const asking = waitingLines(loadQuestions(repo), Date.now(), answerMs(repo));
+      if (asking.length) console.log(["", "Questions waiting on you", ...asking.map((l) => `  ${l}`)].join("\n"));
       return 0;
     }
     case "pane": {
