@@ -19,7 +19,7 @@ import { areaLock, sessionStartContext, stopHook, type HookInput, type LockConte
 import { defaultBase, findRepo, pluginArgs, socketPath, type Repo } from "./paths.ts";
 import { terminal } from "./integrations/index.ts";
 import { requireSession } from "./terminal.ts";
-import { sendToTask } from "./send.ts";
+import { notifyOrchestrator, sendToTask } from "./send.ts";
 import { ensureForeman, plainTitle, spawn } from "./spawn.ts";
 import { budgetOverview, byActivity, statusLabel, table, taskTitle } from "./overview.ts";
 import { findTask, inFlight, loadTasks, updateTask } from "./state.ts";
@@ -33,6 +33,8 @@ import { budgetLeft, budgetOf, orchestratorCost, recordSession, sessionsFile, ta
 import { restartWorker, resume, stopWorker } from "./stop.ts";
 import { watch, watcherArmed } from "./watch.ts";
 import { gatherPane, livePane, openPane, renderPane, spendByTask } from "./pane.ts";
+import { addNote, listNotes, loadNotes, newNoteMessage, removedNoteMessage, removeNote, shareNote } from "./notes.ts";
+import { BASELINE_RUNS, baseline, baselineStatus, TEST_MINUTES } from "./baseline.ts";
 
 
 function flags(args: string[]): { positional: string[]; opts: Record<string, string[]> } {
@@ -306,6 +308,8 @@ async function main(argv: string[]): Promise<number> {
       const tasks = loadTasks(repo);
       if (opts.json) return console.log(JSON.stringify(tasks, null, 2)), 0;
       console.log(statusView(repo, styleFor(), watcherArmed(repo)));
+      const tested = baselineStatus(repo);
+      if (tested) console.log(tested);
       return 0;
     }
     case "pane": {
@@ -324,6 +328,44 @@ async function main(argv: string[]): Promise<number> {
       const r = teardown(findRepo(), id, !!opts.discard, term);
       console.log(r.message);
       return r.removed ? 0 : 3;
+    }
+    case "note": {
+      const repo = findRepo();
+      const by = process.env.FOREMAN_TASK ?? "orchestrator";
+      ensureForeman(repo);
+      const told = (s: { sent: string[]; failed: string[] }) => `Told: ${s.sent.join(", ") || "nobody"}${s.failed.length ? `. Couldn't reach: ${s.failed.join(", ")}` : ""}`;
+      if (opts.remove) {
+        const note = removeNote(repo, Number(opts.remove[0]));
+        console.log(`removed note ${opts.remove[0]}: ${note.text}. ${told(shareNote(repo, removedNoteMessage(note), by, term))}`);
+        return 0;
+      }
+      if (!positional.length) throw usageError("note");
+      const note = addNote(repo, positional.join(" "), by);
+      if (!note) return console.log("that note is already there"), 0;
+      console.log(`added note ${loadNotes(repo).length}. ${told(shareNote(repo, newNoteMessage(repo, note), by, term))}`);
+      return 0;
+    }
+    case "notes": {
+      const notes = loadNotes(findRepo());
+      console.log(notes.length ? listNotes(notes).join("\n") : 'no notes yet. Add one with foreman note "<fact>"');
+      return 0;
+    }
+    case "baseline": {
+      const repo = findRepo();
+      const runs = Number(opts.runs?.[0] ?? BASELINE_RUNS);
+      if (!Number.isInteger(runs) || runs < 1) throw usageError("baseline");
+      ensureForeman(repo);
+      if (opts.test?.[0]) saveConfig(repo, { test: opts.test[0] });
+      const config = loadConfig(repo);
+      if (!config.test) throw new Error('no test command in .foreman/config.json. Save one with foreman baseline --test "<command>"');
+      try {
+        console.log((await baseline(repo, { base: defaultBase(repo), command: config.test, minutes: config.testMinutes ?? TEST_MINUTES, runs, term })).line);
+      } catch (err) {
+        // It runs in the background, so a failure nobody is told about would look like a baseline still going.
+        notifyOrchestrator(repo, `[foreman baseline] failed: ${err instanceof Error ? err.message : err}`);
+        throw err;
+      }
+      return 0;
     }
     case "hook":
       return hook(positional[0]);

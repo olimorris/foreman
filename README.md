@@ -154,6 +154,21 @@ A worker that waits on a hung command, such as a test run that deadlocks, can si
 
 `foreman restart T3` restarts a worker by hand.
 
+### Notes
+
+Some problems belong to the repo, not to a task: a test that deadlocks with `-j 3`, or one that fails one run in three. Without notes, every worker finds them on its own. Notes record these known problems, and any other fact about the setup that every worker should know. They stay in `.foreman/` and never reach the repo.
+
+- A worker that gets past a hang or a failure that isn't its own adds a note. The orchestrator does the same when it gets a worker unstuck.
+- Each new note goes straight to every running worker, and every new brief lists them.
+- When a plan starts, `foreman baseline` runs the repo's tests twice on the base branch, alongside the first workers. It notes a run that hangs, tests that fail every time, and tests that only fail sometimes.
+
+```sh
+foreman notes                   # every note, numbered
+foreman note "swift test -j 3 deadlocks on main, use -j 1"
+foreman note --remove 2         # remove a note that turned out wrong
+foreman baseline --runs 3       # run the tests on the base branch again
+```
+
 ### Settings
 
 `.foreman/config.json` also takes:
@@ -161,4 +176,6 @@ A worker that waits on a hung command, such as a test run that deadlocks, can si
 - `maxWorkers`: how many workers run at once (default 3)
 - `stallMinutes`: how long a worker can go without replying before Foreman nudges it (default 20)
 - `stackTasks`: `false` makes a task wait for its dependency to merge, instead of starting on top of its approved PR (default `true`)
+- `test`: the command that runs the repo's tests, like `swift test`. Foreman works it out when it plans the work
+- `testMinutes`: how long one test run can take before Foreman stops it as hung (default 15)
 - `prScreenshots`: `"local"` keeps screenshots on your machine and lists their paths in the PR. `"branch"` pushes them to a `foreman-screenshots` branch so they show in the PR on GitHub

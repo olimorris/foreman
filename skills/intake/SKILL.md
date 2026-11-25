@@ -12,6 +12,7 @@ The user gives you a backlog (a list, a file or an issue query) and usually a de
 - Read every backlog item in full. Quote the user's own words for each one, because they become that task's Intent.
 - Look at the code the items touch, enough to name the files each task changes. Don't design the solutions yet.
 - Read the decisions index (`.foreman/decisions/index.md`, or run `foreman adr index`) and `CONTEXT.md` when there is one.
+- If `.foreman/config.json` has no `test`, work out the command that runs the repo's tests from `package.json`, `Package.swift`, a `Makefile` or the CI config. It runs in a fresh checkout, so include any install step, like `bun install && bun test`. You save it in step 5.
 
 ## 2. Ask only what changes the plan
 
@@ -80,8 +81,10 @@ Leave out `Calls:` or `Cut:` when there are none. Both appear again in the run s
 
    > 6 tasks, one per item. Tags land first because the tag filter builds on them. Calls: search runs on Enter, and the footer counts all notes. Full plan in `.foreman/plan.md`. Start?
 3. Decide whether the plan needs the user's approval:
-   - **Start straight away** when every task maps to one backlog item, nothing is cut and there are no open decisions. Run `foreman plan approve`, `foreman next`, and arm the watcher. Then send the summary, ending with "Started. Tell me to stop or change anything." instead of "Start?".
-   - **Wait for approval** when there's anything else: a split, merge or contract task, a cut, or an open decision. When they approve, run the same three steps.
+   - **Start straight away** when every task maps to one backlog item, nothing is cut and there are no open decisions. Run `foreman plan approve` and `foreman next`, start the baseline, and arm the watcher. Then send the summary, ending with "Started. Tell me to stop or change anything." instead of "Start?".
+   - **Wait for approval** when there's anything else: a split, merge or contract task, a cut, or an open decision. When they approve, run the same steps.
+
+Start the baseline as a background command, like the watcher: `foreman baseline`, or `foreman baseline --test "<command>"` the first time, which saves the command you worked out. It runs the tests on the base branch while the workers start, and doesn't hold them up. Anything it finds reaches them as a note.
 
 If they ask for changes, edit `plan.md` and run `foreman plan .foreman/plan.md` again. That clears the approval, so ask again.
 
