@@ -43,6 +43,7 @@ export const GROUPS: Group[] = [
       { usage: "budget <usd>", about: "Set the limit for every task" },
       { usage: "budget <task> <usd>", about: "Set the limit for one task" },
       { usage: "budget --plan <usd>", about: "Set the limit for the whole plan" },
+      { usage: "budget reset", about: "Start the plan's count again at $0" },
       { usage: "cost", about: "Spend split into workers and reviews" },
     ],
   },

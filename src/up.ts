@@ -37,14 +37,8 @@ export function orchestratorPlugins(repo: Repo): string[] {
   return [...pluginArgs(), ...skillsPluginArgs(repo)];
 }
 
-// pane is a command for people, which the orchestrator runs only when the user asks for the status pane back.
-const STILL_ON_THE_CLI = ["pane"];
-
 export function orchestratorAllowedTools(tools: Tool[] = TOOLS): string[] {
-  return [
-    ...toolsFor(tools, "orchestrator").map((t) => `mcp__${SERVER_NAME}__${t.name}`),
-    ...STILL_ON_THE_CLI.map((cmd) => `Bash(foreman ${cmd} *)`),
-  ];
+  return toolsFor(tools, "orchestrator").map((t) => `mcp__${SERVER_NAME}__${t.name}`);
 }
 
 // claude --resume with an id it has no transcript for exits at once, which would leave the user an empty tab.
@@ -61,6 +55,8 @@ export function orchestratorCommand(plugin: string[], socket: string, model?: st
     "--agent", "foreman:orchestrator",
     ...(model ? ["--model", model] : []),
     "--allowedTools", ...orchestratorAllowedTools(),
+    // The CLI is the user's, such as foreman budget reset, so the orchestrator can't raise its own spending room.
+    "--disallowedTools", "Bash(foreman *)",
     // Messages from Telegram only reach a session started with --channels, and only one copy of the plugin may load, since each kills the other's bot.
     ...(channel ? [
       "--channels", `plugin:${channel}`,

@@ -148,6 +148,14 @@ foreman budget
 
 By default, each task can spend $5 and the plan $40. Change these in [Settings](#gear-settings). When a task goes over, Foreman stops its worker and asks whether to raise the limit.
 
+The plan's spend counts the tasks in the current plan, any task spawned while it runs, and the orchestrator from when you approved the plan. Tasks from earlier plans don't count. To start the plan's count again at $0 without changing the plan or any limit, run:
+
+```sh
+foreman budget reset
+```
+
+Only you can run this. Claude Code blocks the orchestrator from running the `foreman` CLI.
+
 On a Pro, Max or other Claude subscription, these amounts measure work done at list prices, not what you pay. Your usage limit is what stops work. When you hit it, Foreman pauses every worker, starts nothing new and holds reviews until the limit resets. Then it picks each worker up where it left off. `foreman status` shows when the limit resets.
 
 ### Permissions

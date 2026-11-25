@@ -4,8 +4,9 @@ import { dirname, join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { loadConfig } from "./config.ts";
 import type { Repo } from "./paths.ts";
+import { loadPlan, planPath, type Plan } from "./plan.ts";
 import { roundDir } from "./review.ts";
-import { loadTasks, type Task } from "./state.ts";
+import { loadTasks, writeJson, type Task } from "./state.ts";
 
 // Dollars per million tokens at list price; other models go in config.json's "prices". Cache writes cost 1.25x input for 5 minutes and 2x for an hour.
 export type Price = { input: number; output: number; cacheRead: number };
@@ -59,13 +60,15 @@ export function recordSession(file: string, id: string): void {
 export const loadSessions = (file: string) => (existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean) : []);
 
 // Claude Code writes one line per content block, each repeating the reply's usage, so replies are counted once by id.
-export function transcriptSpend(dir: string, sessions: string[], overrides: Record<string, Price> = {}): Spend {
+export function transcriptSpend(dir: string, sessions: string[], overrides: Record<string, Price> = {}, since?: number): Spend {
   const replies = new Map<string, { model: string; usage: Usage }>();
   for (const file of jsonlFiles(dir).filter((f) => sessions.some((s) => f.includes(s)))) {
     for (const line of readFileSync(file, "utf8").split("\n")) {
       if (!line.includes('"usage"')) continue;
       try {
-        const m = JSON.parse(line).message;
+        const entry = JSON.parse(line);
+        if (since !== undefined && !(Date.parse(entry.timestamp) >= since)) continue;
+        const m = entry.message;
         if (m?.id && m.usage && m.model) replies.set(m.id, { model: m.model, usage: m.usage });
       } catch {}
     }
@@ -79,11 +82,14 @@ export function transcriptSpend(dir: string, sessions: string[], overrides: Reco
   return spend;
 }
 
-export function reviewSpend(repo: Repo, task: Task): number {
+// The reviewer writes reviewer.json once it finishes, so its time is when the round's spend landed.
+export function reviewSpend(repo: Repo, task: Task, since?: number): number {
   let usd = 0;
   for (let r = 1; r <= (task.reviews ?? 0); r++) {
     try {
-      usd += JSON.parse(readFileSync(join(roundDir(repo, task.id, r), "reviewer.json"), "utf8")).total_cost_usd ?? 0;
+      const file = join(roundDir(repo, task.id, r), "reviewer.json");
+      if (since !== undefined && statSync(file).mtimeMs < since) continue;
+      usd += JSON.parse(readFileSync(file, "utf8")).total_cost_usd ?? 0;
     } catch {}
   }
   return usd;
@@ -91,9 +97,9 @@ export function reviewSpend(repo: Repo, task: Task): number {
 
 export type TaskCost = { id: string; worker: number; review: number; total: number; unpriced: string[] };
 
-export function taskCost(repo: Repo, task: Task): TaskCost {
-  const worker = transcriptSpend(transcriptDir(task.worktree), loadSessions(sessionsFile(repo, task.id)), loadConfig(repo).prices);
-  const review = reviewSpend(repo, task);
+export function taskCost(repo: Repo, task: Task, since?: number): TaskCost {
+  const worker = transcriptSpend(transcriptDir(task.worktree), loadSessions(sessionsFile(repo, task.id)), loadConfig(repo).prices, since);
+  const review = reviewSpend(repo, task, since);
   return { id: task.id, worker: worker.usd, review, total: worker.usd + review, unpriced: worker.unpriced };
 }
 
@@ -161,8 +167,8 @@ export function lastReplyAt(file: string): number | undefined {
   return undefined;
 }
 
-export function orchestratorCost(repo: Repo): Spend {
-  return transcriptSpend(transcriptDir(repo.root), loadSessions(sessionsFile(repo)), loadConfig(repo).prices);
+export function orchestratorCost(repo: Repo, since?: number): Spend {
+  return transcriptSpend(transcriptDir(repo.root), loadSessions(sessionsFile(repo)), loadConfig(repo).prices, since);
 }
 
 export const usd = (n: number) => `$${n.toFixed(2)}`;
@@ -174,7 +180,7 @@ export const budgetOf = (repo: Repo): Budget => ({ ...DEFAULT_BUDGET, ...loadCon
 
 export const taskLimit = (b: Budget | undefined, id: string) => b?.tasks?.[id] ?? b?.perTask;
 
-// Alerts fire once per limit, so a raised limit can alert again, but stop lists every task over its limit on every pass.
+// Alerts fire once per limit, so a raised limit can alert again, and so can a plan that a reset brought back under its limit. Stop lists every task over its limit on every pass.
 export function overBudget(costs: TaskCost[], planTotal: number, budget: Budget | undefined, alerted: Record<string, number>): { reasons: string[]; alerted: Record<string, number>; stop: string[] } {
   const next = { ...alerted };
   const reasons: string[] = [];
@@ -194,19 +200,53 @@ export function overBudget(costs: TaskCost[], planTotal: number, budget: Budget 
       reasons.push(`over-budget plan: ${usd(planTotal)} of ${usd(budget.plan)}`);
       next["plan"] = budget.plan;
     }
-  }
+  } else delete next["plan"];
   return { reasons, alerted: next, stop };
 }
 
-export function planSpend(repo: Repo, tasks: Task[]): number {
-  return tasks.reduce((sum, t) => sum + taskCost(repo, t).total, 0) + orchestratorCost(repo).usd;
+// Tasks spawned outside the plan join it while it runs, and a draft plan counts nothing until it's approved. With no plan at all, everything counts.
+export type PlanCount = { since?: number; resetAt?: number; counts: (t: Task) => boolean };
+
+export function planCount(plan: Plan | undefined): PlanCount {
+  if (!plan) return { counts: () => true };
+  const ids = new Set(plan.tasks.map((t) => t.id));
+  const start = Date.parse(plan.startedAt ?? plan.approvedAt ?? "");
+  const reset = Date.parse(plan.budgetResetAt ?? "");
+  const resetAt = Number.isNaN(reset) ? undefined : reset;
+  if (Number.isNaN(start)) return { since: Infinity, resetAt, counts: (t) => ids.has(t.id) };
+  return { since: Math.max(start, resetAt ?? start), resetAt, counts: (t) => ids.has(t.id) || Date.parse(t.createdAt) >= start };
+}
+
+export type PlanSpend = { usd: number; tasks: TaskCost[]; orchestrator: Spend } & PlanCount;
+
+export function planSpending(repo: Repo, tasks: Task[]): PlanSpend {
+  const count = planCount(loadPlan(repo));
+  const costs = tasks.filter(count.counts).map((t) => taskCost(repo, t, count.since));
+  const orchestrator = orchestratorCost(repo, count.since);
+  return { ...count, usd: costs.reduce((sum, c) => sum + c.total, 0) + orchestrator.usd, tasks: costs, orchestrator };
+}
+
+export const planSpend = (repo: Repo, tasks: Task[]): number => planSpending(repo, tasks).usd;
+
+// Stored on the plan, so the next plan starts its own count without one.
+export function resetBudget(repo: Repo, now = new Date()): string[] {
+  const plan = loadPlan(repo);
+  if (!plan) throw new Error("no plan. foreman budget reset starts the current plan's count again, and the orchestrator stores a plan with the plan tool");
+  writeJson(planPath(repo), { ...plan, budgetResetAt: now.toISOString() });
+  const budget = budgetOf(repo);
+  const tasks = loadTasks(repo);
+  const resumable = tasks.filter((t) => t.status === "over-budget" && !budgetLeft(repo, tasks, t.id).reason).map((t) => t.id);
+  return [
+    `The plan's count starts again at $0.00 from now. ${budget.plan !== undefined ? `Its ${usd(budget.plan)} limit and every task's limit stay as they are.` : "Every task's limit stays as it is."}`,
+    ...(resumable.length ? [`${resumable.join(", ")} stopped because the plan ran over. Ask the orchestrator to resume ${resumable.length === 1 ? "it" : "them"}.`] : []),
+  ];
 }
 
 export function budgetLeft(repo: Repo, tasks: Task[], id?: string): { usd?: number; reason?: string } {
   const budget = budgetOf(repo);
   const spent = planSpend(repo, tasks);
   if (budget.plan !== undefined && spent >= budget.plan) {
-    return { usd: 0, reason: `the plan has spent ${usd(spent)} of its ${usd(budget.plan)} budget. Ask the user whether to raise it, then call set_budget` };
+    return { usd: 0, reason: `the plan has spent ${usd(spent)} of its ${usd(budget.plan)} budget. Ask the user whether to raise it, then call set_budget. The user can also start the plan's count again with foreman budget reset` };
   }
   const planLeft = budget.plan === undefined ? undefined : budget.plan - spent;
   const task = id ? tasks.find((t) => t.id === id) : undefined;
@@ -228,9 +268,19 @@ export function costText(repo: Repo): string {
     return `${c.id.padEnd(8)} ${usd(c.total).padStart(8)}  worker ${usd(c.worker)}${model ? ` on ${model}` : ""}, reviews ${usd(c.review)}${limit !== undefined ? `, limit ${usd(limit)}` : ""}`;
   });
   const total = costs.reduce((s, c) => s + c.total, 0) + orch.usd;
+  const plan = planSpending(repo, tasks);
   lines.push(`${"foreman".padEnd(8)} ${usd(orch.usd).padStart(8)}  orchestrator`);
-  lines.push(`${"total".padEnd(8)} ${usd(total).padStart(8)}${budget.plan !== undefined ? `  of ${usd(budget.plan)}` : ""}  at list prices`);
+  lines.push(`${"total".padEnd(8)} ${usd(total).padStart(8)}  at list prices`);
+  lines.push(`${"plan".padEnd(8)} ${usd(plan.usd).padStart(8)}${budget.plan !== undefined ? `  of ${usd(budget.plan)}` : ""}  ${countedText(plan)}`);
   const unpriced = [...new Set([...costs.flatMap((c) => c.unpriced), ...orch.unpriced])];
   if (unpriced.length) lines.push(`not counted: ${unpriced.join(", ")} has no price. Add it under "prices" in .foreman/config.json`);
   return lines.join("\n");
+}
+
+export const when = (ms: number) => new Date(ms).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+
+export function countedText(count: PlanCount): string {
+  if (count.since === undefined) return "counting every task, since there's no plan";
+  if (count.since === Infinity) return "counting from when the plan is approved";
+  return count.since === count.resetAt ? `counted since foreman budget reset on ${when(count.since)}` : `counted since the plan was approved on ${when(count.since)}`;
 }

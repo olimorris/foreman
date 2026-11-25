@@ -89,7 +89,8 @@ function planTool(repo: Repo, args: Args): string {
   if (args.approve) {
     const p = loadPlan(repo);
     if (!p) throw new Error("no plan to approve. Store one with the plan tool and its text first");
-    savePlan(repo, { ...p, approvedAt: new Date().toISOString() });
+    const now = new Date().toISOString();
+    savePlan(repo, { ...p, approvedAt: now, startedAt: p.startedAt ?? now });
     return `approved: ${p.title}. Call next to start the first tasks`;
   }
   const whole = text(args, "text");
@@ -111,9 +112,10 @@ function planTool(repo: Repo, args: Args): string {
   const p = parsePlan(md!);
   const errors = validatePlan(p);
   if (errors.length) throw new Error(lines(errors.map((e) => `problem: ${e}`)));
-  // A change keeps the run's worker limit and automerge, which a whole new plan starts without.
+  // A change keeps the run's worker limit, automerge and budget count, which a whole new plan starts without.
   const before = changed ? loadPlan(repo) : undefined;
-  savePlan(repo, { ...p, ...(before?.maxWorkers !== undefined ? { maxWorkers: before.maxWorkers } : {}), ...(before?.automerge !== undefined ? { automerge: before.automerge } : {}) });
+  const kept = (["maxWorkers", "automerge", "startedAt", "budgetResetAt"] as const).filter((k) => before?.[k] !== undefined).map((k) => [k, before![k]]);
+  savePlan(repo, { ...p, ...Object.fromEntries(kept) });
   return `${describePlan(p, loadConfig(repo).workerModel)}\nSaved as a draft in .foreman/plan.md. Show the user, and once they approve call plan with approve`;
 }
 
