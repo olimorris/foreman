@@ -75,16 +75,18 @@ test("a hit the caller saw itself is waited out even when no wait is saved", asy
   expect(now).toBeGreaterThanOrEqual(at("14:31"));
 });
 
+const waitingNow = () => wait({ since: Date.now(), resetsAt: Date.now() + 60 * 60_000 });
+
 test("foreman resume refuses while the account waits, since the watcher resumes the task at the reset", () => {
   const repo = tempRepo();
   withTasks(repo, (ts) => ts.push({ id: "T1", status: "limited", branch: "foreman/T1", base: "main", worktree: repo.root, owns: [], socket: "", createdAt: "" }));
-  saveLimit(repo, wait());
+  saveLimit(repo, waitingNow());
   expect(() => resume(repo, "T1", fakeTerminal(false), "session:1")).toThrow(/waiting for its usage limit to reset at .*, and the watcher resumes T1 then/);
 });
 
 test("foreman spawn and foreman next start nothing while the account waits", () => {
   const repo = tempRepo();
-  saveLimit(repo, wait());
+  saveLimit(repo, waitingNow());
   const cli = join(import.meta.dir, "..", "src", "cli.ts");
   const brief = join(mkdtempSync(join(tmpdir(), "foreman-brief-")), "brief.md");
   writeFileSync(brief, "## Intent\n\nx\n");
