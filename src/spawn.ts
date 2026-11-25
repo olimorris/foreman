@@ -4,7 +4,8 @@ import { must } from "./exec.ts";
 import { baseRef } from "./snapshot.ts";
 import { loadConfig, neverRules, telegramPlugins, withoutTelegram } from "./config.ts";
 import { findContext, writeIndex } from "./decisions.ts";
-import { pluginArgs, socketPath, taskDir, worktreeDir, type Repo } from "./paths.ts";
+import { findRepo, pluginArgs, socketPath, taskDir, worktreeDir, type Repo } from "./paths.ts";
+import { skillsPluginArgs } from "./skills.ts";
 import type { Terminal } from "./terminal.ts";
 import { CONVENTIONAL } from "./plan.ts";
 import { briefNotes } from "./notes.ts";
@@ -78,11 +79,11 @@ export function spawn(repo: Repo, opts: SpawnOptions, term: Terminal): Task {
   return task;
 }
 
-export function workerCommand(task: Task, term: Terminal, prompt: string, resume?: string, telegram = telegramPlugins()): string[] {
+export function workerCommand(task: Task, term: Terminal, prompt: string, resume?: string, telegram = telegramPlugins(), skills = skillsPluginArgs(findRepo(task.worktree))): string[] {
   return [
     // Without the terminal's session ids, a user hook that names "your session" can't rename the orchestrator's session from a worker.
     "env", ...term.sessionEnv.flatMap((v) => ["-u", v]), "FOREMAN_ROLE=worker", `FOREMAN_TASK=${task.id}`,
-    "claude", ...pluginArgs(),
+    "claude", ...pluginArgs(), ...skills,
     "--agent", "foreman:worker",
     ...(task.model ? ["--model", task.model] : []),
     "--permission-mode", "auto",

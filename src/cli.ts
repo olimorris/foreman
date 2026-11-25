@@ -19,14 +19,14 @@ import { join } from "node:path";
 import { appendEvent, logRun, REPORT_TYPES, type ReportType } from "./events.ts";
 import { areaLock, hookWho, recordHookBlock, sessionStartContext, stopHook, type HookInput, type LockContext } from "./hooks.ts";
 import { blockSummary, unblock } from "./permissions.ts";
-import { defaultBase, findRepo, pluginArgs, pluginRoot, socketPath, type Repo } from "./paths.ts";
+import { defaultBase, findRepo, pluginRoot, socketPath, type Repo } from "./paths.ts";
 import { terminal } from "./integrations/index.ts";
 import { requireSession } from "./terminal.ts";
 import { notifyOrchestrator, sendToTask } from "./send.ts";
 import { ensureForeman, plainTitle, spawn } from "./spawn.ts";
 import { budgetOverview, byActivity, statusLabel, table, taskTitle } from "./overview.ts";
 import { findTask, inFlight, loadTasks, updateTask } from "./state.ts";
-import { orchestratorCommand, orchestratorModel } from "./up.ts";
+import { orchestratorCommand, orchestratorModel, orchestratorPlugins } from "./up.ts";
 import { teardown } from "./teardown.ts";
 import { setTrust } from "./trust.ts";
 import { deliver } from "./deliver.ts";
@@ -96,7 +96,7 @@ async function main(argv: string[]): Promise<number> {
       if (existing) return console.log(`${term.name} session ${name} already exists (${existing})`), 0;
       // Claude Code's trust prompt would otherwise swallow the user's first message and exit.
       setTrust(repo.root, true);
-      const session = term.newSession(name, repo.root, orchestratorCommand(pluginArgs(), socketPath(repo, "orchestrator"), model));
+      const session = term.newSession(name, repo.root, orchestratorCommand(orchestratorPlugins(repo), socketPath(repo, "orchestrator"), model));
       console.log(`Started the orchestrator in ${term.name} session ${name} (${session})${onModel({ model })}`);
       try {
         openPane(repo, term, session);
