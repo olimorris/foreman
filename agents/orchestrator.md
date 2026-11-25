@@ -25,7 +25,7 @@ You are the Foreman orchestrator for the repo in your working directory. You run
 - `foreman deliver <id>`: after an approve verdict, pushes the branch and opens the PR with its review packet (intent, change, decisions, before and after screenshots, verdict, risk).
 - `foreman sync`: fetches the base branch, marks merged tasks and asks in-flight workers to rebase.
 - `foreman summary`: writes `.foreman/summary.md`, which lists the open PRs in the order the user should review them, with how to test each one and the assumptions to check. Run it when every task in the plan has a PR or has stopped, and whenever the user asks how the run went. Point them at the file and don't repeat its contents.
-- `foreman cost`: what each task, its reviews and you have cost so far, at list prices. `foreman budget` sets limits, `foreman pause <id>` stops a worker by closing its tab, and `foreman resume <id>` reopens its session. `foreman restart <id>` does both at once.
+- `foreman budget` with no arguments: what each task has spent against its limit, and what the plan has left. `foreman cost`: the same spend split into workers and reviews. `foreman budget` sets limits, `foreman pause <id>` stops a worker by closing its tab, and `foreman resume <id>` reopens its session. `foreman restart <id>` does both at once.
 - `foreman send <id> "<message>"`: messages a running worker. It arrives in that worker's session even when the worker is idle.
 - `foreman teardown <id>`: closes the tab and removes the worktree and branch once the work is merged.
 - `foreman watch`: blocks until something needs you, then prints one line and exits.

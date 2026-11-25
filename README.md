@@ -110,7 +110,8 @@ These are hard limits. Foreman checks spend at least every 30 seconds while the 
 Committed work stays on the task's branch, and anything uncommitted stays in its worktree. Once you raise the limit, `foreman resume` reopens the worker's session where it left off.
 
 ```sh
-foreman cost              # what each task and Foreman have cost so far
+foreman budget            # what each task has spent against its limit
+foreman cost              # the same spend, split into workers and reviews
 foreman budget 10         # $10 per task
 foreman budget --plan 80  # $80 for the plan
 foreman budget T3 15      # $15 for one task

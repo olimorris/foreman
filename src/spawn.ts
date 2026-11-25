@@ -81,11 +81,11 @@ export function workerCommand(task: Task, prompt: string, resume?: string): stri
 
 // Ids like T1 mean nothing to someone glancing across tabs, so the label carries the start of the task's title.
 export function tabLabel(task: Pick<Task, "id" | "title">, prefix = ""): string {
-  const summary = task.title?.replace(CONVENTIONAL_TYPE, "").split(/\s+/).filter(Boolean).slice(0, 4).join(" ");
+  const summary = task.title && plainTitle(task.title).split(/\s+/).slice(0, 4).join(" ");
   return `${prefix}${task.id}${summary ? `: ${summary}` : ""}`;
 }
 
-const CONVENTIONAL_TYPE = /^\w+(\([\w./-]+\))?!?:\s*/;
+export const plainTitle = (title: string) => title.replace(/^\w+(\([\w./-]+\))?!?:\s*/, "").trim();
 
 type Header = { id: string; worktree: string; branch: string; base: string; owns: string[]; index: string; context?: string };
 
