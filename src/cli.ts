@@ -27,8 +27,6 @@ import { ensureForeman, plainTitle, spawn } from "./spawn.ts";
 import { budgetOverview, byActivity, statusLabel, table, taskTitle } from "./overview.ts";
 import { findTask, inFlight, loadTasks, updateTask } from "./state.ts";
 import { orchestratorCommand, orchestratorModel } from "./up.ts";
-import { serve, SERVER_NAME } from "./mcp.ts";
-import { skillsCapability } from "./skillserver.ts";
 import { teardown } from "./teardown.ts";
 import { setTrust } from "./trust.ts";
 import { deliver } from "./deliver.ts";
@@ -60,21 +58,10 @@ function flags(args: string[]): { positional: string[]; opts: Record<string, str
   return { positional, opts };
 }
 
-function version(): string {
-  return JSON.parse(readFileSync(join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8")).version;
-}
-
-function serveMcp(): Promise<void> {
-  const repo = findRepo();
-  return serve({ name: SERVER_NAME, version: version(), capabilities: [skillsCapability(repo)] });
-}
-
 const onModel = (task: { model?: string }) => (task.model ? `, on ${task.model}` : ", on Claude Code's default model");
 
 async function main(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv;
-  // Claude Code starts the server, and anything else on stdout would break its protocol.
-  if (cmd === "mcp") return await serveMcp(), 0;
   const term = terminal();
   const { positional, opts } = flags(rest);
 
@@ -87,7 +74,7 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     case "version":
     case "--version":
-      console.log(version());
+      console.log(JSON.parse(readFileSync(join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8")).version);
       return 0;
     case "doctor": {
       printBanner();

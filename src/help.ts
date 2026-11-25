@@ -88,7 +88,6 @@ export const GROUPS: Group[] = [
       { usage: "shots <task>", about: "Screenshot a task's screens" },
       { usage: "sync", about: "Mark merged tasks and ask workers to rebase" },
       { usage: "watch", about: "Wait until something needs the orchestrator" },
-      { usage: "mcp", about: "Serve Foreman's MCP server to a Claude Code session" },
       { usage: "hook <event>", about: "Run one of Claude Code's hooks", full: "hook session-start | stop | pre-tool-use | permission-request | permission-denied" },
     ],
   },
