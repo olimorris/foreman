@@ -30,7 +30,7 @@ export function teardown(repo: Repo, id: string, discard: boolean, term: Termina
   if ((lost.commits || lost.dirty) && !discard) {
     return {
       removed: false,
-      message: `${id} has ${lost.commits} unmerged commit(s) and ${lost.dirty} uncommitted file(s). Nothing was removed. Ask the user, and only if they agree run: foreman teardown ${id} --discard`,
+      message: `${id} has ${lost.commits} unmerged commit(s) and ${lost.dirty} uncommitted file(s). Nothing was removed. Ask the user, and only if they agree, call teardown for ${id} with discard`,
     };
   }
   if (task.tab) term.close(task.tab);

@@ -65,7 +65,7 @@ export function bar(spent: number, limit: number | undefined, style: Style): str
   return tone("█".repeat(filled)) + style.dim("░".repeat(BAR - filled));
 }
 
-export function budgetOverview(repo: Repo, style: Style = PLAIN): string {
+export function budgetOverview(repo: Repo, style: Style = PLAIN, change = "Change a limit with foreman budget <usd> for every task, foreman budget <task> <usd> for one, or foreman budget --plan <usd>."): string {
   const budget = budgetOf(repo);
   const tasks = byActivity(loadTasks(repo));
   const costs = new Map(tasks.map((t) => [t.id, taskCost(repo, t)]));
@@ -93,6 +93,6 @@ export function budgetOverview(repo: Repo, style: Style = PLAIN): string {
     ...sectionLines(sections, style, () => [spentAt]),
     "",
     ...(unpriced.length ? [style.yellow(`Not counted: ${unpriced.join(", ")} has no price. Add it under "prices" in .foreman/config.json`), ""] : []),
-    style.dim("Change a limit with foreman budget <usd> for every task, foreman budget <task> <usd> for one, or foreman budget --plan <usd>."),
+    style.dim(change),
   ].join("\n");
 }

@@ -52,7 +52,7 @@ function withQuestions(repo: Repo, fn: (questions: Question[]) => Question): Que
 
 export function ask(repo: Repo, q: { question: string; call: string; task?: string; decision?: string }, at = new Date()): Question {
   if (!q.question.trim()) throw new Error("ask needs the question you're putting to the user");
-  if (!q.call.trim()) throw new Error('ask needs --call "<what you would do>". A question with no call of yours waits for the user, so just ask it');
+  if (!q.call.trim()) throw new Error('ask needs a call, which is what you would do. A question with no call of yours waits for the user, so just ask it');
   if (q.decision && findDecision(repo, q.decision).status !== "proposed") throw new Error(`${q.decision} isn't waiting for a decision`);
   return withQuestions(repo, (questions) => {
     const n = Math.max(0, ...questions.map((x) => Number(x.id.slice(2)))) + 1;
@@ -62,7 +62,7 @@ export function ask(repo: Repo, q: { question: string; call: string; task?: stri
 
 export function answer(repo: Repo, id: string, a: { answer: string } | { byForeman: true }): Question {
   const byForeman = "byForeman" in a;
-  if (!byForeman && !a.answer.trim()) throw new Error("answer needs the user's answer in their words, or --by-foreman");
+  if (!byForeman && !a.answer.trim()) throw new Error("answer needs the user's answer in their words, or by_foreman");
   return withQuestions(repo, (questions) => {
     const q = questions.find((x) => x.id === id);
     if (!q) throw new Error(`no question ${id}`);
@@ -73,7 +73,7 @@ export function answer(repo: Repo, id: string, a: { answer: string } | { byForem
     if (q.decision) {
       const d = findDecision(repo, q.decision);
       if (d.status === "proposed") throw new Error(`${q.decision} is still proposed. Accept or reject it first, then run this again`);
-      if (Date.parse(d.resolvedAt!) < Date.parse(q.askedAt) + answerMs(repo)) throw new Error(`${q.decision} was ${d.status} before ${id} ran out of time, so it was the user's call. Record their answer with foreman answer ${id} "<their answer>"`);
+      if (Date.parse(d.resolvedAt!) < Date.parse(q.askedAt) + answerMs(repo)) throw new Error(`${q.decision} was ${d.status} before ${id} ran out of time, so it was the user's call. Call answer for ${id} with their answer`);
       if (d.status === "accepted") updateDecision(repo, d.id, { decidedBy: "foreman" });
     }
     return { ...q, answeredAt: now, answer: q.call, by: "foreman" };

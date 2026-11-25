@@ -206,14 +206,14 @@ export function budgetLeft(repo: Repo, tasks: Task[], id?: string): { usd?: numb
   const budget = budgetOf(repo);
   const spent = planSpend(repo, tasks);
   if (budget.plan !== undefined && spent >= budget.plan) {
-    return { usd: 0, reason: `the plan has spent ${usd(spent)} of its ${usd(budget.plan)} budget. Ask the user to raise it with foreman budget --plan <usd>` };
+    return { usd: 0, reason: `the plan has spent ${usd(spent)} of its ${usd(budget.plan)} budget. Ask the user whether to raise it, then call set_budget` };
   }
   const planLeft = budget.plan === undefined ? undefined : budget.plan - spent;
   const task = id ? tasks.find((t) => t.id === id) : undefined;
   const limit = id ? taskLimit(budget, id) : undefined;
   if (!task || limit === undefined) return { usd: planLeft };
   const taskSpent = taskCost(repo, task).total;
-  if (taskSpent >= limit) return { usd: 0, reason: `${id} has spent ${usd(taskSpent)} of its ${usd(limit)} budget. Ask the user to raise it with foreman budget ${id} <usd>` };
+  if (taskSpent >= limit) return { usd: 0, reason: `${id} has spent ${usd(taskSpent)} of its ${usd(limit)} budget. Ask the user whether to raise it, then call set_budget` };
   return { usd: Math.min(limit - taskSpent, planLeft ?? Infinity) };
 }
 
