@@ -218,6 +218,7 @@ test("the orchestrator is allowed its tools by name, and Bash only for the comma
   expect(allowed).toContain("mcp__foreman__spawn");
   expect(allowed).toContain("mcp__foreman__status");
   expect(allowed).not.toContain("mcp__foreman__report");
-  expect(allowed.filter((a) => a.startsWith("Bash("))).toEqual(["Bash(foreman watch *)", "Bash(foreman baseline *)", "Bash(foreman together *)", "Bash(foreman pane *)"]);
+  expect(allowed).toContain("mcp__foreman__watch");
+  expect(allowed.filter((a) => a.startsWith("Bash("))).toEqual(["Bash(foreman pane *)"]);
   expect(orchestratorCommand([], "/s.sock", undefined, false)).not.toContain("Bash(foreman *)");
 });
