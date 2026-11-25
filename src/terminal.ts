@@ -1,5 +1,7 @@
 export type Tab = { session: string; window: string; pane: string };
 
+export type Check = { name: string; ok: boolean; detail: string };
+
 export type Terminal = {
   name: string;
   /** The session Foreman was run from, or undefined outside this terminal. */
@@ -8,6 +10,8 @@ export type Terminal = {
   sessionEnv: string[];
   /** Binaries that must be on PATH for this terminal. */
   requires: string[];
+  /** Requirements `foreman doctor` can't check as binaries on PATH, such as an app's version or a setting. */
+  checks?(): Check[];
   open(session: string, label: string, cwd: string, cmd: string[], keepOpen?: boolean): Tab;
   /** The pane Foreman was run from, or undefined outside this terminal. */
   currentPane?(): string | undefined;
