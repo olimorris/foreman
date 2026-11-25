@@ -6,6 +6,7 @@ import { loadConfig, saveConfig } from "./config.ts";
 import { accept, findContext, reject, writeIndex } from "./decisions.ts";
 import { doctor } from "./doctor.ts";
 import { printBanner } from "./banner.ts";
+import { helpText, usageError, UsageError } from "./help.ts";
 import { loadDecisions, propose } from "./ledger.ts";
 import { baseRef, snapshot } from "./snapshot.ts";
 import { runReview, sendFeedback, startReview } from "./review.ts";
@@ -29,33 +30,6 @@ import { budgetLeft, budgetOf, orchestratorCost, recordSession, sessionsFile, ta
 import { restartWorker, resume, stopWorker } from "./stop.ts";
 import { watch, watcherArmed } from "./watch.ts";
 
-const USAGE = `usage:
-  foreman doctor
-  foreman up
-  foreman spawn <id> --title "<type>: <summary>" --brief <file> --owns <path-or-glob>... [--base <branch>]
-  foreman send <id> <message>          (reads stdin when no message)
-  foreman report done <one line> --test <step>... [--assume <assumption>]...
-  foreman report <blocked|needs-decision|rebased> <one line>
-  foreman propose <decision> (--body <text> | --body-file <file>) [--paths <glob>]... [--supersedes <adr number>]... [--slug <name>]
-  foreman accept <D-n> [--title <text>] [--body-file <file>] [--paths <glob>]... [--supersedes <n>]... [--slug <name>]
-  foreman reject <D-n> --reason <text>
-  foreman decisions [--all]
-  foreman adr detect | init [--dir <path>] | write [--dry-run] [--no-push] | index
-  foreman plan <plan.md> | plan approve | plan show
-  foreman next [--max <n>]
-  foreman sync
-  foreman cost
-  foreman summary
-  foreman budget                       (what each task has spent against its limit)
-  foreman budget [<id>] <usd> | budget --plan <usd>
-  foreman pause <id>
-  foreman resume <id>
-  foreman restart <id>
-  foreman deliver <id> [--title "<type>: <summary>"] [--dry-run]
-  foreman status [--json]
-  foreman watch
-  foreman teardown <id> [--discard]
-  foreman hook <session-start|stop|pre-tool-use>`;
 
 function flags(args: string[]): { positional: string[]; opts: Record<string, string[]> } {
   const positional: string[] = [];
@@ -78,8 +52,7 @@ async function main(argv: string[]): Promise<number> {
     case "help":
     case "--help":
     case "-h":
-      printBanner();
-      console.log(USAGE);
+      console.log(helpText());
       return 0;
     case "doctor": {
       printBanner();
@@ -115,7 +88,7 @@ async function main(argv: string[]): Promise<number> {
       const repo = findRepo();
       const [id] = positional;
       const session = process.env.REX_SESSION;
-      if (!id || !opts.brief?.[0]) throw new Error(USAGE);
+      if (!id || !opts.brief?.[0]) throw usageError("spawn");
       if (!session) throw new Error("REX_SESSION isn't set: run spawn from inside Rex");
       const left = budgetLeft(repo, loadTasks(repo));
       if (left.reason) throw new Error(`no new tasks start: ${left.reason}`);
@@ -126,7 +99,7 @@ async function main(argv: string[]): Promise<number> {
     case "send": {
       const repo = findRepo();
       const [id, ...words] = positional;
-      if (!id) throw new Error(USAGE);
+      if (!id) throw usageError("send");
       const text = words.length ? words.join(" ") : await Bun.stdin.text();
       console.log(`sent to ${id} via ${sendToTask(repo, findTask(repo, id), text.trim(), rex)}`);
       return 0;
@@ -136,7 +109,7 @@ async function main(argv: string[]): Promise<number> {
       const id = process.env.FOREMAN_TASK;
       const [type, ...words] = positional;
       if (!id) throw new Error("FOREMAN_TASK isn't set: only workers report");
-      if (!REPORT_TYPES.includes(type as ReportType) || !words.length) throw new Error(USAGE);
+      if (!REPORT_TYPES.includes(type as ReportType) || !words.length) throw usageError("report");
       if (type === "done" && !opts.test?.length) {
         throw new Error('done needs at least one --test "<step>": how the user checks this by hand, in the words they see on screen. Add --assume "<assumption>" for each choice the brief didn\'t settle');
       }
@@ -158,7 +131,7 @@ async function main(argv: string[]): Promise<number> {
     case "accept": {
       const repo = findRepo();
       const [id] = positional;
-      if (!id) throw new Error(USAGE);
+      if (!id) throw usageError("accept");
       const body = opts["body-file"]?.[0] ? await Bun.file(opts["body-file"][0]).text() : undefined;
       const r = accept(repo, id, { title: opts.title?.[0], body, paths: opts.paths, slug: opts.slug?.[0], supersedes: opts.supersedes?.map(Number) }, rex);
       console.log(`accepted ${id}. Told: ${r.sent.join(", ") || "nobody"}${r.failed.length ? `. Couldn't reach: ${r.failed.join(", ")}` : ""}`);
@@ -167,7 +140,7 @@ async function main(argv: string[]): Promise<number> {
     case "reject": {
       const repo = findRepo();
       const [id] = positional;
-      if (!id) throw new Error(USAGE);
+      if (!id) throw usageError("reject");
       const r = reject(repo, id, opts.reason?.[0] ?? "", rex);
       console.log(`rejected ${id}. Told: ${r.sent.join(", ") || "nobody"}`);
       return 0;
@@ -181,27 +154,27 @@ async function main(argv: string[]): Promise<number> {
     }
     case "review": {
       const [id] = positional;
-      if (!id) throw new Error(USAGE);
+      if (!id) throw usageError("review");
       startReview(findRepo(), id, rex);
       console.log(`review of ${id} started in its own tab. The verdict arrives through the watcher.`);
       return 0;
     }
     case "review-run": {
       const [id] = positional;
-      if (!id) throw new Error(USAGE);
+      if (!id) throw usageError("review");
       console.log(await runReview(findRepo(), id));
       return 0;
     }
     case "feedback": {
       const [id] = positional;
-      if (!id) throw new Error(USAGE);
+      if (!id) throw usageError("feedback");
       console.log(sendFeedback(findRepo(), id, rex));
       return 0;
     }
     case "shots": {
       const repo = findRepo();
       const [id] = positional;
-      if (!id) throw new Error(USAGE);
+      if (!id) throw usageError("shots");
       const task = findTask(repo, id);
       const cfg = loadConfig(repo).screenshots;
       if (!cfg) throw new Error("no screenshots entry in .foreman/config.json; see the review skill");
@@ -270,7 +243,7 @@ async function main(argv: string[]): Promise<number> {
       if (!positional.length && !opts.plan) return console.log(budgetOverview(repo)), 0;
       const budget = { ...budgetOf(repo) };
       const amount = Number(opts.plan?.[0] ?? positional.at(-1));
-      if (!Number.isFinite(amount) || amount <= 0) throw new Error(USAGE);
+      if (!Number.isFinite(amount) || amount <= 0) throw usageError("budget");
       if (opts.plan) budget.plan = amount;
       else if (positional.length === 2) budget.tasks = { ...budget.tasks, [positional[0]!]: amount };
       else budget.perTask = amount;
@@ -281,7 +254,7 @@ async function main(argv: string[]): Promise<number> {
     case "pause": {
       const repo = findRepo();
       const [id] = positional;
-      if (!id) throw new Error(USAGE);
+      if (!id) throw usageError("pause");
       console.log(stopWorker(repo, findTask(repo, id), rex) ? `stopped ${id}'s worker. Its work so far is in its worktree` : `${id} had no worker running`);
       return 0;
     }
@@ -289,7 +262,7 @@ async function main(argv: string[]): Promise<number> {
       const repo = findRepo();
       const [id] = positional;
       const session = process.env.REX_SESSION;
-      if (!id) throw new Error(USAGE);
+      if (!id) throw usageError("restart");
       if (!session) throw new Error("REX_SESSION isn't set: run restart from inside Rex");
       restartWorker(repo, findTask(repo, id), rex, session);
       console.log(`restarted ${id}'s worker in a new tab, carrying on its last session`);
@@ -299,7 +272,7 @@ async function main(argv: string[]): Promise<number> {
       const repo = findRepo();
       const [id] = positional;
       const session = process.env.REX_SESSION;
-      if (!id) throw new Error(USAGE);
+      if (!id) throw usageError("resume");
       if (!session) throw new Error("REX_SESSION isn't set: run resume from inside Rex");
       resume(repo, id, rex, session);
       console.log(`resumed ${id}'s worker in a new tab`);
@@ -307,7 +280,7 @@ async function main(argv: string[]): Promise<number> {
     }
     case "deliver": {
       const [id] = positional;
-      if (!id) throw new Error(USAGE);
+      if (!id) throw usageError("deliver");
       console.log(deliver(findRepo(), id, { dryRun: !!opts["dry-run"], title: opts.title?.[0] }).note);
       return 0;
     }
@@ -331,7 +304,7 @@ async function main(argv: string[]): Promise<number> {
       return watch(findRepo(), defaultBase(findRepo()), rex);
     case "teardown": {
       const [id] = positional;
-      if (!id) throw new Error(USAGE);
+      if (!id) throw usageError("teardown");
       const r = teardown(findRepo(), id, !!opts.discard, rex);
       console.log(r.message);
       return r.removed ? 0 : 3;
@@ -339,8 +312,8 @@ async function main(argv: string[]): Promise<number> {
     case "hook":
       return hook(positional[0]);
     default:
-      console.error(USAGE);
-      return cmd ? 2 : 0;
+      console.error(`foreman: there's no command "${cmd}". Run foreman help to see every command.`);
+      return 2;
   }
 }
 
@@ -406,8 +379,7 @@ async function adr(sub: string | undefined, opts: Record<string, string[]>): Pro
       console.log(writeIndex(repo, base));
       return 0;
     default:
-      console.error(USAGE);
-      return 2;
+      throw usageError("adr");
   }
 }
 
@@ -445,6 +417,6 @@ async function hook(event: string | undefined): Promise<number> {
 try {
   process.exitCode = await main(Bun.argv.slice(2));
 } catch (err) {
-  console.error(`foreman: ${err instanceof Error ? err.message : err}`);
+  console.error(err instanceof UsageError ? err.message : `foreman: ${err instanceof Error ? err.message : err}`);
   process.exitCode = 1;
 }
