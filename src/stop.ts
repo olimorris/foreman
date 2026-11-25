@@ -14,6 +14,11 @@ export function stopWorker(repo: Repo, task: Task, rex: Rex): boolean {
   return true;
 }
 
+export function restartWorker(repo: Repo, task: Task, rex: Rex, session: string): Task {
+  if (task.rex && rex.alive(task.rex)) rex.close(task.rex);
+  return resume(repo, task.id, rex, session);
+}
+
 export function resume(repo: Repo, id: string, rex: Rex, session: string): Task {
   const task = findTask(repo, id);
   if (task.rex && rex.alive(task.rex)) throw new Error(`${id}'s worker is still running`);

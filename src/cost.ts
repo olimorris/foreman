@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { loadConfig } from "./config.ts";
@@ -35,7 +35,7 @@ export function usageCost(u: Usage, p: Price): number {
 const projectsDir = () => join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"), "projects");
 export const transcriptDir = (cwd: string) => join(projectsDir(), cwd.replace(/[^A-Za-z0-9-]/g, "-"));
 
-function jsonlFiles(dir: string): string[] {
+export function jsonlFiles(dir: string): string[] {
   if (!existsSync(dir)) return [];
   return readdirSync(dir).flatMap((f) => {
     const path = join(dir, f);
@@ -93,6 +93,35 @@ export function taskCost(repo: Repo, task: Task): TaskCost {
   const worker = transcriptSpend(transcriptDir(task.worktree), loadSessions(sessionsFile(repo, task.id)), loadConfig(repo).prices);
   const review = reviewSpend(repo, task);
   return { id: task.id, worker: worker.usd, review, total: worker.usd + review, unpriced: worker.unpriced };
+}
+
+// Only the model's own replies count, since a nudge queued into an idle session also writes to its transcript.
+export function lastActivity(repo: Repo, task: Task): number | undefined {
+  const sessions = loadSessions(sessionsFile(repo, task.id));
+  const times = jsonlFiles(transcriptDir(task.worktree)).filter((f) => sessions.some((s) => f.includes(s))).map(lastReplyAt);
+  const known = times.filter((t): t is number => t !== undefined);
+  return known.length ? Math.max(...known) : undefined;
+}
+
+const TAIL_BYTES = 512 * 1024;
+
+export function lastReplyAt(file: string): number | undefined {
+  const size = statSync(file).size;
+  const fd = openSync(file, "r");
+  const buf = Buffer.alloc(Math.min(size, TAIL_BYTES));
+  try {
+    readSync(fd, buf, 0, buf.length, size - buf.length);
+  } finally {
+    closeSync(fd);
+  }
+  for (const line of buf.toString("utf8").split("\n").reverse()) {
+    if (!line.includes('"type":"assistant"')) continue;
+    try {
+      const at = Date.parse(JSON.parse(line).timestamp);
+      if (!Number.isNaN(at)) return at;
+    } catch {}
+  }
+  return undefined;
 }
 
 export function orchestratorCost(repo: Repo): Spend {

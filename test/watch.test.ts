@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import type { TaskEvent } from "../src/events.ts";
 import type { Task } from "../src/state.ts";
 import { scan, type Cursor, type Probes } from "../src/watch.ts";
@@ -49,6 +49,40 @@ test("reports a resumed worker exiting again, and never a worker Foreman stopped
   const resumed = scan([task("T1")], first.cursor, probes({}));
   expect(scan([task("T1")], resumed.cursor, probes({}, "aaa", ["T1"])).reasons).toEqual(["exited T1"]);
   expect(scan([task("T2", { status: "over-budget" })], { ...empty, main: "aaa" }, probes({}, "aaa", ["T2"])).reasons).toEqual([]);
+});
+
+describe("stalls", () => {
+  const min = 60_000;
+  const quiet = (last: number): Probes => ({ ...probes({}), lastActivity: () => last });
+  const check = (now: number, waiting: string[] = []) => ({ now, stallMs: 20 * min, waiting: () => waiting });
+  const start = { ...empty, main: "aaa" };
+
+  test("nudges at the threshold and restarts at twice it, without waking the orchestrator", () => {
+    expect(scan([task("T1")], start, quiet(0), [], check(19 * min)).nudge).toEqual([]);
+    const nudged = scan([task("T1")], start, quiet(0), [], check(20 * min));
+    expect(nudged).toMatchObject({ nudge: ["T1"], restart: [], reasons: [] });
+    expect(scan([task("T1")], nudged.cursor, quiet(0), [], check(30 * min))).toMatchObject({ nudge: [], restart: [] });
+    const restarted = scan([task("T1")], nudged.cursor, quiet(0), [], check(40 * min));
+    expect(restarted).toMatchObject({ restart: ["T1"], reasons: [] });
+    expect(scan([task("T1")], restarted.cursor, quiet(0), [], check(90 * min)).restart).toEqual([]);
+    expect(scan([task("T1")], restarted.cursor, quiet(50 * min), [], check(70 * min)).nudge).toEqual(["T1"]);
+  });
+
+  test("tells the orchestrator once a worker hangs again after two restarts", () => {
+    let cursor: Cursor = start;
+    let last = 0;
+    for (let i = 0; i < 2; i++) {
+      cursor = scan([task("T1")], cursor, quiet(last), [], check(last + 40 * min)).cursor;
+      last += 50 * min;
+    }
+    const r = scan([task("T1")], cursor, quiet(last), [], check(last + 40 * min, ["T6"]));
+    expect(r).toMatchObject({ restart: [], reasons: ["stuck T1: hung again after 2 restarts, and T6 waits on it"] });
+  });
+
+  test("leaves workers alone that aren't running", () => {
+    expect(scan([task("T1", { status: "done" })], start, quiet(0), [], check(60 * min)).reasons).toEqual([]);
+    expect(scan([task("T1", { status: "blocked" })], start, quiet(0), [], check(60 * min)).reasons).toEqual([]);
+  });
 });
 
 test("reports new PR comments and a merge once each, only when gh was polled", () => {

@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { overBudget, priceFor, transcriptSpend, usageCost } from "../src/cost.ts";
+import { lastReplyAt, overBudget, priceFor, transcriptSpend, usageCost } from "../src/cost.ts";
 
 test("usageCost matches what Claude Code reported for a real review", () => {
   const usage = { input_tokens: 6, output_tokens: 1024, cache_read_input_tokens: 1387674, cache_creation_input_tokens: 23758, cache_creation: { ephemeral_1h_input_tokens: 23758, ephemeral_5m_input_tokens: 0 } };
@@ -25,6 +25,13 @@ test("transcriptSpend counts each reply once and only recorded sessions", () => 
   const spend = transcriptSpend(dir, ["worker-1"]);
   expect(spend.usd).toBeCloseTo(12, 6);
   expect(spend.unpriced).toEqual(["claude-mystery-1"]);
+});
+
+test("lastReplyAt skips messages queued into an idle session", () => {
+  const file = join(mkdtempSync(join(tmpdir(), "foreman-idle-")), "s.jsonl");
+  const line = (type: string, timestamp: string) => JSON.stringify({ type, timestamp });
+  writeFileSync(file, [line("assistant", "2026-11-25T00:24:24Z"), line("system", "2026-11-25T01:19:26Z"), line("queue-operation", "2026-11-25T07:17:49Z")].join("\n") + "\n");
+  expect(lastReplyAt(file)).toBe(Date.parse("2026-11-25T00:24:24Z"));
 });
 
 test("overBudget alerts once per limit, and again after the limit is raised", () => {
