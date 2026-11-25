@@ -20,7 +20,7 @@ export const sample: PaneInput = {
     row(task("T4", "needs-decision", { worker: "W3" }), { title: "export notes as JSON", note: "Should exports include archived notes?" }),
     row(task("T5", "pr-open", { pr: 7 }), { title: "show tag colours", risk: "medium" }),
   ],
-  waiting: [{ id: "T6", reason: "waits for T2 to merge", title: "feat: tag suggestions" }],
+  waiting: [{ id: "T6", reason: "waits for T2 to merge", title: "tag suggestions" }],
   recent: [{ at: ago(1), text: "T5 finished: tag colours on the list" }],
   decisions: [{ id: "D-2", title: "Tag names are lowercase", by: "T2" }],
 };
@@ -30,7 +30,7 @@ test("the pane puts what needs the user first, then the crew, PRs and what's wai
   const find = (s: string) => lines.findIndex((l) => l.includes(s));
   expect(lines[0]).toMatch(/^FOREMAN  notes +\d\d:\d\d$/);
   expect(lines).toContain("$12.40 of $40.00 spent · 4 of 4 slots · watcher on");
-  const order = ["NEEDS YOU", "T4", "Should exports include archived notes?", "D-2", "WORKING", "filter notes by tag", "$ bun test", "search notes as you type", "idle", "READY TO MERGE", "#7 risk medium", "WAITING", "waits for T2 to merge", "Merged: T1 #4", "RECENT"];
+  const order = ["NEEDS YOU", "T4", "Should exports include archived notes?", "D-2", "WORKING", "filter notes by tag", "$ bun test", "search notes as you type", "idle", "READY TO MERGE", "#7 risk medium", "UP NEXT", "waits for T2 to merge", "Merged: T1 #4", "RECENT"];
   const at = order.map(find);
   expect(at.every((n) => n >= 0)).toBe(true);
   expect([...at].sort((a, b) => a - b)).toEqual(at);
@@ -76,4 +76,37 @@ test("open permission blocks move their task to Needs you, each with what was bl
   expect(lines[find("filter notes by tag") + 1]).toContain("waiting at a permission prompt to run `gh pr merge 41`");
   expect(find("filter notes by tag")).toBeLessThan(find("WORKING"));
   for (const l of renderPane({ ...sample, blocks }, 40)) expect(l.length).toBeLessThanOrEqual(40);
+});
+
+const crew: PaneInput = {
+  ...sample,
+  tasks: [row(task("T2", "running", { worker: "W1" }), { title: "filter notes by tag", activity: { what: "$ bun test", since: ago(3), idle: false } })],
+  waiting: [
+    { id: "T3", reason: "waits for T2 to merge", title: "tag suggestions" },
+    { id: "T4", reason: "shares paths with T2", title: "rename tags" },
+  ],
+  recent: [],
+  decisions: [],
+};
+
+test("tasks that haven't started show under Up next in the order they'd start, each with its title and why it waits", () => {
+  const lines = renderPane(crew, 60);
+  const up = lines.indexOf("UP NEXT");
+  expect(up).toBeGreaterThan(lines.indexOf("WORKING"));
+  expect(lines[up + 1]).toMatch(/^ T3 +tag suggestions +waits for T2 to merge$/);
+  expect(lines[up + 2]).toMatch(/^ T4 +rename tags +shares paths with T2$/);
+  for (const width of [30, 40]) for (const l of renderPane(crew, width)) expect(l.length).toBeLessThanOrEqual(width);
+});
+
+test("with nothing waiting, the pane has no Up next section", () => {
+  expect(renderPane({ ...crew, waiting: [] }, 60)).not.toContain("UP NEXT");
+});
+
+test("a short pane keeps the Up next rows that fit and counts the rest", () => {
+  const many = { ...crew, waiting: Array.from({ length: 8 }, (_, i) => ({ id: `T${i + 3}`, reason: "all 4 worker slots are busy", title: `task ${i + 3}` })) };
+  const lines = renderPane(many, 60, false, 14);
+  expect(lines.length).toBeLessThanOrEqual(14);
+  expect(lines.at(-1)).toBe(" +5 more");
+  expect(lines.filter((l) => l.includes("all 4 worker slots are busy"))).toHaveLength(3);
+  expect(renderPane(many, 60).filter((l) => l.includes("all 4 worker slots are busy"))).toHaveLength(8);
 });

@@ -217,7 +217,7 @@ A status pane beside the orchestrator shows the run at a glance:
 - **Needs you**: questions waiting on you, tasks that are blocked or stopped, and sessions a permission has blocked
 - **Working**: what each worker is doing right now, and for how long
 - **Ready to merge**: PRs waiting for you, with the reviewer's risk
-- **Waiting**: planned tasks and what they wait on
+- **Up next**: planned tasks that haven't started, in the order they'll start, each with what it waits on. In a short pane it shows the ones that fit and how many more there are
 - **Recent**: the last few things that happened
 
 A worker that goes quiet turns yellow, then red.
