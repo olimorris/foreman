@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } fro
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "./config.ts";
-import { lastDone } from "./events.ts";
+import { lastDone, logRun } from "./events.ts";
 import { must, run } from "./exec.ts";
 import { loadDecisions } from "./ledger.ts";
 import { taskDir, type Repo } from "./paths.ts";
@@ -182,6 +182,7 @@ export function deliver(repo: Repo, id: string, opts: { dryRun?: boolean; title?
 
   if (task.pr) {
     must(["gh", "pr", "edit", String(task.pr), "--body-file", packet], { cwd: repo.root });
+    logRun(repo, id, "pr-updated", `#${task.pr}`);
     const stacked = loadTasks(repo).filter((t) => t.stackedOn === id && t.status !== "torn-down").map((t) => t.id);
     const restack = stacked.length ? `. ${stacked.join(", ")} ${stacked.length > 1 ? "build" : "builds"} on this branch, so run foreman sync to ask ${stacked.length > 1 ? "their workers" : "its worker"} to rebase` : "";
     return { packet, pr: task.pr, note: `pushed ${task.branch} and refreshed PR #${task.pr}${restack}` };
@@ -189,6 +190,7 @@ export function deliver(repo: Repo, id: string, opts: { dryRun?: boolean; title?
   const url = must(["gh", "pr", "create", "--base", buildsOn?.branch ?? task.base, "--head", task.branch, "--title", title, "--body-file", packet], { cwd: repo.root }).trim().split("\n").at(-1)!;
   const pr = Number(url.match(/\/pull\/(\d+)/)?.[1]);
   updateTask(repo, id, { pr, status: "pr-open" });
+  logRun(repo, id, "pr-opened", `#${pr}`);
   const started = new Set(loadTasks(repo).map((t) => t.id));
   const next = stackable(repo) ? loadPlan(repo)?.tasks.filter((t) => t.deps.includes(id) && !started.has(t.id)).map((t) => t.id) ?? [] : [];
   return { packet, pr, url, note: `opened PR #${pr}: ${url}${next.length ? `. Run foreman next, which can start ${next.join(", ")} on top of it` : ""}` };

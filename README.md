@@ -92,6 +92,8 @@ foreman budget    # what each task has spent against its limit
 foreman summary   # the PRs to review so far, in order. Press q to leave a long one
 ```
 
+To see how the run went, run `foreman timeline`. It shows when each task started, when its worker went quiet, and which tasks waited on it.
+
 All state lives in `.foreman/` in your repo, which Foreman keeps out of git. If the orchestrator restarts, it picks up from there.
 
 ### Status pane
@@ -176,6 +178,17 @@ Each PR is reviewed on its own, so two approved PRs can still conflict, or pass 
 So once two or more PRs are open, Foreman merges them all into a throwaway copy of the base branch and runs your tests on the result. It tells you which PRs conflict and which to merge first, or that the tests fail with them combined. The run summary carries the same advice, and says when a PR has changed since it was checked.
 
 The tests run with the `test` command in `.foreman/config.json`. If there isn't one, Foreman works it out from the repo and saves it. `foreman together` runs the check by hand.
+
+### Timeline
+
+`foreman timeline` shows what happened to each task, a line for each step: when it started, its reports and reviews, nudges and restarts, its PR and when it merged. A worker that hasn't replied for half the stall time while it's meant to be working shows as quiet. A quiet stretch of the full stall time or more is marked with `!`, and any task that was waiting on that worker is listed under it:
+
+```
+! Wed 00:24  quiet for 6h 53m, until Wed 07:17
+  Wed 00:24  T6 waited 6h 53m for T5, which shares LayerCompositor.swift and 6 other paths
+```
+
+`foreman timeline T5` shows one task.
 
 ### Settings
 

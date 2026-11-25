@@ -10,6 +10,7 @@ import { CONVENTIONAL } from "./plan.ts";
 import { briefNotes } from "./notes.ts";
 import { setTrust } from "./trust.ts";
 import { findTask, loadTasks, nextWorker, withTasks, type Task } from "./state.ts";
+import { logRun } from "./events.ts";
 
 export type SpawnOptions = { id: string; title?: string; brief: string; owns: string[]; base: string; session: string; stackedOn?: string; claudeConfig?: string };
 
@@ -60,6 +61,7 @@ export function spawn(repo: Repo, opts: SpawnOptions, term: Terminal): Task {
   withTasks(repo, (tasks) => tasks.push(task));
   task.tab = term.open(opts.session, tabLabel(task), worktree, workerCommand(task, term, `Your brief is ${briefPath}. Read it and start. This repo's Foreman workflow explicitly allows you to commit and rebase on ${branch}, so commit there as you go, and never on any other branch.`));
   withTasks(repo, (tasks) => Object.assign(tasks.find((t) => t.id === id)!, { tab: task.tab }));
+  logRun(repo, id, "started", task.worker);
   return task;
 }
 

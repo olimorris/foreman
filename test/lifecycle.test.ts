@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { appendEvent, readEvents } from "../src/events.ts";
+import { appendEvent, readEvents, readRunLog } from "../src/events.ts";
 import { must, run } from "../src/exec.ts";
 import { checkBrief, spawn, tabLabel } from "../src/spawn.ts";
 import { findTask, loadTasks, nextWorker, updateTask, type Task } from "../src/state.ts";
@@ -56,6 +56,13 @@ describe("spawn", () => {
     expect(() => spawn(repo, { id: "T1", brief: "/dev/null", owns: ["x"], base: "main", session: "s" }, term)).toThrow("already exists");
     expect(() => checkBrief("## Spec\n")).toThrow("## Intent");
   });
+});
+
+test("Foreman's own steps go to the run log, so the watcher doesn't wake the orchestrator for them", () => {
+  const { repo, term } = spawned();
+  teardown(repo, "T1", false, term);
+  expect(readRunLog(repo).map((e) => [e.task, e.what, e.note])).toEqual([["T1", "started", "W1"], ["T1", "torn-down", undefined]]);
+  expect(readEvents(repo, "T1")).toEqual([]);
 });
 
 test("events append and read back in order", () => {

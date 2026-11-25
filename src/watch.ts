@@ -1,13 +1,13 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { readEvents, type TaskEvent } from "./events.ts";
+import { logRun, readEvents, type TaskEvent } from "./events.ts";
 import { loadDecisions, type Decision } from "./ledger.ts";
 import { run } from "./exec.ts";
 import type { Repo } from "./paths.ts";
 import type { Terminal } from "./terminal.ts";
 import { notifyOrchestrator, sendToTask } from "./send.ts";
 import { baseRef } from "./snapshot.ts";
-import { budgetOf, lastActivity, overBudget, planSpend, taskCost } from "./cost.ts";
+import { budgetOf, lastActivity, overBudget, planSpend, taskCost, taskLimit, usd } from "./cost.ts";
 import { loadConfig } from "./config.ts";
 import { loadPlan, readyTasks, maxWorkers, stackable } from "./plan.ts";
 import { restartWorker, stopWorker } from "./stop.ts";
@@ -184,23 +184,31 @@ export async function watch(repo: Repo, base: string, term: Terminal): Promise<n
       for (const id of result.nudge) {
         try {
           sendToTask(repo, tasks.find((t) => t.id === id)!, NUDGE, term);
+          logRun(repo, id, "nudged", `no reply for ${stallMs / 60_000}m`);
         } catch {}
       }
       for (const id of result.restart) {
         const task = tasks.find((t) => t.id === id)!;
         try {
           restartWorker(repo, task, term, task.tab!.session);
+          logRun(repo, id, "restarted", `no reply for ${(2 * stallMs) / 60_000}m`);
         } catch (err) {
           result.reasons.push(`stuck ${id}: restarting its hung worker failed: ${err instanceof Error ? err.message : err}`);
         }
       }
       {
-        const over = overBudget(tasks.map((t) => taskCost(repo, t)), planSpend(repo, loadTasks(repo)), budgetOf(repo), cursor.budget ?? {});
+        const budget = budgetOf(repo);
+        const costs = tasks.map((t) => taskCost(repo, t));
+        const over = overBudget(costs, planSpend(repo, loadTasks(repo)), budget, cursor.budget ?? {});
         result.reasons.push(...over.reasons);
         cursor.budget = over.alerted;
         for (const id of over.stop) {
           const task = tasks.find((t) => t.id === id)!;
-          if (stopWorker(repo, task, term)) result.reasons.push(`stopped ${id}`);
+          if (!stopWorker(repo, task, term)) continue;
+          result.reasons.push(`stopped ${id}`);
+          const spent = costs.find((c) => c.id === id)!.total;
+          const limit = taskLimit(budget, id);
+          logRun(repo, id, "stopped", limit !== undefined && spent > limit ? `over budget, ${usd(spent)} of ${usd(limit)}` : "the plan is over budget");
         }
       }
       writeFileSync(cursorFile, JSON.stringify(cursor));

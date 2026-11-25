@@ -14,7 +14,7 @@ import { baseRef, snapshot } from "./snapshot.ts";
 import { runReview, sendFeedback, startReview } from "./review.ts";
 import { capture, parseScreens } from "./shots.ts";
 import { join } from "node:path";
-import { appendEvent, REPORT_TYPES, type ReportType } from "./events.ts";
+import { appendEvent, logRun, REPORT_TYPES, type ReportType } from "./events.ts";
 import { areaLock, sessionStartContext, stopHook, type HookInput, type LockContext } from "./hooks.ts";
 import { defaultBase, findRepo, pluginArgs, socketPath, type Repo } from "./paths.ts";
 import { terminal } from "./integrations/index.ts";
@@ -30,6 +30,7 @@ import { describePlan, loadPlan, maxWorkers, parsePlan, planBrief, readyTasks, s
 import { sync } from "./sync.ts";
 import { forTerminal, openPrs, page, writeSummary } from "./summary.ts";
 import { together } from "./together.ts";
+import { timelineText } from "./timeline.ts";
 import { budgetLeft, budgetOf, orchestratorCost, recordSession, sessionsFile, taskCost, usd } from "./cost.ts";
 import { restartWorker, resume, stopWorker } from "./stop.ts";
 import { watch, watcherArmed } from "./watch.ts";
@@ -251,6 +252,9 @@ async function main(argv: string[]): Promise<number> {
       if (r.result) notifyOrchestrator(repo, r.line);
       return 0;
     }
+    case "timeline":
+      console.log(timelineText(findRepo(), positional[0]));
+      return 0;
     case "cost": {
       const repo = findRepo();
       const budget = budgetOf(repo);
@@ -284,7 +288,9 @@ async function main(argv: string[]): Promise<number> {
       const repo = findRepo();
       const [id] = positional;
       if (!id) throw usageError("pause");
-      console.log(stopWorker(repo, findTask(repo, id), term) ? `stopped ${id}'s worker. Its work so far is in its worktree` : `${id} had no worker running`);
+      const stopped = stopWorker(repo, findTask(repo, id), term);
+      if (stopped) logRun(repo, id, "paused");
+      console.log(stopped ? `stopped ${id}'s worker. Its work so far is in its worktree` : `${id} had no worker running`);
       return 0;
     }
     case "restart": {
@@ -293,6 +299,7 @@ async function main(argv: string[]): Promise<number> {
       if (!id) throw usageError("restart");
       const session = requireSession(term, "restart");
       restartWorker(repo, findTask(repo, id), term, session);
+      logRun(repo, id, "restarted");
       console.log(`restarted ${id}'s worker in a new tab, carrying on its last session`);
       return 0;
     }
@@ -302,6 +309,7 @@ async function main(argv: string[]): Promise<number> {
       if (!id) throw usageError("resume");
       const session = requireSession(term, "resume");
       resume(repo, id, term, session);
+      logRun(repo, id, "resumed");
       console.log(`resumed ${id}'s worker in a new tab`);
       return 0;
     }

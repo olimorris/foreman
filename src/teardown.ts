@@ -5,6 +5,7 @@ import type { Terminal } from "./terminal.ts";
 import { findTask, updateTask } from "./state.ts";
 import { setTrust } from "./trust.ts";
 import { baseRef } from "./snapshot.ts";
+import { logRun } from "./events.ts";
 
 export type Unmerged = { commits: number; dirty: number };
 
@@ -58,5 +59,6 @@ export function teardown(repo: Repo, id: string, discard: boolean, term: Termina
   run(["git", "-C", repo.root, "branch", discard || task.mergedAt ? "-D" : "-d", task.branch]);
   setTrust(task.worktree, false, claudeConfig);
   updateTask(repo, id, { status: "torn-down" });
+  logRun(repo, id, "torn-down", lost.commits || lost.dirty ? "unmerged work discarded" : undefined);
   return { removed: true, message: `${id}: closed the worker tab, removed ${task.worktree} and branch ${task.branch}` };
 }
