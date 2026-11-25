@@ -1,9 +1,11 @@
+import { join } from "node:path";
 import { BASELINE_RUNS, runBaseline } from "../baseline.ts";
 import type { TaskTool } from "../mcp.ts";
 import { defaultBase } from "../paths.ts";
 import { openPrs } from "../summary.ts";
-import { together } from "../together.ts";
-import { watchFor, type WaitForChange } from "../watch.ts";
+import { pidAlive } from "../procs.ts";
+import { together, togetherBusy } from "../together.ts";
+import { readPid, watchFor, type WaitForChange } from "../watch.ts";
 import { noInput } from "./tool.ts";
 
 // Tests pass their own wait, since the watcher otherwise waits on fswatch, which CI runners lack.
@@ -14,6 +16,10 @@ export const taskTools = (wait?: WaitForChange): TaskTool[] => [
     inputSchema: noInput,
     roles: ["orchestrator"],
     task: true,
+    now: (_args, s) => {
+      const pid = readPid(join(s.repo.foreman, "watch.pid"));
+      return pid && pidAlive(pid) ? `watcher: already running (pid ${pid})` : undefined;
+    },
     handler: (_args, s, context) => watchFor(s.repo, defaultBase(s.repo), s.term(), { signal: context?.signal, notice: context?.status, wait }),
   },
   {
@@ -37,6 +43,7 @@ export const taskTools = (wait?: WaitForChange): TaskTool[] => [
     inputSchema: noInput,
     roles: ["orchestrator"],
     task: true,
+    now: (_args, s) => togetherBusy(s.repo),
     handler: async (_args, s, context) => (await together(s.repo, defaultBase(s.repo), () => openPrs(s.repo), { fetch: true, signal: context?.signal })).line,
   },
 ];

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfig, saveConfig } from "../src/config.ts";
 import { appendEvent } from "../src/events.ts";
@@ -65,7 +65,8 @@ test("a second watch while one runs says the watcher is already running", async 
   const s = orchestrator(runningRepo());
   const first = await ask(s, "tools/call", { name: "watch", arguments: {}, _meta: offer });
   const second = await ask(s, "tools/call", { name: "watch", arguments: {}, _meta: offer });
-  expect((await settled(s, second.taskId)).result.content[0].text).toBe(`watcher: already running (pid ${process.pid})`);
+  expect(second.content[0].text).toBe(`watcher: already running (pid ${process.pid})`);
+  expect(second.taskId).toBeUndefined();
   await ask(s, "tasks/cancel", { taskId: first.taskId });
 });
 
@@ -158,4 +159,14 @@ test("together returns a task and completes with its together line", async () =>
 test("together with fewer than two open PRs completes at once saying there's nothing to test", async () => {
   const s = orchestrator(withPrs(["T1"]));
   expect(text(await settled(s, await start(s, "together")))).toBe("together: only #70 is open, so there's nothing to test together");
+});
+
+test("a second together while one runs answers as a plain result and asks the running check to go again", async () => {
+  const repo = withPrs(["T1", "T2"]);
+  mkdirSync(join(repo.foreman, "together"), { recursive: true });
+  writeFileSync(join(repo.foreman, "together", "pid"), String(process.pid));
+  const second = await ask(orchestrator(repo), "tools/call", { name: "together", arguments: {}, _meta: offer });
+  expect(second.taskId).toBeUndefined();
+  expect(second.content[0].text).toBe(`together: already running (pid ${process.pid}), so it checks again with the latest PRs when it finishes`);
+  expect(existsSync(join(repo.foreman, "together", "rerun"))).toBe(true);
 });
