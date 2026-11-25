@@ -126,19 +126,20 @@ describe("foreman automerge", () => {
     expect(automerge(repo, ["off"])[0]).toStartWith("Automerge is off");
     automerge(repo, ["on"]);
     withTasks(repo, (tasks) => void tasks.push(...loadPlan(repo)!.tasks.map((t) => task(t.id, { status: "merged" }))));
-    savePlan(repo, parsePlan(PLAN));
+    savePlan(repo, parsePlan(PLAN.replaceAll("T1", "T2")));
     expect(automergeOn(repo)).toBe(false);
   });
 
   test("changing and re-approving the plan mid-run keeps it on", () => {
     const repo = tempRepo();
-    savePlan(repo, parsePlan(PLAN));
+    const T2 = PLAN.replaceAll("T1", "T2");
+    savePlan(repo, parsePlan(PLAN + T2));
     automerge(repo, ["on"]);
     savePlan(repo, { ...loadPlan(repo)!, approvedAt: "now" });
-    withTasks(repo, (tasks) => void tasks.push(task(loadPlan(repo)!.tasks[0]!.id, { status: "merged" })));
-    savePlan(repo, parsePlan(PLAN + PLAN.replaceAll("T1", "T2").replace("feat: notes carry tags", "feat: notes carry colours")));
+    withTasks(repo, (tasks) => void tasks.push(task("T1", { status: "merged" })));
+    savePlan(repo, parsePlan(PLAN + T2.replace("feat: notes carry tags", "feat: notes carry colours")));
     expect(automergeOn(repo)).toBe(true);
-    savePlan(repo, parsePlan(PLAN + PLAN.replaceAll("T1", "T2")));
+    savePlan(repo, parsePlan(PLAN + T2 + PLAN.replaceAll("T1", "T3")));
     expect(automergeOn(repo)).toBe(true);
     savePlan(repo, { ...loadPlan(repo)!, approvedAt: "later" });
     expect(automergeOn(repo)).toBe(true);
