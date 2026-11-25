@@ -5,36 +5,21 @@
     </picture>
 </p>
 
-## :firecracker: Problem Statement
+## :firecracker: The problem
 
-Building and deploying software takes a team of engineers. Those engineers need a manager to coordinate and review their work. That manager needs a leader to set the vision. That leader is you.
+You've got a backlog and a deadline. One Claude Code session works through it one task at a time, and every task waits on you to review the last.
 
-Foreman gives you the team and the manager, right inside Claude Code.
+You could open five sessions yourself. Then you're the one splitting up the work, keeping sessions out of each other's way, checking every result and untangling the merge conflicts. You've become the bottleneck.
 
-## :sparkles: Features
-
-- :wrestling: Runs a crew of Claude workers in parallel, each in its own worktree and tab
-- :calendar: Turns a backlog of any format into a plan to build
-- :mag: Reviews every task against your intent before it becomes a PR
-- :camera: Takes before and after screenshots of web and macOS apps
-- :moneybag: Caps spend per task and per plan
-- :robot: Runs simple tasks on cheaper models
-- :rotating_light: Spots hung workers and restarts them
-- :memo: Warns every worker about known problems, like flaky tests
-- :zzz: Keeps working while you're away, and logs every call it makes
-- :iphone: Pings you on Telegram, and takes your answers from there
-- :clipboard: Writes a summary of the PRs to review, in order
-
-> [!IMPORTANT]
-> Foreman runs inside a terminal app it can drive. [Rex](https://www.superlogical.com) is the default, and `FOREMAN_TERMINAL=<name>` picks another. Each worker gets its own tab, so you can watch any of them or step in. `foreman doctor` lists the terminals available, and each one's setup is in its folder under `src/integrations/`.
+Foreman brings in a team, and a manager to run it. You set the direction and approve the PRs.
 
 ## :construction_worker: What is Foreman?
 
-Foreman is a Claude Code plugin that turns one Claude session into the manager of a small engineering team:
+Foreman is a CLI and a Claude Code plugin. `foreman up` starts Claude Code with the plugin loaded, and that session runs the team:
 
-- **The engineers** are worker Claude sessions, numbered W1, W2 and so on. Each gets its own git worktree and tab, so they work in parallel without stepping on each other.
-- **The manager** is Foreman. It never writes code. It plans, hands out work, keeps everyone aligned and checks the work before it reaches you.
-- **The leader** is you. You set the direction and approve every PR. Nothing merges without your say-so.
+- **The engineers** are worker sessions, numbered W1, W2 and so on. Each gets its own git worktree and tab, so they work in parallel without stepping on each other.
+- **The manager** is the orchestrator. It never writes code. It plans, hands out work, keeps everyone aligned and checks the work before it reaches you.
+- **The leader** is you. You set the direction and approve every PR.
 
 ### How it works
 
@@ -47,29 +32,46 @@ Foreman is a Claude Code plugin that turns one Claude session into the manager o
 
 1. **Give it a backlog.** Foreman talks it through with you, then turns each item into a brief with clear boundaries.
 2. **It schedules the crew.** Foreman decides what runs in parallel and what goes first, based on dependencies and your deadline.
-3. **Decisions are shared.** Workers propose decisions, Foreman accepts them and tells the rest of the crew, so conflicts surface before merge time.
+3. **Decisions are shared.** Workers propose decisions. Foreman accepts them and tells the crew, so conflicts surface before merge time.
 4. **Work gets reviewed.** A separate reviewer checks each change against your intent, with screenshots for UI work, and sends it back until it's right.
-5. **You approve the PR.** Each PR says what was asked, which decisions it touched, what changed on screen and how risky it is. Merging it starts the tasks that were waiting on it.
+5. **You approve the PR.** Each PR says what was asked, which decisions it touched, what changed on screen and how risky it is. Tasks that build on it start without waiting for the merge.
 
 ### What Foreman isn't
 
-It's Claude Code only and works on one repo at a time. That's deliberate - fewer moving parts, less to break.
+It's macOS and Claude Code only, and works on one repo at a time. Fewer moving parts means less to break.
+
+### What it touches
+
+- Workers run in Claude Code's auto mode, each in a worktree under `.foreman/worktrees/`, and commit to their own `foreman/<task>` branch
+- The reviewer can only read files
+- Foreman pushes each approved task's branch and opens its PR, plus a PR that adds accepted decisions to your ADR folder
+- Foreman never merges unless you turn on [automerge](#let-foreman-merge), and then only its own task PRs
+- It keeps its state in `.foreman/`, out of git, and picks up from there after a restart
 
 ### Why not Claude Code's agent teams?
 
 Agent teams are great for research and review inside one session. Foreman is built for unattended builds that end in PRs, so it needs things teams don't offer:
 
 - Each worker gets its own worktree, so workers never share a checkout
-- A run survives restarts, since its state lives in `.foreman/`
-- Workers commit without asking you for permission, and Foreman opens the PR once the reviewer approves
 - Every task has its own budget, and a hung worker is spotted and restarted
+
+## :sparkles: Features
+
+- :camera: Takes before and after screenshots of web and macOS apps
+- :books: Reads your repo's ADRs and keeps every worker to them
+- :link: Tests the open PRs merged together, to catch ones that pass alone but break together
+- :robot: Runs simple tasks on cheaper models
+- :memo: Runs your tests on the base branch first, and warns every worker about what already fails
+- :zzz: Keeps working while you're away, and logs every call it makes
+- :iphone: Pings you on Telegram, and takes your answers from there
+- :clipboard: Writes a summary of the PRs to review, in order
 
 ## :package: Install
 
-Foreman runs on macOS inside a terminal app it can drive. [Rex](https://www.superlogical.com) is the default. You need:
+Foreman runs on macOS inside a terminal app it can drive. [Rex](https://www.superlogical.com) is the default, and `FOREMAN_TERMINAL=<name>` picks another from `src/integrations/`. You need:
 
 - Claude Code 2.1.224 or later
-- [Bun](https://bun.sh), `git`, `jq`, `fswatch` and `gh` (signed in with `gh auth login`)
+- [Bun](https://bun.sh), `git`, `fswatch` and `gh` (signed in with `gh auth login`), plus `jq` for Rex
 - For web screenshots: Playwright's Chromium (`bunx playwright install chromium`)
 - For macOS app screenshots: Xcode, and Screen Recording permission for your terminal in System Settings > Privacy & Security > Screen & System Audio Recording
 
@@ -81,8 +83,6 @@ ln -s ~/Code/Foreman/bin/foreman ~/.local/bin/foreman
 foreman doctor
 ```
 
-`foreman doctor` checks every requirement and says what's missing.
-
 ### Working with an agent
 
 Paste this to your coding agent, so it can answer questions about Foreman and help you set it up:
@@ -93,7 +93,7 @@ Read https://raw.githubusercontent.com/olimorris/foreman/main/docs/agents.txt an
 
 ## :rocket: Usage
 
-Open your terminal in your repo and start Foreman:
+In your repo, start Foreman:
 
 ```sh
 foreman up
@@ -105,7 +105,7 @@ Then tell it what you want done:
 Here's my backlog: BACKLOG.md. The deadline is tomorrow. Do it as cheaply as you can.
 ```
 
-Foreman asks about anything unclear, then plans the work. If the plan differs from your backlog, such as splitting or cutting an item, it waits for your approval first. Workers open in their own tabs, and approved work arrives as PRs for you to merge. When the run ends, Foreman writes a summary of what to review.
+Foreman asks about anything unclear, then plans the work. If the plan differs from your backlog, such as splitting or cutting an item, it waits for your approval. If you don't answer within 30 minutes, Foreman makes the call and notes it in the summary. Workers open in their own tabs, and approved work arrives as PRs. `foreman help` lists every command.
 
 ### What each task is doing
 
@@ -198,7 +198,7 @@ foreman pane
 
 <img alt="foreman pane" src="assets/README/foreman-pane.png">
 
-Open a status pane beside the orchestrator, so you can see the run at a glance:
+A status pane beside the orchestrator shows the run at a glance:
 
 - **Needs you**: questions waiting on you, tasks that are blocked or stopped, and sessions a permission has blocked
 - **Working**: what each worker is doing right now, and for how long
@@ -206,9 +206,7 @@ Open a status pane beside the orchestrator, so you can see the run at a glance:
 - **Waiting**: planned tasks and what they wait on
 - **Recent**: the last few things that happened
 
-A worker that goes quiet turns yellow, then red. Run `foreman pane` if you close it.
-
-Run `foreman help` to see every command. Foreman keeps its state in `.foreman/` in your repo, out of git, and picks up from there if the orchestrator restarts.
+A worker that goes quiet turns yellow, then red.
 
 ## :gear: Settings
 
@@ -235,7 +233,7 @@ Settings live in `.foreman/config.json` in your repo, and every one is optional.
 
 | Setting | What it does |
 | --- | --- |
-| `maxWorkers` | How many workers run at once. `foreman workers <n>` changes it until the current plan finishes, and `foreman workers` shows the limit in force |
+| `maxWorkers` | How many workers run at once. See [More or fewer workers](#more-or-fewer-workers) |
 | `budget` | Spend limits in dollars: `perTask` for every task, `plan` for the whole plan and `tasks` for one task. `foreman budget` sets these for you |
 | `orchestratorModel` | The model `foreman up` starts the orchestrator on, as an alias or a full model id. `foreman up --model <name>` overrides it for one run. Without it, the orchestrator uses Claude Code's default |
 | `workerModel` | The model for tasks the plan doesn't give one, as an alias like `"sonnet"` or a full model id. Without it, workers use Claude Code's default |
