@@ -12,6 +12,7 @@ import { briefNotes } from "./notes.ts";
 import { setTrust } from "./trust.ts";
 import { findTask, loadTasks, nextWorker, withTasks, type Task } from "./state.ts";
 import { logRun } from "./events.ts";
+import { mcpArgs } from "./mcp.ts";
 
 export type SpawnOptions = { id: string; title?: string; model?: string; brief: string; owns: string[]; base: string; session: string; stackedOn?: string; claudeConfig?: string };
 
@@ -83,7 +84,7 @@ export function workerCommand(task: Task, term: Terminal, prompt: string, resume
   return [
     // Without the terminal's session ids, a user hook that names "your session" can't rename the orchestrator's session from a worker.
     "env", ...term.sessionEnv.flatMap((v) => ["-u", v]), "FOREMAN_ROLE=worker", `FOREMAN_TASK=${task.id}`,
-    "claude", ...pluginArgs(), ...skills,
+    "claude", ...pluginArgs(), ...skills, ...mcpArgs("worker", task.id),
     "--agent", "foreman:worker",
     ...(task.model ? ["--model", task.model] : []),
     "--permission-mode", "auto",
