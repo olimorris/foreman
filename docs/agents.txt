@@ -11,20 +11,19 @@ Tasks are named T1, T2 and so on. Workers are numbered W1, W2 and so on. Decisio
 ## Requirements
 
 - macOS, inside a terminal app Foreman can drive. Rex (https://www.superlogical.com) is the default. `FOREMAN_TERMINAL=<name>` picks another, `foreman doctor` lists the ones available, and each terminal's setup is in its folder under `src/integrations/`.
-- Claude Code 2.1.224 or later.
-- Bun, git, jq, fswatch, and gh signed in with `gh auth login`.
+- Claude Code 2.1.224 or later: `brew install --cask claude-code`.
+- git, and gh signed in with `gh auth login`. Homebrew installs Bun, jq, fswatch and gh along with Foreman.
 - Web screenshots need Playwright's Chromium: `bunx playwright install chromium`.
 - macOS app screenshots need Xcode, and Screen Recording permission for the terminal in System Settings > Privacy & Security > Screen & System Audio Recording.
 
 Install:
 
 ```sh
-brew install jq fswatch gh
-git clone https://github.com/olimorris/foreman ~/Code/Foreman
-cd ~/Code/Foreman && bun install
-ln -s ~/Code/Foreman/bin/foreman ~/.local/bin/foreman
+brew install olimorris/tap/foreman
 foreman doctor
 ```
+
+`foreman up` loads the plugin from the same Homebrew install, so the command and the plugin are always the same version. Foreman isn't in a Claude Code plugin marketplace, so there's nothing to install with `/plugin`.
 
 `foreman doctor` checks every requirement and names what's missing. Run it first whenever something doesn't start.
 
@@ -78,10 +77,10 @@ A decision is a rule that affects more than one task, like the shape of an API. 
 ## Updating Foreman
 
 ```sh
-cd ~/Code/Foreman && git pull && bun install
+brew upgrade foreman
 ```
 
-Running orchestrators and workers load Foreman from that folder, so update between runs rather than in the middle of one.
+Sessions that are already running keep working after an upgrade. Their hooks run the new version, but they keep the agents, skills and prompts they started with, so update between runs rather than in the middle of one.
 
 ## Commands for the user
 
@@ -195,10 +194,10 @@ The user can add skills that shape the review and the PRs Foreman opens. Workers
 - A skill is named by its folder, not its frontmatter, so a copied skill like `documentation-and-adrs` becomes the `adr` skill when it sits in `.foreman/skills/adr/`.
 - Skills are read at the start of each review round, so a new skill applies from the next review. A PR that's already open picks up the new description and title the next time `foreman deliver` runs after an approved review.
 - Without `.foreman/skills/`, the reviewer and the PR work as before.
-- Foreman's own repo has a pull-request skill at `.claude/skills/pull-request/SKILL.md` that makes a good starting point. To use it, copy its folder into `.foreman/skills/` and edit it:
+- Foreman's own repo has a pull-request skill at `.claude/skills/pull-request/SKILL.md` that makes a good starting point. To use it, download it into `.foreman/skills/pull-request/` and edit it:
 
 ```sh
-mkdir -p .foreman/skills && cp -r ~/Code/Foreman/.claude/skills/pull-request .foreman/skills/
+mkdir -p .foreman/skills/pull-request && curl -fsSL https://raw.githubusercontent.com/olimorris/foreman/main/.claude/skills/pull-request/SKILL.md -o .foreman/skills/pull-request/SKILL.md
 ```
 
 ## Where things live

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { saveConfig, telegramPlugins, telegramSetup } from "../src/config.ts";
 import { telegramChecks } from "../src/doctor.ts";
 import { orchestratorCommand, orchestratorModel, orchestratorTelegram } from "../src/up.ts";
+import { stableRoot } from "../src/paths.ts";
 import { tempRepo } from "./helpers.ts";
 
 test("the orchestrator's command has no --model without one", () => {
@@ -96,5 +97,23 @@ describe("Telegram", () => {
     const repo = tempRepo();
     saveConfig(repo, { telegram: {} });
     expect(orchestratorTelegram(repo)).toBeArray();
+  });
+});
+
+describe("Homebrew", () => {
+  const cellar = "/opt/homebrew/Cellar/foreman/0.2.0/libexec";
+  const opt = "/opt/homebrew/opt/foreman/libexec";
+
+  test("an install from Homebrew loads the plugin through the opt link, which survives brew upgrade and brew cleanup", () => {
+    expect(stableRoot(cellar, (p) => p === opt)).toBe(opt);
+  });
+
+  test("without the opt link, the plugin loads from where the script runs", () => {
+    expect(stableRoot(cellar, () => false)).toBe(cellar);
+  });
+
+  test("a clone loads from where it is, even when a parent folder is called Cellar", () => {
+    expect(stableRoot("/Users/me/Code/Foreman", () => true)).toBe("/Users/me/Code/Foreman");
+    expect(stableRoot("/Users/me/Cellar/foreman/main", () => true)).toBe("/Users/me/Cellar/foreman/main");
   });
 });

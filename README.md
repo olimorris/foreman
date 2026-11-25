@@ -68,20 +68,34 @@ Agent teams are great for research and review inside one session. Foreman is bui
 
 ## :package: Install
 
-Foreman runs on macOS inside a terminal app it can drive. [Rex](https://www.superlogical.com) is the default, and `FOREMAN_TERMINAL=<name>` picks another from `src/integrations/`. You need:
+```sh
+brew install olimorris/tap/foreman
+foreman doctor
+```
 
-- Claude Code 2.1.224 or later
-- [Bun](https://bun.sh), `git`, `fswatch` and `gh` (signed in with `gh auth login`), plus `jq` for Rex
+This installs the `foreman` command along with [Bun](https://bun.sh), `jq`, `fswatch` and `gh`. `foreman up` loads the Claude Code plugin from the same install, so the command and the plugin are always the same version. `brew upgrade foreman` updates both, and sessions that are already running keep working.
+
+Foreman runs on macOS inside a terminal app it can drive. [Rex](https://www.superlogical.com) is the default, and `FOREMAN_TERMINAL=<name>` picks another from `src/integrations/`. You also need:
+
+- Claude Code 2.1.224 or later (`brew install --cask claude-code`)
+- `gh` signed in with `gh auth login`
 - For web screenshots: Playwright's Chromium (`bunx playwright install chromium`)
 - For macOS app screenshots: Xcode, and Screen Recording permission for your terminal in System Settings > Privacy & Security > Screen & System Audio Recording
 
+`foreman doctor` checks each of these.
+
+### Working on Foreman
+
+To change Foreman itself, run it from a clone. Uninstall the Homebrew copy first with `brew uninstall foreman`, or whichever `foreman` comes first on your PATH runs.
+
 ```sh
-brew install jq fswatch gh
 git clone https://github.com/olimorris/foreman ~/Code/Foreman
 cd ~/Code/Foreman && bun install
 ln -s ~/Code/Foreman/bin/foreman ~/.local/bin/foreman
 foreman doctor
 ```
+
+Each release publishes the formula to `Formula/foreman.rb` in the [olimorris/homebrew-tap](https://github.com/olimorris/homebrew-tap) repo. That needs the repo to exist, and a `HOMEBREW_TAP_TOKEN` secret in this repo with a token that can push to it. Without the secret, the release still goes out and the Release workflow warns that it skipped the formula.
 
 ### Working with an agent
 
@@ -263,10 +277,10 @@ Foreman can follow your own skills when it reviews work and opens PRs. Put each 
 - A skill named `adr` shapes the decisions Foreman records. The orchestrator writes each one in its format, and in a repo with no ADR folder yet, the new folder takes the skill's title line, status and a README that describes them. An existing ADR folder keeps its own convention.
 - Workers don't see these skills, so they shape the review and the PR, not how workers build.
 
-Foreman names each skill by its folder, so a skill copied in as `.foreman/skills/adr/` is the `adr` skill whatever its frontmatter says. Foreman's own [pull-request skill](.claude/skills/pull-request/SKILL.md) is a working example. Copy it in and make it yours:
+Foreman names each skill by its folder, so a skill copied in as `.foreman/skills/adr/` is the `adr` skill whatever its frontmatter says. Foreman's own [pull-request skill](.claude/skills/pull-request/SKILL.md) is a working example. Download it and make it yours:
 
 ```sh
-mkdir -p .foreman/skills && cp -r ~/Code/Foreman/.claude/skills/pull-request .foreman/skills/
+mkdir -p .foreman/skills/pull-request && curl -fsSL https://raw.githubusercontent.com/olimorris/foreman/main/.claude/skills/pull-request/SKILL.md -o .foreman/skills/pull-request/SKILL.md
 ```
 
 Skills apply from the next review, so add them before a task reports done. Without `.foreman/skills/`, the review and the PR stay as they are.
