@@ -75,8 +75,8 @@ export function automerge(repo: Repo, args: string[]): string[] {
   if (extra.length || (arg !== undefined && arg !== "on" && arg !== "off")) throw usageError("automerge");
   const plan = loadPlan(repo);
   if (arg === undefined) return [plan?.automerge ? ON : OFF];
-  if (!plan) throw new Error("no plan. foreman automerge switches it for the current plan, so store one with foreman plan <file> first");
-  // Stored on the plan, not in config.json, so the next foreman plan <file> starts with it off.
+  if (!plan) throw new Error("no plan. This switches it for the current plan, and the orchestrator stores one with the plan tool");
+  // Stored on the plan, not in config.json, so the next plan starts with it off.
   writeJson(planPath(repo), { ...plan, automerge: arg === "on" });
   if (arg === "off") return [OFF];
   const merging = neverRules(loadConfig(repo)).filter((r) => /merg/i.test(r));
