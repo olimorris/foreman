@@ -175,7 +175,7 @@ describe("foreman workers", () => {
     savePlan(repo, { ...parsePlan(PLAN), approvedAt: "now" });
     withTasks(repo, (tasks) => void tasks.push(task("T1", ["src/types.ts"]), task("T3", ["src/views/list.ts"])));
     expect(workers(repo, ["2"])).toEqual(["2 workers at once until this plan finishes"]);
-    expect(workers(repo, ["3"])).toEqual(["3 workers at once until this plan finishes", "run foreman next to start waiting tasks"]);
+    expect(workers(repo, ["3"])).toEqual(["3 workers at once until this plan finishes", "waiting tasks start when the orchestrator next calls next"]);
     expect(workers(repo, ["1"])).toEqual(["1 worker at once until this plan finishes", "2 tasks already hold a slot. None of them stops, and new tasks wait until fewer than 1 do"]);
   });
 
@@ -187,7 +187,7 @@ describe("foreman workers", () => {
     expect(maxWorkers(repo)).toBe(3);
   });
 
-  test("setting a limit with no plan stored says to store one first", () => {
-    expect(() => workers(tempRepo(), ["4"])).toThrow("store one with foreman plan <file> first");
+  test("setting a limit with no plan stored says the orchestrator stores one, without naming a removed command", () => {
+    expect(() => workers(tempRepo(), ["4"])).toThrow("no plan. This sets the limit for the current plan, and the orchestrator stores one with the plan tool");
   });
 });

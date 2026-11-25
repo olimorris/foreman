@@ -155,7 +155,7 @@ describe("foreman automerge", () => {
 
   test("needs a plan, and takes only on or off", () => {
     const repo = tempRepo();
-    expect(() => automerge(repo, ["on"])).toThrow("no plan");
+    expect(() => automerge(repo, ["on"])).toThrow("no plan. This switches it for the current plan, and the orchestrator stores one with the plan tool");
     savePlan(repo, parsePlan(PLAN));
     for (const bad of [["yes"], ["on", "off"]]) expect(() => automerge(repo, bad)).toThrow(UsageError);
   });

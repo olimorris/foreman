@@ -16,30 +16,23 @@ export const GROUPS: Group[] = [
     ],
   },
   {
-    title: "Run a plan",
+    title: "Check on a run",
     commands: [
-      { usage: "plan <file>", about: "Check a plan and store it" },
-      { usage: "plan approve", about: "Approve the stored plan" },
-      { usage: "plan show", about: "Show the stored plan" },
-      { usage: "next [--max <n>]", about: "Start every task that's ready" },
-      { usage: "workers", about: "How many workers run at once, and why" },
-      { usage: "workers <n>", about: "Change how many run at once for this plan" },
-      { usage: "automerge", about: "Whether Foreman merges approved PRs itself" },
-      { usage: "automerge on|off", about: "Let Foreman merge approved PRs for this plan" },
       { usage: "status [--json]", about: "What each task is doing" },
       { usage: "pane", about: "Open the status pane beside this tab" },
       { usage: "summary", about: "Write the run summary of PRs to review and show it" },
-      { usage: "together", about: "Merge the open PRs together and run the tests" },
       { usage: "timeline [<task>]", about: "What happened when, and who waited" },
     ],
   },
   {
-    title: "Notes about the setup",
+    title: "Steer a run",
     commands: [
-      { usage: "notes", about: "List what workers should know about the setup" },
-      { usage: 'note "<fact>"', about: "Add a note and send it to every worker" },
-      { usage: "note --remove <n>", about: "Remove a note that turned out wrong" },
-      { usage: "baseline", about: "Run the tests on the base branch and note what fails", full: 'baseline [--runs <n>] [--test "<command>"]' },
+      { usage: "workers", about: "How many workers run at once, and why" },
+      { usage: "workers <n>", about: "Change how many run at once for this plan" },
+      { usage: "automerge", about: "Whether Foreman merges approved PRs itself" },
+      { usage: "automerge on|off", about: "Let Foreman merge approved PRs for this plan" },
+      { usage: "resume <task>", about: "Reopen a stopped worker's session", full: "resume <task> [--model <name>]" },
+      { usage: "restart <task>", about: "Close a worker and reopen its session", full: "restart <task> [--model <name>]" },
     ],
   },
   {
@@ -53,45 +46,32 @@ export const GROUPS: Group[] = [
     ],
   },
   {
-    title: "Steer a task",
+    title: "Notes about the setup",
     commands: [
-      { usage: "spawn <task>", about: "Start a task outside the plan", full: 'spawn <task> --title "<type>: <summary>" --brief <file> --owns <path>... [--base <branch>] [--model <name>]' },
-      { usage: "send <task> <message>", about: "Message a task's worker" },
-      { usage: "pause <task>", about: "Stop a task's worker" },
-      { usage: "resume <task>", about: "Reopen a stopped worker's session", full: "resume <task> [--model <name>]" },
-      { usage: "restart <task>", about: "Close a worker and reopen its session", full: "restart <task> [--model <name>]" },
-      { usage: "tidy <task>", about: "Stop processes a task's old runs left behind" },
-      { usage: "unblock <task>", about: "Close a task's permission blocks once the user allowed or skipped them" },
-      { usage: "deliver <task>", about: "Push the branch and open the PR", full: 'deliver <task> [--title "<type>: <summary>"] [--dry-run]' },
-      { usage: "teardown <task>", about: "Remove a finished task's tab, worktree and branch", full: "teardown <task> [--discard]" },
+      { usage: "notes", about: "List what workers should know about the setup" },
+      { usage: 'note "<fact>"', about: "Add a note and send it to every worker" },
+      { usage: "note --remove <n>", about: "Remove a note that turned out wrong" },
     ],
   },
   {
-    title: "Decisions",
+    title: "Run by Claude Code",
     commands: [
-      { usage: "decisions [--all]", about: "List proposed and accepted decisions" },
-      { usage: 'propose "<decision>"', about: "Propose a decision", full: 'propose "<decision>" (--body <why> | --body-file <file>) [--paths <glob>]... [--supersedes <adr>]... [--slug <name>]' },
-      { usage: "accept <D-n>", about: "Accept a proposed decision", full: "accept <D-n> [--title <text>] [--body-file <file>] [--paths <glob>]... [--supersedes <adr>]... [--slug <name>]" },
-      { usage: "reject <D-n>", about: "Reject a proposed decision", full: "reject <D-n> --reason <text>" },
-      { usage: "adr <action>", about: "Detect, set up, write or index the ADR folder", full: "adr detect | init [--dir <path>] | write [--dry-run] [--no-push] | index" },
-    ],
-  },
-  {
-    title: "Used by Foreman itself",
-    commands: [
-      { usage: 'report done "<line>"', about: "A worker reports it has finished", full: 'report done "<one line>" --test "<step>"... [--assume "<assumption>"]...' },
-      { usage: 'report <state> "<line>"', about: "A worker reports it's blocked, needs a decision or rebased", full: 'report blocked | needs-decision | rebased "<one line>"' },
-      { usage: 'ask "<question>"', about: "Record a question Foreman answers if you don't", full: 'ask "<question>" --call "<what Foreman would do>" [--task <task>] [--decision <D-n>]' },
-      { usage: "answer <Q-n>", about: "Record the answer to a question", full: 'answer <Q-n> ("<the user\'s answer>" | --by-foreman)' },
-      { usage: "review <task>", about: "Review a finished task" },
-      { usage: "feedback <task>", about: "Send review feedback to a worker" },
-      { usage: "shots <task>", about: "Screenshot a task's screens" },
-      { usage: "sync", about: "Mark merged tasks and ask workers to rebase" },
-      { usage: "watch", about: "Wait until something needs the orchestrator" },
+      { usage: "mcp", about: "Serve Foreman's tools to the orchestrator and workers" },
       { usage: "hook <event>", about: "Run one of Claude Code's hooks", full: "hook session-start | stop | pre-tool-use | permission-request | permission-denied" },
     ],
   },
 ];
+
+// Commands that moved to the MCP server, each named after the tool that replaced it.
+const ON_THE_SERVER = [
+  "accept", "adr", "answer", "ask", "baseline", "decisions", "deliver", "feedback", "next", "pause", "plan", "propose",
+  "reject", "report", "review", "send", "shots", "spawn", "sync", "teardown", "tidy", "together", "unblock", "watch",
+];
+
+export function goneText(command: string): string | undefined {
+  if (!ON_THE_SERVER.includes(command)) return undefined;
+  return `foreman: ${command} isn't a command anymore. The orchestrator and workers call the ${command} tool on Foreman's MCP server instead. Run foreman help to see the commands for people.`;
+}
 
 // The descriptions start in one column, so a usage longer than this puts its description on the next line.
 const USAGE_WIDTH = 24;

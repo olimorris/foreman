@@ -111,7 +111,7 @@ test("the summary says which PR to merge first, and when the check is out of dat
   must(["git", "-C", wt, "add", "."]);
   must(["git", "-C", wt, "commit", "-qm", "more"]);
   md = renderSummary(gather(repo, loadPlan(repo)));
-  expect(md).toContain("Out of date: #2's branch moved since this was checked. Run `foreman together` to check again.");
+  expect(md).toContain("Out of date: #2's branch moved since this was checked. Ask the orchestrator to run the together check again.");
 });
 
 test("staleness lists moved, gone and new PRs", () => {
@@ -162,5 +162,5 @@ test("tests that fail on the base branch too aren't blamed on the PRs", async ()
   saveConfig(repo, { test: "echo 'FAILED tests/test_strip.py::test_reorder'; exit 1" });
   const r = await together(repo, "main", () => openPrs(repo));
   expect(r.line).toBe("together: tests fail on main too: tests/test_strip.py::test_reorder");
-  expect(renderSummary(gather(repo, loadPlan(repo)))).toContain("- The tests fail on main too: `tests/test_strip.py::test_reorder`, so they say nothing about these PRs.");
+  expect(renderSummary(gather(repo, loadPlan(repo)))).toContain("- The tests fail on main too: `tests/test_strip.py::test_reorder`, so they say nothing about these PRs. Fix main's tests, then ask the orchestrator to run the together check again.");
 });

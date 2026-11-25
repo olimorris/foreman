@@ -226,14 +226,14 @@ export function renderTogether(t: Together, stale: string[]): string[] {
     : c.with.length ? `- ${pr(c.id)} conflicts with ${list(c.with.map(pr))} in ${paths(c.files)}. Merge ${list(c.with.map(pr))} first, and Foreman then asks ${pr(c.id)}'s worker to rebase.`
     : `- ${pr(c.id)} conflicts with ${t.base} in ${paths(c.files)}. Its worker needs to rebase before it can merge.`);
   if (tests.status === "pass") lines.push(t.conflicts.length ? `- With ${merged} merged together, the tests pass.` : `- All ${t.merged.length} open PRs merge cleanly together and the tests pass, so merge them in any order.`);
-  if (tests.status === "fail" && tests.onBase) lines.push(`- The tests fail on ${t.base} too${tests.failure ? `: \`${tests.failure}\`` : ""}, so they say nothing about these PRs. Fix ${t.base}'s tests, then run \`foreman together\` again.`);
+  if (tests.status === "fail" && tests.onBase) lines.push(`- The tests fail on ${t.base} too${tests.failure ? `: \`${tests.failure}\`` : ""}, so they say nothing about these PRs. Fix ${t.base}'s tests, then ask the orchestrator to run the together check again.`);
   if (tests.status === "fail" && !tests.onBase) lines.push(`- The tests fail with ${merged} merged together${tests.failure ? `: \`${tests.failure}\`` : ""}. Don't merge them all until that's fixed. The end of the output is in \`.foreman/together/test-output.txt\`.`);
   if (tests.status === "timeout") lines.push(`- The tests ran past ${tests.minutes} minutes with ${merged} merged, so Foreman stopped them. Raise \`testMinutes\` in \`.foreman/config.json\` if the suite is that slow.`);
   if (tests.reason === "no-command") lines.push(`- ${t.conflicts.length ? "" : `All ${t.merged.length} open PRs merge cleanly together. `}The tests weren't run, because \`.foreman/config.json\` has no test command.`);
   return [
     "## Open PRs together",
     "",
-    ...(stale.length ? [`Out of date: ${list(stale)} since this was checked. Run \`foreman together\` to check again.`, ""] : []),
+    ...(stale.length ? [`Out of date: ${list(stale)} since this was checked. Ask the orchestrator to run the together check again.`, ""] : []),
     ...lines,
     "",
   ];

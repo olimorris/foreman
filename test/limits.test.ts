@@ -1,9 +1,10 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { limitHit, limitLine, loadLimit, RETRY_MS, reviewerLimit, saveLimit, transcriptLimit, waitForReset, type UsageLimit } from "../src/limits.ts";
+import { respond, type Server } from "../src/mcp.ts";
 import { resume } from "../src/stop.ts";
+import { orchestratorTools } from "../src/tools/orchestrator.ts";
 import { withTasks } from "../src/state.ts";
 import { fakeTerminal, tempRepo } from "./helpers.ts";
 
@@ -84,16 +85,20 @@ test("foreman resume refuses while the account waits, since the watcher resumes 
   expect(() => resume(repo, "T1", fakeTerminal(false), "session:1")).toThrow(/waiting for its usage limit to reset at .*, and the watcher resumes T1 then/);
 });
 
-test("foreman spawn and foreman next start nothing while the account waits", () => {
+test("resume on a task whose worktree is gone points at the teardown tool, not a CLI command", () => {
+  const repo = tempRepo();
+  withTasks(repo, (ts) => ts.push({ id: "T1", status: "exited", branch: "foreman/T1", base: "main", worktree: join(repo.root, "gone"), owns: [], socket: "", createdAt: "" }));
+  expect(() => resume(repo, "T1", fakeTerminal(false), "session:1")).toThrow("T1's worktree is gone, so it can't resume. The orchestrator can tear it down with the teardown tool");
+});
+
+test("spawn and next start nothing while the account waits", async () => {
   const repo = tempRepo();
   saveLimit(repo, waitingNow());
-  const cli = join(import.meta.dir, "..", "src", "cli.ts");
-  const brief = join(mkdtempSync(join(tmpdir(), "foreman-brief-")), "brief.md");
-  writeFileSync(brief, "## Intent\n\nx\n");
   writeFileSync(join(repo.foreman, "plan.json"), JSON.stringify({ title: "p", approvedAt: "2026-11-25T00:00:00Z", tasks: [] }));
-  for (const args of [["spawn", "T9", "--brief", brief], ["next"]]) {
-    const p = Bun.spawnSync(["bun", cli, ...args], { cwd: repo.root, env: { ...process.env, FOREMAN_TASK: "" } });
-    expect(p.stderr.toString()).toContain("no new tasks start: the account is waiting for its usage limit to reset at");
-    expect(p.exitCode).toBe(1);
+  const server: Server = { name: "foreman", version: "0", tools: orchestratorTools(() => fakeTerminal()), session: { role: "orchestrator", repo } };
+  for (const [name, args] of [["spawn", { task: "T9", title: "feat: x", brief: "## Intent\n\nx\n", owns: "src/" }], ["next", {}]] as const) {
+    const r = (await respond({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }, server)) as { result: { content: { text: string }[]; isError?: boolean } };
+    expect(r.result.content[0]!.text).toContain("no new tasks start: the account is waiting for its usage limit to reset at");
+    expect(r.result.isError).toBe(true);
   }
 });

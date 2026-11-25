@@ -164,8 +164,8 @@ export function workers(repo: Repo, args: string[]): string[] {
   const n = Number(args[0]);
   if (args.length > 1 || !/^\d+$/.test(args[0]!) || n <= 0) throw usageError("workers");
   const p = loadPlan(repo);
-  if (!p) throw new Error("no plan. foreman workers sets the limit for the current plan, so store one with foreman plan <file> first");
-  // Stored on the plan, not in config.json, so the next foreman plan <file> goes back to the default.
+  if (!p) throw new Error("no plan. This sets the limit for the current plan, and the orchestrator stores one with the plan tool");
+  // Stored on the plan, not in config.json, so the next plan goes back to the default.
   const plan = { ...p, maxWorkers: n };
   writeJson(planPath(repo), plan);
   const tasks = loadTasks(repo);
@@ -173,7 +173,7 @@ export function workers(repo: Repo, args: string[]): string[] {
   return [
     `${atOnce(n)} until this plan finishes`,
     ...(holding > n ? [`${holding} tasks already hold a slot. None of them stops, and new tasks wait until fewer than ${n} do`] : []),
-    ...(holding < n && plan.approvedAt && readyTasks(plan, tasks, n, stackable(repo)).start.length ? ["run foreman next to start waiting tasks"] : []),
+    ...(holding < n && plan.approvedAt && readyTasks(plan, tasks, n, stackable(repo)).start.length ? ["waiting tasks start when the orchestrator next calls next"] : []),
   ];
 }
 

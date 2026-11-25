@@ -6,6 +6,9 @@ import { findDecision, propose } from "../src/ledger.ts";
 import { answer, ask, loadQuestions, openQuestions, waitingLines, type Question } from "../src/questions.ts";
 import { withTasks, type Task } from "../src/state.ts";
 import { gather } from "../src/summary.ts";
+import { respond, type Server } from "../src/mcp.ts";
+import { TOOLS } from "../src/tools/index.ts";
+import type { Role } from "../src/tools/tool.ts";
 import { fakeTerminal, tempRepo } from "./helpers.ts";
 
 const hourAgo = () => new Date(Date.now() - 60 * 60_000);
@@ -116,12 +119,17 @@ test("status says when Foreman goes ahead with each open question", () => {
   expect(waitingLines(questions, now, 0)[0]).toEndWith("It waits for you.");
 });
 
-test("only the orchestrator records questions, and ask prints the id", () => {
+test("only the orchestrator records questions, and foreman status lists them", async () => {
   const repo = tempRepo();
-  const cli = join(import.meta.dir, "..", "src", "cli.ts");
-  const run = (args: string[], env: Record<string, string> = {}) => Bun.spawnSync(["bun", cli, ...args], { cwd: repo.root, env: { ...process.env, FOREMAN_TASK: "", ...env } });
-  expect(run(["ask", "Tabs?", "--call", "spaces"], { FOREMAN_TASK: "T1" }).stderr.toString()).toContain("only the orchestrator");
-  expect(run(["ask", "Tabs?", "--call", "spaces"]).stdout.toString()).toStartWith("recorded Q-1. Ask the user in your own words. If they don't answer within 30 min");
-  expect(run(["status"]).stdout.toString()).toContain("Questions waiting on you\n  Q-1: Tabs? Foreman's call: spaces.");
-  expect(run(["answer", "Q-1", "--by-foreman"]).stdout.toString()).toContain("recorded that Foreman went ahead with Q-1");
+  const call = async (role: Role, name: string, args: object) => {
+    const server: Server = { name: "foreman", version: "0", tools: TOOLS, session: { role, repo } };
+    const r = (await respond({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }, server)) as { result?: { content: { text: string }[] }; error?: { message: string } };
+    return r.result?.content[0]!.text ?? r.error!.message;
+  };
+  expect(await call("worker", "ask", { question: "Tabs?", call: "spaces" })).toBe("unknown tool: ask");
+  expect(loadQuestions(repo)).toEqual([]);
+  expect(await call("orchestrator", "ask", { question: "Tabs?", call: "spaces" })).toStartWith("recorded Q-1. Ask the user in your own words. If they don't answer within 30 min");
+  const status = Bun.spawnSync(["bun", join(import.meta.dir, "..", "src", "cli.ts"), "status"], { cwd: repo.root, env: { ...process.env, FOREMAN_TASK: "", NO_COLOR: "1" } });
+  expect(status.stdout.toString()).toContain("Questions waiting on you\n  Q-1: Tabs? Foreman's call: spaces.");
+  expect(await call("orchestrator", "answer", { question: "Q-1", by_foreman: true })).toContain("recorded that Foreman went ahead with Q-1");
 });

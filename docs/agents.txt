@@ -70,7 +70,7 @@ A decision is a rule that affects more than one task, like the shape of an API. 
 - Accepted decisions reach every running worker straight away. They reach the repo as ADRs in one batched decisions PR, which the user merges like any other.
 - A PR comment that states a rule, like "always store times in UTC", can become a decision too.
 - To overrule a decision, the user tells the orchestrator, such as "overrule D-4". It rejects the decision and tells the workers.
-- `foreman decisions` lists proposed and accepted decisions.
+- To see the proposed and accepted decisions, the user asks the orchestrator.
 
 ## Review
 
@@ -81,8 +81,8 @@ A decision is a rule that affects more than one task, like the shape of an API. 
 ## Steering and stopping
 
 - For anything about the plan, such as adding, changing or cutting a task, or stopping the run, the user tells the orchestrator in its tab. There's no single command that stops everything.
-- To steer one worker, the user can open its tab, named like `W1 · T1: add tags to notes`, and type to it. `foreman send <task> "<message>"` does the same from any terminal.
-- `foreman pause <task>` stops a worker by closing its tab. Its commits stay on its branch and uncommitted work stays in its worktree. `foreman resume <task>` reopens its session where it left off.
+- To steer one worker, the user can open its tab, named like `W1 · T1: add tags to notes`, and type to it.
+- To stop one worker, the user asks the orchestrator to pause it, which closes its tab. Its commits stay on its branch and uncommitted work stays in its worktree. `foreman resume <task>` reopens its session where it left off.
 - If the user closes a worker's tab, the orchestrator notices and asks whether to resume the task or tear it down. It never discards unmerged work without the user's yes.
 
 ## The CLI and the MCP server
@@ -113,25 +113,24 @@ Sessions that are already running keep working after an upgrade. Their hooks run
 
 ## Commands for the user
 
-Run `foreman help` for the full list. The ones people use:
+`foreman help` lists these, plus `foreman hook` and `foreman mcp`, which Claude Code runs. The orchestrator and workers call Foreman's MCP tools for everything else.
 
+- `foreman doctor`: check every requirement and name what's missing.
+- `foreman --version`: print the installed version.
 - `foreman up`: start the orchestrator and status pane in the current repo. Takes `--model <name>` to pick the orchestrator's model for that run.
 - `foreman status`: what each task is doing, what's waiting to start and the questions waiting on the user.
 - `foreman pane`: reopen the status pane beside the current tab.
 - `foreman budget`: what each task has spent against its limit. `foreman cost` splits it into workers and reviews.
 - `foreman budget <usd>`, `foreman budget <task> <usd>`, `foreman budget --plan <usd>`: set the limit for every task, one task, or the plan.
-- `foreman workers <n>`: run up to n workers at once until the current plan finishes. The next plan goes back to `maxWorkers`. Lowering it stops no worker, and raising it starts nothing until `foreman next` runs. `foreman workers` with no number prints the limit and where it comes from.
+- `foreman workers <n>`: run up to n workers at once until the current plan finishes. The next plan goes back to `maxWorkers`. Lowering it stops no worker, and raising it starts nothing until the orchestrator starts the next tasks. `foreman workers` with no number prints the limit and where it comes from.
 - `foreman resume <task>`: reopen a stopped worker's session, such as after raising its limit. Takes `--model <name>`.
 - `foreman restart <task>`: close a worker and reopen its session. Takes `--model <name>`.
 - `foreman summary`: write and show the run summary.
 - `foreman timeline [<task>]`: what happened to each task and when, and which tasks waited on a quiet worker.
 - `foreman automerge on`: let Foreman merge each task's PR once the reviewer approves it and every check passes, until the current plan finishes. The user can also tell the orchestrator "feel free to merge". It only merges task PRs from `foreman/<task>` branches, so release PRs, the decisions PR and the user's own PRs are never touched. A failing check never merges, and Foreman sends the worker to fix it. The `never` list still applies: the reviewer won't approve a PR that a rule about merging covers. A PR built on another task's branch waits until that task merges. Merges use squash when the repo allows it, then a merge commit, then rebase. `foreman automerge off` hands merging back, and `foreman automerge` prints whether it's on. `foreman status` shows "Automerge on" while it is.
-- `foreman together`: merge the open PRs into a throwaway copy of the base branch and run the tests on the result.
 - `foreman notes`, `foreman note "<fact>"`, `foreman note --remove <n>`: list, add or remove known problems every worker should know about, such as a test that deadlocks.
-- `foreman baseline`: run the tests on the base branch and note what hangs or fails there.
-- `foreman tidy <task>`: stop processes a task's old runs left behind.
 
-Most other commands in `foreman help` are for the orchestrator and workers. Leave them to Foreman.
+The watcher, the baseline, the `together` check and tidying a task's leftover processes are the orchestrator's jobs. When the user wants one done, they ask the orchestrator.
 
 ## Settings
 
@@ -153,7 +152,7 @@ Settings live in `.foreman/config.json` in the user's repo. The file is plain JS
 - `telegram` (object): turns on pings through Claude Code's Telegram plugin, like `{ "when": "only when a question has waited 10 minutes, or the run is finished" }`. `when` is free text in the user's own words, and the orchestrator gets it in its session-start context. Without `when`, the orchestrator pings when a question needs the user's answer or the run is finished. Without `telegram`, nothing changes. See "Telegram" below for setting up the plugin.
 - `prices` (object): prices for models Foreman doesn't know, so it can work out their cost. Maps a model id to dollars per million tokens: `{ "my-model": { "input": 3, "output": 15, "cacheRead": 0.3 } }`. Foreman already knows claude-fable-5-2, claude-opus-5-5, claude-sonnet-5-5 and claude-haiku-5-5.
 - `context` (string): the path to the repo's glossary of domain terms, which every brief points workers at. Foreman finds `CONTEXT.md` or `docs/CONTEXT.md` on its own.
-- `adr` (object): how the repo writes its architecture decision records. `foreman adr detect` fills it in from the repo's ADR folder, and `foreman adr init [--dir <path>]` sets up a new one. Don't write it by hand.
+- `adr` (object): how the repo writes its architecture decision records. The orchestrator fills it in from the repo's ADR folder, or sets up a new one. Don't write it by hand.
 
 ### Screenshots
 
@@ -207,7 +206,7 @@ How it works:
 - **Over budget.** Foreman checks spend at least every 30 seconds. A task over its limit has its worker stopped, and the orchestrator asks the user whether to raise the limit. When the plan goes over, every worker stops and no new task starts. Work already committed stays on the task's branch, and uncommitted work stays in its worktree. Costs use Anthropic's list prices, so on a subscription they show how much work was done, not what the user pays.
 - **Usage limit.** On Pro, Max and other Claude subscriptions, every worker, reviewer and the orchestrator share the account's usage limit. When a worker hits it, the watcher pauses every running worker by closing its tab, starts no new task and holds reviews. A review that hits the limit waits for the reset and runs again. At the reset time, the watcher reopens each paused worker and tells it to carry on where it was. Uncommitted work stays in each worktree. `foreman status`, the status pane and `foreman timeline` show the wait and the reset time. Dollar budgets still apply on a subscription, but they measure how much work was done at list prices, not what the user pays, so a user who only cares about the limit can raise them with `foreman budget`.
 - **Hung workers.** After `stallMinutes` with no reply and no CPU use, Foreman messages the worker and names the command that looks hung. At twice that, it restarts the worker in a new tab. A worker whose commands keep using CPU, like a long build, is left alone until four times `stallMinutes`. After two restarts, the orchestrator steps in.
-- **Permission blocks.** When auto mode refuses a worker's call, or a worker waits at a permission prompt in its tab, Foreman records it from Claude Code's PermissionRequest and PermissionDenied hooks and the worker's transcript. A reviewer's refusals come from its `claude -p` output. The orchestrator tells the user which session was blocked, from what, and the rule to add in /permissions, such as `Bash(gh pr merge *)`, or that they can say skip it. The worker carries on with what doesn't need that step. `foreman status` and the pane list the block under "Needs you" until the user answers a prompt in the worker's tab, the call later runs, or the orchestrator runs `foreman unblock <task>`. A worker waiting at a prompt is never nudged or restarted. Blocks live in `.foreman/blocks.json`.
+- **Permission blocks.** When auto mode refuses a worker's call, or a worker waits at a permission prompt in its tab, Foreman records it from Claude Code's PermissionRequest and PermissionDenied hooks and the worker's transcript. A reviewer's refusals come from its `claude -p` output. The orchestrator tells the user which session was blocked, from what, and the rule to add in /permissions, such as `Bash(gh pr merge *)`, or that they can say skip it. The worker carries on with what doesn't need that step. `foreman status` and the pane list the block under "Needs you" until the user answers a prompt in the worker's tab, the call later runs, or the orchestrator closes it. A worker waiting at a prompt is never nudged or restarted. Blocks live in `.foreman/blocks.json`.
 - **Leftover processes.** Foreman stops any process in a worktree whose parent has exited, such as a test runner left behind by a timed-out run. Anything else open in the worktree, like the user's shell or editor, is left alone.
 - **Unanswered questions.** The orchestrator tells the user the call it would make. If they don't answer within `answerMinutes`, it makes that call and the summary lists it. It never does this for money or lost work: raising a budget, discarding unmerged work, or closing or merging a PR always waits for the user.
 - **PRs that clash.** Once two or more PRs are open, Foreman merges them into a throwaway copy of the base branch and runs `test`. It reports PRs that conflict, the order to merge them in and tests that fail only when they're combined.
@@ -247,5 +246,5 @@ mkdir -p .foreman/skills/pull-request && curl -fsSL https://raw.githubuserconten
 - The orchestrator sits idle with tasks in flight: tell it to call `watch`.
 - The orchestrator's turn hangs on `watch`: unset `CLAUDE_CODE_DISABLE_MCP_TASK_BACKGROUND`, `CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS`, `MCP_SDK_GENERATION` and `MCP_PROTOCOL_NEGOTIATION`. Each one stops MCP tasks running in the background.
 - A worker seems stuck: `foreman timeline <task>` shows when it went quiet. Foreman restarts hung workers itself, and `foreman restart <task>` does it by hand.
-- Tests hang or fail on the base branch: `foreman note "<what happens and how to avoid it>"` tells every worker. `foreman baseline` checks the base branch again.
+- Tests hang or fail on the base branch: `foreman note "<what happens and how to avoid it>"` tells every worker. Ask the orchestrator to run the baseline again to check the base branch.
 - The `together` check says tests ran too long: raise `testMinutes`.
