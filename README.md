@@ -107,7 +107,7 @@ It closes any worker tabs still open, then removes every task's worktree, the `.
 Paste this to your coding agent, so it can answer questions about Foreman and help you set it up:
 
 ```text
-Read https://raw.githubusercontent.com/olimorris/foreman/main/docs/agents.txt and help me with Foreman.
+Read https://raw.githubusercontent.com/olimorris/foreman/main/docs/agents.md and help me with Foreman.
 ```
 
 ## :rocket: Usage
@@ -126,9 +126,7 @@ Then tell it what you want done:
 Here's my backlog: BACKLOG.md. The deadline is tomorrow. Do it as cheaply as you can.
 ```
 
-Foreman asks about anything unclear, then plans the work. If the plan differs from your backlog, such as splitting or cutting an item, it waits for your approval. If you don't answer within 30 minutes, Foreman makes the call and notes it in the summary. Workers open in their own tabs, and approved work arrives as PRs. `foreman help` lists the commands for you. The orchestrator and workers use Foreman's MCP tools instead.
-
-The orchestrator waits on long-running work as [MCP tasks](https://modelcontextprotocol.io/extensions/tasks/overview), so you no longer see a message from another session each time it wakes. Its tab shows "MCP task still running" while it waits, and "MCP task ... completed" when something needs it. Routine changes don't wake it: when the base branch moves without a task merging, Foreman asks the workers to rebase by itself.
+Foreman asks about anything unclear, plans the work and opens a PR for each approved task. `foreman help` lists every command.
 
 ### Status
 
@@ -146,15 +144,18 @@ foreman budget
 
 <img alt="foreman budget" src="assets/README/foreman-budget.png">
 
-By default, each task can spend $5 and the plan $40. Change these in [Settings](#gear-settings). When a task goes over, Foreman stops its worker and asks whether to raise the limit.
+Each task can spend $5 and the plan $40. When a task goes over, Foreman stops its worker and asks whether to raise the limit.
 
-The plan's spend counts the tasks in the current plan, any task spawned while it runs, and the orchestrator from when you approved the plan. Tasks from earlier plans don't count. To start the plan's count again at $0 without changing the plan or any limit, run:
+| Command | What it does |
+| --- | --- |
+| `foreman budget` | Shows what each task has spent against its limit |
+| `foreman budget <usd>` | Sets the limit for every task |
+| `foreman budget <task> <usd>` | Sets the limit for one task |
+| `foreman budget --plan <usd>` | Sets the limit for the whole plan |
+| `foreman budget reset` | Starts the plan's count again at $0 |
+| `foreman cost` | Splits spend into workers and reviews |
 
-```sh
-foreman budget reset
-```
-
-Only you can run this. Claude Code blocks the orchestrator from running the `foreman` CLI.
+The plan's spend counts its tasks and the orchestrator from when you approved it.
 
 On a Pro, Max or other Claude subscription, these amounts measure work done at list prices, not what you pay. Your usage limit is what stops work. When you hit it, Foreman pauses every worker, starts nothing new and holds reviews until the limit resets. Then it picks each worker up where it left off. `foreman status` shows when the limit resets.
 
@@ -172,7 +173,7 @@ Workers run in auto mode by default, so Claude Code _may_ refuse a call or wait 
 foreman workers 5
 ```
 
-Runs up to 5 workers at once until the current plan finishes. The next plan goes back to `maxWorkers` from [Settings](#gear-settings). Lowering it never stops a running worker, and new tasks wait until fewer are running. After raising it, ask the orchestrator to start the tasks that were waiting. `foreman workers` on its own shows the limit and where it comes from.
+Runs up to 5 workers at once until the current plan finishes. The next plan goes back to `maxWorkers` from [Configuration](#gear-configuration). Lowering it never stops a running worker, and new tasks wait until fewer are running. After raising it, ask the orchestrator to start the tasks that were waiting. `foreman workers` on its own shows the limit and where it comes from.
 
 ### Auto-merging PRs
 
@@ -222,7 +223,7 @@ A status pane beside the orchestrator shows the run at a glance:
 
 A worker that goes quiet turns yellow, then red.
 
-## :gear: Settings
+## :gear: Configuration
 
 Settings live in `.foreman/config.json` in your repo, and every one is optional. Here they are with their defaults, or an example where there's no default:
 
@@ -260,7 +261,7 @@ Settings live in `.foreman/config.json` in your repo, and every one is optional.
 | `screenshots` | How to run your app for before and after screenshots |
 | `prScreenshots` | `"local"` lists screenshot paths in the PR. `"branch"` pushes them to a `foreman-screenshots` branch so they show on GitHub |
 | `never` | Things Foreman must never do in this repo, one plain sentence each. The orchestrator sees the list when it starts, every brief lists it and the reviewer treats a change that breaks one as an issue |
-| `telegram` | Turns on pings through Claude Code's Telegram plugin. `when` says in your own words when the orchestrator should ping you. [docs/agents.txt](docs/agents.txt) covers setting up the plugin |
+| `telegram` | Turns on pings through Claude Code's Telegram plugin. `when` says in your own words when the orchestrator should ping you. [docs/agents.md](docs/agents.md) covers setting up the plugin |
 
 For a macOS app, `screenshots` builds the app instead of starting a server:
 
@@ -268,21 +269,21 @@ For a macOS app, `screenshots` builds the app instead of starting a server:
 { "screenshots": { "adapter": "macos", "build": "xcodebuild -scheme App -derivedDataPath {derivedData} build", "app": "{derivedData}/Build/Products/Debug/App.app" } }
 ```
 
-### Your own skills
+## :hammer_and_wrench: Your own skills
 
-Put skills you use in every repo in `~/.config/foreman/skills/<name>/SKILL.md`, or `$XDG_CONFIG_HOME/foreman/skills` when you set it. Put skills for one repo in that repo's `.foreman/skills/<name>/SKILL.md`. When both have a skill of the same name, the repo's wins. Every session gets them, and they stay out of git.
+Skills change how Foreman works. Use them to set how workers build, what the reviewer checks, how PRs are written and how decisions are recorded.
 
-- Workers and the orchestrator load them as `user-skills:<name>`
-- The reviewer checks each change against your review skills
-- A `pull-request` skill shapes the PRs Foreman opens
-- An `adr` skill shapes the decisions it records
+Put a skill in `~/.config/foreman/skills/<name>/SKILL.md` to use it in every repo, or in `.foreman/skills/<name>/SKILL.md` for one repo. The repo's wins when both have the same name. Both stay out of git.
 
-As an example, you can start from Foreman's own [pull-request skill](.claude/skills/pull-request/SKILL.md):
+Two names have a set job:
+
+- `pull-request` shapes the PRs Foreman opens
+- `adr` shapes the decisions it records
+
+To start from Foreman's own [pull-request skill](.claude/skills/pull-request/SKILL.md):
 
 ```sh
 mkdir -p .foreman/skills/pull-request && curl -fsSL https://raw.githubusercontent.com/olimorris/foreman/main/.claude/skills/pull-request/SKILL.md -o .foreman/skills/pull-request/SKILL.md
 ```
-
-Put it in `~/.config/foreman/skills/pull-request` instead to use it in every repo.
 
 A skill you add mid-run reaches workers started after it.

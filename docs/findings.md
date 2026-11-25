@@ -1,6 +1,6 @@
-# Spikes
+# Findings
 
-Findings that shaped the design, checked against Claude Code 2.1.331 and Rex 0.1.0-preview.19 on macOS.
+How Claude Code, Rex, git and gh behave, as checked against Claude Code 2.1.331 and Rex 0.1.0-preview.19 on macOS.
 
 ## Messaging socket
 

@@ -57,7 +57,7 @@ Code the watcher calls takes its outside world as probes, like `scan` in `src/wa
 
 ## Record what you learn
 
-When you find out how Claude Code, Rex, git or `gh` behave, write it in [docs/spikes.md](docs/spikes.md). One short bullet per finding is enough.
+When you find out how Claude Code, Rex, git or `gh` behave, write it in [docs/findings.md](docs/findings.md). One short bullet per finding is enough.
 
 A change to what the orchestrator, a worker or the reviewer should do updates `agents/`, `skills/` or `prompts/` in the same PR. The [README](README.md) covers anything a user sees.
 
