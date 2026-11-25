@@ -118,6 +118,8 @@ In your repo, start Foreman with:
 foreman up
 ```
 
+If you've run it in this repo before, the orchestrator carries on its last conversation, so you can exit and come back without losing it. `foreman up --new` starts a new conversation instead.
+
 Then tell it what you want done:
 
 ```text

@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { saveConfig, telegramPlugins, telegramSetup } from "../src/config.ts";
 import { telegramChecks } from "../src/doctor.ts";
-import { orchestratorCommand, orchestratorModel, orchestratorTelegram } from "../src/up.ts";
+import { lastOrchestratorSession, orchestratorCommand, orchestratorModel, orchestratorTelegram } from "../src/up.ts";
+import { recordSession, sessionsFile, transcriptDir } from "../src/cost.ts";
 import { stableRoot } from "../src/paths.ts";
 import { tempRepo } from "./helpers.ts";
 
@@ -30,6 +31,52 @@ test("a bad model name fails and says where it came from", () => {
   saveConfig(repo, { orchestratorModel: "opuss" });
   expect(() => orchestratorModel(repo)).toThrow("orchestratorModel in .foreman/config.json");
   expect(() => orchestratorModel(repo, "sonet")).toThrow("--model");
+});
+
+describe("the orchestrator's last conversation", () => {
+  const always = () => true;
+
+  test("foreman up carries on the most recent conversation the orchestrator recorded", () => {
+    const repo = tempRepo();
+    recordSession(sessionsFile(repo), "first");
+    recordSession(sessionsFile(repo), "second");
+    const last = lastOrchestratorSession(repo, always);
+    expect(last).toBe("second");
+    const cmd = orchestratorCommand([], "/s.sock", undefined, false, last);
+    expect(cmd.slice(cmd.indexOf("--resume"), cmd.indexOf("--resume") + 2)).toEqual(["--resume", "second"]);
+    expect(cmd).toContain("--agent");
+    expect(cmd).not.toContain("--continue");
+  });
+
+  test("a repo with no recorded conversation starts a new one", () => {
+    const repo = tempRepo();
+    expect(lastOrchestratorSession(repo, always)).toBeUndefined();
+    expect(orchestratorCommand([], "/s.sock", undefined, false, undefined)).not.toContain("--resume");
+  });
+
+  test("a recorded conversation Claude Code has no transcript for is skipped, since claude --resume would exit at once", () => {
+    const repo = tempRepo();
+    recordSession(sessionsFile(repo), "kept");
+    recordSession(sessionsFile(repo), "closed-before-a-message");
+    expect(lastOrchestratorSession(repo, (id) => id === "kept")).toBe("kept");
+    expect(lastOrchestratorSession(repo, () => false)).toBeUndefined();
+  });
+
+  test("by default it looks for the transcript in Claude Code's folder for the repo", () => {
+    const repo = tempRepo();
+    const saved = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = mkdtempSync(join(tmpdir(), "foreman-claude-"));
+    try {
+      recordSession(sessionsFile(repo), "with-transcript");
+      recordSession(sessionsFile(repo), "without-transcript");
+      mkdirSync(transcriptDir(repo.root), { recursive: true });
+      writeFileSync(join(transcriptDir(repo.root), "with-transcript.jsonl"), "");
+      expect(lastOrchestratorSession(repo)).toBe("with-transcript");
+    } finally {
+      if (saved === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = saved;
+    }
+  });
 });
 
 const flag = (cmd: string[], name: string) => (cmd.includes(name) ? cmd[cmd.indexOf(name) + 1] : undefined);
