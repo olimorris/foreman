@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { loadConfig } from "./config.ts";
 import { overlaps } from "./decisions.ts";
 import type { Repo } from "./paths.ts";
+import { latestVerdict } from "./review.ts";
 import { checkBrief } from "./spawn.ts";
 import { writeJson, type Task } from "./state.ts";
 
@@ -99,20 +100,31 @@ export const merged = (t: Task) => !!t.mergedAt;
 export const active = (tasks: Task[]) => tasks.filter((t) => t.status !== "torn-down" && !merged(t));
 
 export type Waiting = { id: string; reason: string };
+export type Starting = PlanTask & { stackedOn?: string };
+export type CanStackOn = (dep: Task) => boolean;
 
-export function readyTasks(plan: Plan, tasks: Task[], max: number): { start: PlanTask[]; waiting: Waiting[] } {
+// Nothing merges while the user sleeps, so a task whose last unmerged dependency is approved starts on that dependency's branch.
+export function stackable(repo: Repo): CanStackOn | undefined {
+  if (loadConfig(repo).stackTasks === false) return undefined;
+  return (dep) => dep.status === "pr-open" && !dep.prClosed && !dep.mergedInto && latestVerdict(repo, dep)?.verdict === "approve";
+}
+
+export function readyTasks(plan: Plan, tasks: Task[], max: number, canStackOn?: CanStackOn): { start: Starting[]; waiting: Waiting[] } {
   const byId = new Map(tasks.map((t) => [t.id, t]));
   const busy = active(tasks);
-  const start: PlanTask[] = [];
+  const start: Starting[] = [];
   const waiting: Waiting[] = [];
   for (const t of [...plan.tasks].sort(byPriority(plan))) {
     if (byId.has(t.id)) continue;
     const blockers = t.deps.filter((d) => !byId.get(d) || !merged(byId.get(d)!));
+    // Only one level deep, because every rebase down a chain of unmerged branches can conflict.
+    const parent = blockers.length === 1 && canStackOn ? byId.get(blockers[0]!) : undefined;
+    const stackedOn = parent && !parent.stackedOn && canStackOn!(parent) ? parent.id : undefined;
     const clash = [...busy.map((b) => ({ id: b.id, owns: b.owns })), ...start].find((b) => overlaps(b.owns, t.owns));
-    if (blockers.length) waiting.push({ id: t.id, reason: `waits for ${blockers.join(", ")} to merge` });
+    if (blockers.length && !stackedOn) waiting.push({ id: t.id, reason: parent && !parent.stackedOn ? `waits for ${parent.id}'s PR` : `waits for ${blockers.join(", ")} to merge` });
     else if (clash) waiting.push({ id: t.id, reason: `shares paths with ${clash.id}` });
     else if (busy.length + start.length >= max) waiting.push({ id: t.id, reason: `all ${max} worker slots are busy` });
-    else start.push(t);
+    else start.push(stackedOn ? { ...t, stackedOn } : t);
   }
   return { start, waiting };
 }

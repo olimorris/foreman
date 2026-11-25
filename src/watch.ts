@@ -9,12 +9,12 @@ import { notifyOrchestrator, sendToTask } from "./send.ts";
 import { baseRef } from "./snapshot.ts";
 import { budgetOf, lastActivity, overBudget, planSpend, taskCost } from "./cost.ts";
 import { loadConfig } from "./config.ts";
-import { loadPlan, readyTasks, maxWorkers } from "./plan.ts";
+import { loadPlan, readyTasks, maxWorkers, stackable } from "./plan.ts";
 import { restartWorker, stopWorker } from "./stop.ts";
-import { inFlight, loadTasks, type Task } from "./state.ts";
+import { inFlight, loadTasks, updateTask, type Task } from "./state.ts";
 
-export type PrState = { state: string; comments: number };
-export type TrackedPr = { key: string; number: number };
+export type PrState = { state: string; comments: number; base?: string };
+export type TrackedPr = { key: string; number: number; base?: string };
 export type Stall = { since: number; nudged: boolean; escalated: boolean };
 export type Cursor = { events: Record<string, number>; main?: string; exited: string[]; prs?: Record<string, PrState>; budget?: Record<string, number>; stalls?: Record<string, Stall>; restarts?: Record<string, number> };
 
@@ -58,13 +58,13 @@ export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: Tracked
     if (!tasks.some((t) => t.id === id && t.status === "running")) delete next.stalls![id], delete next.restarts![id];
   }
 
-  for (const { key, number } of prs) {
+  for (const { key, number, base } of prs) {
     const now = probes.pr?.(number);
     if (!now) continue;
     const seen = next.prs![`${number}`];
     if (seen && now.comments > seen.comments) reasons.push(`pr-comments ${key} #${number} (+${now.comments - seen.comments})`);
-    if (now.state === "MERGED" && seen?.state !== "MERGED") reasons.push(`merged ${key} #${number}`);
-    if (now.state === "CLOSED" && seen?.state !== "CLOSED") reasons.push(`closed ${key} #${number}`);
+    if (now.state === "MERGED" && seen?.state !== "MERGED") reasons.push(base && now.base && now.base !== base ? `merged-early ${key} #${number} into ${now.base}` : `merged ${key} #${number}`);
+    if (now.state === "CLOSED" && seen?.state !== "CLOSED") reasons.push(`closed ${key} #${number}${stackedOnto(tasks, key)}`);
     next.prs![`${number}`] = now;
   }
 
@@ -102,6 +102,12 @@ function checkStall(task: Task, probes: Probes, check: StallCheck, cursor: Curso
 
 export const NUDGE = "You've done nothing for a while. If you're waiting on a command, check it's still making progress: a test run that hasn't printed anything for minutes has usually hung. Kill it, then rerun it with a time limit, or report blocked with what you found. Never end your turn waiting on a command that has no time limit.";
 
+// The PR's branch is the start of each task stacked on it, so closing it leaves them with work that may never merge.
+function stackedOnto(tasks: Task[], id: string): string {
+  const ids = tasks.filter((t) => t.stackedOn === id).map((t) => t.id);
+  return ids.length ? `, which ${ids.join(" and ")} ${ids.length > 1 ? "build" : "builds"} on` : "";
+}
+
 const clip = (s: string) => (s.length > 100 ? s.slice(0, 97) + "..." : s);
 
 const POLL_MS = 30_000;
@@ -109,16 +115,28 @@ const POLL_MS = 30_000;
 const GH_POLL_MS = 5 * 60_000;
 
 export function trackedPrs(tasks: Task[], decisions: Decision[]): TrackedPr[] {
-  const prs: TrackedPr[] = tasks.filter((t) => t.pr).map((t) => ({ key: t.id, number: t.pr! }));
+  const prs: TrackedPr[] = tasks.filter((t) => t.pr).map((t) => ({ key: t.id, number: t.pr!, base: t.base }));
   for (const n of new Set(decisions.flatMap((d) => (d.adr?.pr ? [d.adr.pr] : [])))) prs.push({ key: "decisions", number: n });
   return prs;
 }
 
 function ghPr(root: string, number: number): PrState | undefined {
-  const r = run(["gh", "pr", "view", String(number), "--json", "state,comments,reviews"], { cwd: root });
+  const r = run(["gh", "pr", "view", String(number), "--json", "state,comments,reviews,baseRefName"], { cwd: root });
   if (r.code !== 0) return undefined;
   const pr = JSON.parse(r.stdout);
-  return { state: pr.state, comments: pr.comments.length + pr.reviews.filter((x: { body: string }) => x.body).length };
+  return { state: pr.state, comments: pr.comments.length + pr.reviews.filter((x: { body: string }) => x.body).length, base: pr.baseRefName };
+}
+
+// A closed or early-merged PR stays "pr-open" in the task's status, and foreman next must not start new work on its branch.
+export function prPatches(tasks: Task[], prs: TrackedPr[], seen: Record<string, PrState>): [string, Partial<Task>][] {
+  return prs.flatMap(({ key, number, base }): [string, Partial<Task>][] => {
+    const task = tasks.find((t) => t.id === key);
+    const s = seen[`${number}`];
+    if (!task || !s) return [];
+    if (s.state === "CLOSED" && !task.prClosed) return [[key, { prClosed: true }]];
+    if (s.state === "MERGED" && s.base && s.base !== base && !task.mergedInto) return [[key, { mergedInto: s.base }]];
+    return [];
+  });
 }
 
 export async function watch(repo: Repo, base: string, term: Terminal): Promise<number> {
@@ -146,7 +164,7 @@ export async function watch(repo: Repo, base: string, term: Terminal): Promise<n
   const waiting = (id: string) => {
     const plan = loadPlan(repo);
     if (!plan?.approvedAt) return [];
-    return readyTasks(plan, loadTasks(repo), maxWorkers(repo)).waiting.filter((w) => new RegExp(`\\b${id}\\b`).test(w.reason)).map((w) => w.id);
+    return readyTasks(plan, loadTasks(repo), maxWorkers(repo), stackable(repo)).waiting.filter((w) => new RegExp(`\\b${id}\\b`).test(w.reason)).map((w) => w.id);
   };
   let lastGh = 0;
   const watched = [join(repo.foreman, "tasks"), join(repo.root, ".git", "refs"), join(repo.root, ".git", "packed-refs")].filter(existsSync);
@@ -162,6 +180,7 @@ export async function watch(repo: Repo, base: string, term: Terminal): Promise<n
       const prs = trackedPrs(tasks, loadDecisions(repo)).filter((p) => !["MERGED", "CLOSED"].includes(cursor.prs?.[`${p.number}`]?.state ?? ""));
       const result = scan(tasks, cursor, { ...probes, pr: ghDue ? (n) => ghPr(repo.root, n) : undefined }, prs, { now: Date.now(), stallMs, waiting });
       cursor = result.cursor;
+      for (const [id, patch] of prPatches(tasks, prs, cursor.prs ?? {})) updateTask(repo, id, patch);
       for (const id of result.nudge) {
         try {
           sendToTask(repo, tasks.find((t) => t.id === id)!, NUDGE, term);

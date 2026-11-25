@@ -8,9 +8,9 @@ import { pluginArgs, socketPath, taskDir, worktreeDir, type Repo } from "./paths
 import type { Terminal } from "./terminal.ts";
 import { CONVENTIONAL } from "./plan.ts";
 import { setTrust } from "./trust.ts";
-import { loadTasks, nextWorker, withTasks, type Task } from "./state.ts";
+import { findTask, loadTasks, nextWorker, withTasks, type Task } from "./state.ts";
 
-export type SpawnOptions = { id: string; title?: string; brief: string; owns: string[]; base: string; session: string; claudeConfig?: string };
+export type SpawnOptions = { id: string; title?: string; brief: string; owns: string[]; base: string; session: string; stackedOn?: string; claudeConfig?: string };
 
 export function ensureForeman(repo: Repo): void {
   mkdirSync(join(repo.foreman, "tasks"), { recursive: true });
@@ -40,8 +40,9 @@ export function spawn(repo: Repo, opts: SpawnOptions, term: Terminal): Task {
   ensureForeman(repo);
   const branch = `foreman/${id}`;
   const worktree = worktreeDir(repo, id);
+  const parent = opts.stackedOn ? findTask(repo, opts.stackedOn) : undefined;
   // Start from origin's copy when there is one, because the user's local branch lags behind merged PRs.
-  const start = baseRef(repo, base);
+  const start = parent ? parent.branch : baseRef(repo, base);
   const startSha = must(["git", "-C", repo.root, "rev-parse", start]).trim();
   must(["git", "-C", repo.root, "worktree", "add", "--no-track", "-b", branch, worktree, startSha]);
 
@@ -50,10 +51,11 @@ export function spawn(repo: Repo, opts: SpawnOptions, term: Terminal): Task {
   const briefPath = join(dir, "brief.md");
   const index = writeIndex(repo, base);
   const context = loadConfig(repo).context ?? findContext(worktree);
-  writeFileSync(briefPath, briefHeader({ id, worktree, branch, base, owns, index, context }) + briefText);
+  const from = parent ? `${parent.branch}, which isn't merged yet` : base;
+  writeFileSync(briefPath, briefHeader({ id, worktree, branch, from, owns, index, context }) + briefText);
   setTrust(worktree, true, opts.claudeConfig);
 
-  const task: Task = { id, ...(opts.title ? { title: opts.title } : {}), worker: nextWorker(loadTasks(repo)), status: "running", branch, base, worktree, owns, socket: socketPath(repo, id), startSha, createdAt: new Date().toISOString() };
+  const task: Task = { id, ...(opts.title ? { title: opts.title } : {}), worker: nextWorker(loadTasks(repo)), status: "running", branch, base, worktree, owns, socket: socketPath(repo, id), startSha, ...(parent ? { stackedOn: parent.id, parentSha: startSha } : {}), createdAt: new Date().toISOString() };
   withTasks(repo, (tasks) => tasks.push(task));
   task.tab = term.open(opts.session, tabLabel(task), worktree, workerCommand(task, term, `Your brief is ${briefPath}. Read it and start. This repo's Foreman workflow explicitly allows you to commit and rebase on ${branch}, so commit there as you go, and never on any other branch.`));
   withTasks(repo, (tasks) => Object.assign(tasks.find((t) => t.id === id)!, { tab: task.tab }));
@@ -91,14 +93,14 @@ export function tabLabel(task: Pick<Task, "id" | "title" | "worker">): string {
 
 export const plainTitle = (title: string) => title.replace(/^\w+(\([\w./-]+\))?!?:\s*/, "").trim();
 
-type Header = { id: string; worktree: string; branch: string; base: string; owns: string[]; index: string; context?: string };
+type Header = { id: string; worktree: string; branch: string; from: string; owns: string[]; index: string; context?: string };
 
-function briefHeader({ id, worktree, branch, base, owns, index, context }: Header): string {
+function briefHeader({ id, worktree, branch, from, owns, index, context }: Header): string {
   return [
     `# Task ${id}`,
     "",
     `- Worktree: ${worktree}`,
-    `- Branch: ${branch} (from ${base})`,
+    `- Branch: ${branch} (from ${from})`,
     `- Owned paths: ${owns.map((o) => `\`${o}\``).join(", ")}`,
     `- Commits: this repo's Foreman workflow explicitly allows you to commit and rebase on ${branch}. Never commit on any other branch.`,
     `- Decisions: ${index} (one line each; open a full record only when your work touches it)`,

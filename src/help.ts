@@ -66,7 +66,7 @@ export const GROUPS: Group[] = [
       { usage: "review <task>", about: "Review a finished task" },
       { usage: "feedback <task>", about: "Send review feedback to a worker" },
       { usage: "shots <task>", about: "Screenshot a task's screens" },
-      { usage: "sync", about: "Fetch the base branch and mark merged tasks" },
+      { usage: "sync", about: "Mark merged tasks and ask workers to rebase" },
       { usage: "watch", about: "Wait until something needs the orchestrator" },
       { usage: "hook <event>", about: "Run one of Claude Code's hooks", full: "hook session-start | stop | pre-tool-use" },
     ],

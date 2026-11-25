@@ -6,7 +6,7 @@ import type { ShotsConfig } from "./shots.ts";
 import type { Budget, Price } from "./cost.ts";
 import { writeJson } from "./state.ts";
 
-export type Config = { adr?: AdrConvention; context?: string; screenshots?: ShotsConfig; maxWorkers?: number; prScreenshots?: "branch" | "local"; budget?: Budget; prices?: Record<string, Price>; stallMinutes?: number };
+export type Config = { adr?: AdrConvention; context?: string; screenshots?: ShotsConfig; maxWorkers?: number; prScreenshots?: "branch" | "local"; budget?: Budget; prices?: Record<string, Price>; stallMinutes?: number; stackTasks?: boolean };
 
 const configPath = (repo: Repo) => join(repo.foreman, "config.json");
 

@@ -26,7 +26,7 @@ import { findTask, inFlight, loadTasks, updateTask } from "./state.ts";
 import { teardown } from "./teardown.ts";
 import { setTrust } from "./trust.ts";
 import { deliver } from "./deliver.ts";
-import { describePlan, loadPlan, maxWorkers, parsePlan, planBrief, readyTasks, savePlan, validatePlan } from "./plan.ts";
+import { describePlan, loadPlan, maxWorkers, parsePlan, planBrief, readyTasks, savePlan, stackable, validatePlan } from "./plan.ts";
 import { sync } from "./sync.ts";
 import { forTerminal, page, writeSummary } from "./summary.ts";
 import { budgetLeft, budgetOf, orchestratorCost, recordSession, sessionsFile, taskCost, usd } from "./cost.ts";
@@ -211,10 +211,10 @@ async function main(argv: string[]): Promise<number> {
       const room = budgetLeft(repo, loadTasks(repo));
       if (room.reason) throw new Error(`no new tasks start: ${room.reason}`);
       const max = maxWorkers(repo, opts.max?.[0]);
-      const { start, waiting } = readyTasks(p, loadTasks(repo), max);
+      const { start, waiting } = readyTasks(p, loadTasks(repo), max, stackable(repo));
       for (const t of start) {
-        spawn(repo, { id: t.id, title: t.title, brief: planBrief(repo, t.id), owns: t.owns, base: defaultBase(repo), session }, term);
-        console.log(`spawned ${t.id}: ${t.title}`);
+        spawn(repo, { id: t.id, title: t.title, brief: planBrief(repo, t.id), owns: t.owns, base: defaultBase(repo), session, stackedOn: t.stackedOn }, term);
+        console.log(`spawned ${t.id}: ${t.title}${t.stackedOn ? ` (on top of ${t.stackedOn}'s branch, which isn't merged yet)` : ""}`);
       }
       for (const w of waiting) console.log(`waiting ${w.id}: ${w.reason}`);
       const left = p.tasks.filter((t) => !loadTasks(repo).some((x) => x.id === t.id)).length;
@@ -227,7 +227,9 @@ async function main(argv: string[]): Promise<number> {
       const r = sync(repo, base, term);
       console.log(`${base} is at ${r.head.slice(0, 8)}`);
       if (r.merged.length) console.log(`merged: ${r.merged.join(", ")}. Tear them down, then run foreman next`);
+      for (const id of r.mergedEarly) console.log(`${id}'s PR merged into ${findTask(repo, id).mergedInto}, not ${base}. Keep ${id} until that branch merges`);
       if (r.asked.length) console.log(`asked to rebase: ${r.asked.join(", ")}`);
+      for (const id of r.retargeted) console.log(`moved ${id}'s PR to ${base}`);
       if (r.failed.length) console.log(`couldn't reach: ${r.failed.join(", ")}`);
       return 0;
     }

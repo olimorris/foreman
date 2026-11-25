@@ -80,8 +80,9 @@ From there:
 2. Workers open in their own tabs, named like `W1 · T1: add tags to notes`: the worker, then the task it's building. Open one to watch or steer it.
 3. When a worker proposes a decision that affects others, Foreman asks you before accepting it.
 4. Each finished task gets a review. Approved work arrives as a PR with its review packet. You merge it.
-5. When a PR merges, Foreman tears down that task, asks the remaining workers to rebase and starts the tasks that were waiting on it.
-6. When the run is done, Foreman writes `.foreman/summary.md`: the PRs in the order to review them, how to test each one, and the assumptions the workers made that you should check.
+5. A task that needs one other task's work doesn't wait for you to merge. Once the reviewer approves that task and its PR opens, Foreman starts the next one on top of its branch, so the run keeps going while you're away. Its PR says which PR it builds on, so merge that one first.
+6. When a PR merges, Foreman tears down that task, asks the remaining workers to rebase and starts the tasks that were waiting on it. A PR that built on it moves onto the base branch.
+7. When the run is done, Foreman writes `.foreman/summary.md`: the PRs in the order to review them, how to test each one, and the assumptions the workers made that you should check.
 
 While it runs, check in from any terminal in the repo:
 
@@ -159,4 +160,5 @@ A worker that waits on a hung command, such as a test run that deadlocks, can si
 
 - `maxWorkers`: how many workers run at once (default 3)
 - `stallMinutes`: how long a worker can go without replying before Foreman nudges it (default 20)
+- `stackTasks`: `false` makes a task wait for its dependency to merge, instead of starting on top of its approved PR (default `true`)
 - `prScreenshots`: `"local"` keeps screenshots on your machine and lists their paths in the PR. `"branch"` pushes them to a `foreman-screenshots` branch so they show in the PR on GitHub

@@ -1,11 +1,11 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { budgetOf, orchestratorCost, taskCost, usd } from "./cost.ts";
 import { lastDone, type TaskEvent } from "./events.ts";
 import { loadDecisions, type Decision } from "./ledger.ts";
 import type { Repo } from "./paths.ts";
 import { loadPlan, type Plan } from "./plan.ts";
-import { roundDir, type Verdict } from "./review.ts";
+import { latestVerdict, type Verdict } from "./review.ts";
 import { loadTasks, type Task } from "./state.ts";
 
 export type Ready = { task: Task; title: string; verdict?: Verdict; done?: TaskEvent; blocks: string[] };
@@ -20,11 +20,22 @@ const riskRank = (r: Ready) => RISK[r.verdict?.risk ?? "medium"];
 const list = (ids: string[]) => (ids.length === 1 ? ids[0]! : `${ids.slice(0, -1).join(", ")} and ${ids.at(-1)}`);
 
 // PRs other tasks wait on come first, because nothing behind them can start until they merge. Then riskier work, while there's time to fix it.
+// A stacked PR can only merge after the one it builds on, so it never comes before it.
 export function reviewOrder(ready: Ready[]): Ready[] {
-  return [...ready].sort((a, b) => b.blocks.length - a.blocks.length || riskRank(a) - riskRank(b));
+  const ranked = [...ready].sort((a, b) => b.blocks.length - a.blocks.length || riskRank(a) - riskRank(b));
+  const out: Ready[] = [];
+  const place = (r: Ready) => {
+    if (out.includes(r)) return;
+    const parent = ranked.find((p) => p.task.id === r.task.stackedOn);
+    if (parent) place(parent);
+    out.push(r);
+  };
+  ranked.forEach(place);
+  return out;
 }
 
-function why(r: Ready): string {
+function why(r: Ready, parent?: Ready): string {
+  if (r.task.stackedOn) return ` - builds on ${parent?.task.pr ? `#${parent.task.pr} (${r.task.stackedOn})` : r.task.stackedOn}, so merge it after that`;
   if (r.blocks.length) return ` - ${list(r.blocks)} ${r.blocks.length === 1 ? "waits" : "wait"} for this, so it goes first`;
   if (r.verdict && r.verdict.risk !== "low") return ` - risk ${r.verdict.risk}, so review it early`;
   return "";
@@ -41,7 +52,7 @@ export function renderSummary(s: SummaryInput): string {
     "## Review in this order",
     "",
     ...(ordered.length ? ordered.flatMap((r, i) => [
-      `${i + 1}. **${r.task.pr ? `#${r.task.pr} ` : ""}${r.title}** (${r.task.id})${why(r)}`,
+      `${i + 1}. **${r.task.pr ? `#${r.task.pr} ` : ""}${r.title}** (${r.task.id})${why(r, ordered.find((p) => p.task.id === r.task.stackedOn))}`,
       ...(r.done?.test?.length ? ["   - Test:", ...r.done.test.map((t) => `     - ${t}`)] : ["   - Test: the worker gave no steps"]),
       ...(r.done?.assumptions ?? []).map((a) => `   - Check: ${a}`),
       `   - Risk: ${r.verdict?.risk ?? "not reviewed"}${r.verdict?.risk_note ? `. ${r.verdict.risk_note}` : ""}`,
@@ -54,11 +65,6 @@ export function renderSummary(s: SummaryInput): string {
       ? ["## Still open", "", ...s.open.map((d) => `- ${d.id}: ${d.title}. Proposed by ${d.by} and not decided yet.`), ...s.cut.map((c) => `- Cut: ${c}`), ""]
       : []),
   ].join("\n");
-}
-
-function latestVerdict(repo: Repo, task: Task): Verdict | undefined {
-  const file = join(roundDir(repo, task.id, task.reviews ?? 0), "verdict.json");
-  return task.reviews && existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : undefined;
 }
 
 const UNFINISHED: Record<string, string> = {

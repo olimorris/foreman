@@ -28,7 +28,7 @@ When you do have questions, ask them all in one batch, one line each, with your 
 ## 3. Shape the tasks
 
 - One task per item a reviewer can judge on its own. Split an item when parts of it could merge separately.
-- **Contracts first.** When several tasks need the same new type, API shape or schema, make that a small task of its own with `Contract: yes`. The tasks that use it list it under `Depends on`. A dependent task starts only after its dependency's PR merges, so keep contracts small.
+- **Contracts first.** When several tasks need the same new type, API shape or schema, make that a small task of its own with `Contract: yes`. The tasks that use it list it under `Depends on`. A task with one unmerged dependency starts as soon as that dependency's PR is approved and open, on top of its branch. With two or more unmerged dependencies it waits until they merge. So keep contracts small, and give each task one dependency where you can.
 - Owned paths are the smallest set each task changes. Two tasks that own overlapping paths never run at the same time. If that serialises too much, split the files or make a contract task.
 - Order tasks by what the user needs first. Within the dependency order, `foreman next` starts them in the order the plan lists them.
 - When a choice affects several tasks (naming, a library, a pattern), propose it with `foreman propose` now and mention it in the plan, so the user settles it with the plan.
