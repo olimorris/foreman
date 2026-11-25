@@ -2,6 +2,7 @@ import { readFileSync, realpathSync } from "node:fs";
 import { basename } from "node:path";
 import { defaultConvention, detectAdr } from "./adr.ts";
 import { writeAdrs } from "./adrwrite.ts";
+import { adrLayout, loadSkills } from "./skills.ts";
 import { loadConfig, saveConfig } from "./config.ts";
 import { accept, findContext, reject, writeIndex } from "./decisions.ts";
 import { doctor } from "./doctor.ts";
@@ -493,9 +494,10 @@ async function adr(sub: string | undefined, opts: Record<string, string[]>): Pro
     }
     case "init": {
       if (loadConfig(repo).adr) throw new Error("this repo already has an ADR convention; see .foreman/config.json");
-      const conv = defaultConvention(opts.dir?.[0]);
+      const layout = adrLayout(loadSkills(repo));
+      const conv = defaultConvention(opts.dir?.[0], layout);
       saveConfig(repo, { adr: conv });
-      console.log(`New decisions will go to ${conv.dir}, with its README, in the first decisions PR.`);
+      console.log(`New decisions will go to ${conv.dir}, with its README, in the first decisions PR.${layout ? " They follow the layout in your adr skill." : ""}`);
       return 0;
     }
     case "write": {

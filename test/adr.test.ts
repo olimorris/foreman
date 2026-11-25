@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { defaultConvention, detectAdr, highestNumber, listAdrs, renderAdr, supersede } from "../src/adr.ts";
-import { parseOpenPrNumbers, planAdrs } from "../src/adrwrite.ts";
+import { DEFAULT_README, defaultConvention, detectAdr, highestNumber, listAdrs, renderAdr, skillLayout, supersede } from "../src/adr.ts";
+import { chooseConvention, parseOpenPrNumbers, planAdrs } from "../src/adrwrite.ts";
 import type { Decision } from "../src/ledger.ts";
 
 function fixture(files: Record<string, string>): string {
@@ -76,6 +76,14 @@ test("an adr-tools folder found through .adr-dir, with a Status section", () => 
   expect(old.content).toBe("# 1. R\n\n## Status\n\nSuperseded by ADR 3.\n");
 });
 
+test("a Status heading with its value on the next line is detected and superseded", () => {
+  const root = fixture({ "docs/adr/0001-use-postgres.md": "# 1. Use Postgres\n\n## Status\nAccepted\n\n## Context\n\nX\n" });
+  const conv = detectAdr(root)!;
+  expect(conv.status).toEqual({ kind: "section", heading: "## Status", accepted: "Accepted" });
+  const old = supersede(conv, "docs/adr/0001-use-postgres.md", "# 1. Use Postgres\n\n## Status\nAccepted\n\n## Context\n\nX\n", [2]);
+  expect(old.content).toBe("# 1. Use Postgres\n\n## Status\nSuperseded by ADR 2.\n\n## Context\n\nX\n");
+});
+
 test("an ADR-prefixed title, a status line and an unpadded underscore name", () => {
   const root = fixture({
     "adr/1_use-bun.md": "# ADR 1: Use Bun\n\nStatus: Accepted\n\nWe use Bun.\n",
@@ -101,4 +109,90 @@ test("no ADR folder detects nothing, and the default starts one with a README", 
   expect(detectAdr(root)).toBeUndefined();
   const plan = planAdrs(root, defaultConvention(), [decision("First decision")]);
   expect(plan.files.map((f) => f.file)).toEqual(["docs/decisions/README.md", "docs/decisions/0001-first-decision.md"]);
+});
+
+// Trimmed from agent-skills' documentation-and-adrs skill, which this repo copies into .foreman/skills/adr.
+const ADR_SKILL = [
+  "# Documentation and ADRs",
+  "",
+  "```bash",
+  "echo not a template",
+  "```",
+  "",
+  "```markdown",
+  "# ADR-001: Use PostgreSQL for primary database",
+  "",
+  "## Status",
+  "Proposed | Accepted | Superseded by ADR-XXX | Deprecated",
+  "",
+  "## Date",
+  "2025-01-15",
+  "",
+  "## Context",
+  "We need a database.",
+  "",
+  "## Decision",
+  "Use PostgreSQL.",
+  "",
+  "## Alternatives Considered",
+  "",
+  "### MongoDB",
+  "- Rejected: relational data.",
+  "",
+  "## Consequences",
+  "- Team needs PostgreSQL knowledge.",
+  "```",
+  "",
+  "```markdown",
+  "# Project Name",
+  "```",
+].join("\n");
+
+describe("an adr skill", () => {
+  const layout = skillLayout(ADR_SKILL)!;
+
+  test("gives the title line, status style and sections from its template", () => {
+    expect(layout).toEqual({
+      title: "# ADR-{N}: {title}",
+      status: { kind: "section", heading: "## Status", accepted: "Accepted" },
+      sections: ["Status", "Date", "Context", "Decision", "Alternatives Considered", "Consequences"],
+    });
+    expect(skillLayout("# Rules\n\nWrite good ADRs.\n")).toBeUndefined();
+  });
+
+  test("shapes a new repo's convention, records and README", () => {
+    const root = fixture({ "docs/guide.md": "# Guide\n" });
+    const chosen = chooseConvention(root, defaultConvention(), layout)!;
+    expect(chosen.conv).toEqual(defaultConvention("docs/decisions", layout));
+    expect(chosen.conv).toMatchObject({ dir: "docs/decisions", pad: 4, title: "# ADR-{N}: {title}", status: { kind: "section", heading: "## Status", accepted: "Accepted" } });
+
+    const body = "## Date\n\n2026-11-25\n\n## Context\n\nWhy.\n\n## Decision\n\nWhat.";
+    const plan = planAdrs(root, chosen.conv, [decision("Workers own their folders", { body })], [], chosen.readme);
+    expect(plan.files.map((f) => f.file)).toEqual(["docs/decisions/README.md", "docs/decisions/0001-workers-own-their-folders.md"]);
+    expect(plan.files[1]!.content).toBe(`# ADR-0001: Workers own their folders\n\n## Status\n\nAccepted\n\n${body}\n`);
+    expect(plan.files[0]!.content).toBe([
+      "# Decisions, one per file",
+      "",
+      "- Each record is `NNNN-short-name.md`, and its title line is `# ADR-NNNN: <the decision>`.",
+      "- Its sections, in order: Status, Date, Context, Decision, Alternatives Considered, Consequences.",
+      "- A new record takes one above the highest number in this folder.",
+      "- When a decision is reversed, its status becomes \"Superseded by ADR N.\" and the new decision is written as a new record.",
+      "",
+    ].join("\n"));
+  });
+
+  test("loses to an existing folder's convention", () => {
+    const root = fixture({ "docs/decisions/0007-native-app.md": "# 7. A native Mac app\n\nBody.\n" });
+    const chosen = chooseConvention(root, defaultConvention("docs/decisions", layout), layout)!;
+    expect(chosen.conv).toMatchObject({ title: "# {n}. {title}", status: { kind: "none" } });
+    expect(chosen.readme).toBe(DEFAULT_README);
+    expect(planAdrs(root, chosen.conv, [decision("Next")]).files[0]!.content).toBe("# 8. Next\n\nBecause reasons. Rejected: the other way.\n");
+  });
+
+  test("changes nothing when it's missing", () => {
+    const root = fixture({ "docs/guide.md": "# Guide\n" });
+    expect(defaultConvention("docs/decisions", undefined)).toEqual(defaultConvention());
+    expect(chooseConvention(root, defaultConvention(), undefined)).toEqual({ conv: defaultConvention(), readme: DEFAULT_README });
+    expect(chooseConvention(root, undefined, skillLayout(ADR_SKILL))).toBeUndefined();
+  });
 });

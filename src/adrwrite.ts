@@ -1,11 +1,12 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { DEFAULT_README, detectAdr, highestNumber, renderAdr, supersede, type AdrConvention } from "./adr.ts";
+import { DEFAULT_README, detectAdr, highestNumber, layoutReadme, renderAdr, supersede, withLayout, type AdrConvention, type AdrLayout } from "./adr.ts";
 import { loadConfig } from "./config.ts";
 import { writeIndex } from "./decisions.ts";
 import { must, run } from "./exec.ts";
 import { loadDecisions, updateDecision, type Decision } from "./ledger.ts";
 import { worktreeDir, type Repo } from "./paths.ts";
+import { adrLayout, loadSkills } from "./skills.ts";
 import { baseRef, snapshot } from "./snapshot.ts";
 
 export type PlannedFile = { file: string; content: string; from?: string };
@@ -13,10 +14,22 @@ export type Recorded = Record<string, { number: number; file: string }>;
 export type AdrPlan = { files: PlannedFile[]; recorded: Recorded };
 export type AdrBatch = AdrPlan & { branch: string; pr?: number };
 
-export function planAdrs(root: string, conv: AdrConvention, decisions: Decision[], reserved: number[] = []): AdrPlan {
+export type Chosen = { conv: AdrConvention; readme: string };
+
+// A folder that already has records keeps its own convention. Only a new one takes the adr skill's layout.
+export function chooseConvention(root: string, configured: AdrConvention | undefined, layout: AdrLayout | undefined): Chosen | undefined {
+  const found = detectAdr(root);
+  if (found) return { conv: found, readme: DEFAULT_README };
+  if (!configured) return undefined;
+  if (!layout) return { conv: configured, readme: DEFAULT_README };
+  const conv = withLayout(configured, layout);
+  return { conv, readme: layoutReadme(conv, layout) };
+}
+
+export function planAdrs(root: string, conv: AdrConvention, decisions: Decision[], reserved: number[] = [], readme = DEFAULT_README): AdrPlan {
   const files: PlannedFile[] = [];
   const recorded: Recorded = {};
-  if (conv.readme && !existsSync(join(root, conv.readme))) files.push({ file: conv.readme, content: DEFAULT_README });
+  if (conv.readme && !existsSync(join(root, conv.readme))) files.push({ file: conv.readme, content: readme });
   let n = Math.max(highestNumber(root, conv), ...reserved);
   const replacedBy = new Map<number, number[]>();
   for (const d of decisions) {
@@ -57,6 +70,7 @@ export function writeAdrs(repo: Repo, opts: WriteOptions): AdrBatch {
   const decisions = loadDecisions(repo).filter((d) => d.status === "accepted" && !d.adr);
   if (!decisions.length) throw new Error("no accepted decisions are waiting to be recorded");
   const configured = loadConfig(repo).adr;
+  const layout = adrLayout(loadSkills(repo));
   const stamp = new Date().toISOString().slice(0, 16).replace(/\D/g, "");
   const branch = `foreman/decisions-${stamp}`;
 
@@ -65,18 +79,18 @@ export function writeAdrs(repo: Repo, opts: WriteOptions): AdrBatch {
 
   if (opts.dryRun) {
     const snap = snapshot(repo, ref, configured ? [configured.dir] : ["docs", "doc", "adr", "decisions", ".adr-dir"]);
-    const conv = detectAdr(snap) ?? configured;
-    if (!conv) throw new Error("this repo has no ADR folder. Run foreman adr init first");
-    return { branch, ...planAdrs(snap, conv, decisions, opts.reserved ?? numbersInOpenPrs(repo.root, conv)) };
+    const chosen = chooseConvention(snap, configured, layout);
+    if (!chosen) throw new Error("this repo has no ADR folder. Run foreman adr init first");
+    return { branch, ...planAdrs(snap, chosen.conv, decisions, opts.reserved ?? numbersInOpenPrs(repo.root, chosen.conv), chosen.readme) };
   }
 
   const wt = worktreeDir(repo, `decisions-${stamp}`);
   must(["git", "-C", repo.root, "worktree", "add", "-q", "-b", branch, wt, ref]);
   try {
-    const conv = detectAdr(wt) ?? configured;
-    if (!conv) throw new Error("this repo has no ADR folder. Run foreman adr init first");
-    const reserved = opts.reserved ?? (opts.push ? numbersInOpenPrs(repo.root, conv) : []);
-    const { files, recorded } = planAdrs(wt, conv, decisions, reserved);
+    const chosen = chooseConvention(wt, configured, layout);
+    if (!chosen) throw new Error("this repo has no ADR folder. Run foreman adr init first");
+    const reserved = opts.reserved ?? (opts.push ? numbersInOpenPrs(repo.root, chosen.conv) : []);
+    const { files, recorded } = planAdrs(wt, chosen.conv, decisions, reserved, chosen.readme);
     for (const f of files) {
       if (f.from && f.from !== f.file) {
         mkdirSync(dirname(join(wt, f.file)), { recursive: true });

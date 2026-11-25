@@ -8,8 +8,9 @@ description: Adjudicate Foreman decision proposals, record accepted decisions as
 ## Set up once per repo
 
 1. Run `foreman adr detect`. It reads the base branch, not the user's checkout, and saves the convention to `.foreman/config.json`: folder, numbering, title line, status field, superseded handling, README and template. Show the user the result in two lines and ask them to confirm it.
-2. If it finds no ADR folder, ask the user whether to start one in `docs/decisions`. Only on a yes, run `foreman adr init`. The folder and its README arrive with the first decisions PR.
+2. If it finds no ADR folder, ask the user whether to start one in `docs/decisions`. Only on a yes, run `foreman adr init`. The folder and its README arrive with the first decisions PR. When the user has an `adr` skill in `.foreman/skills/adr/SKILL.md`, the new folder takes its title line and status style, and its README describes that format.
 3. If the convention's README or template has writing rules, read them now. Every record you accept must follow them.
+4. If `.foreman/skills/adr/SKILL.md` exists, load it now. It's the user's format for every record you accept. Where it disagrees with an existing ADR folder, the folder's convention wins.
 
 ## Adjudicate a proposal
 
@@ -18,7 +19,7 @@ A watcher line `needs-decision T1: D-4 <title>` means a worker proposed one. Rea
 - **Already settled** (an accepted decision or ADR covers it, or the brief's intent answers it): reject with a reason that points at the record, e.g. `foreman reject D-4 --reason "ADR 35 already says one file per layer"`.
 - **Only a local choice**: reject with a reason telling the worker to decide inside its own paths.
 - **Cross-cutting and the user hasn't decided**: record the question with `foreman ask "<question>" --decision D-4 --call "<what you would do>"`, then ask the user. Put the question first, with the options in a line each, and end with what you'll do if they don't answer. Don't accept before they answer or the watcher reports `unanswered`.
-- **The user agrees**: rewrite the title and body to the repo's ADR rules, then accept:
+- **The user agrees**: rewrite the title and body to the repo's ADR rules, then accept. With an `adr` skill, write the body in its format, with its sections in its order, and leave out the title line and status, since `foreman adr write` adds those:
   `foreman accept D-4 --title "<decision, and what it protects>" --body-file .foreman/decisions/D-4.final.md --paths 'src/export/**'`
   Add `--supersedes <n>` when it reverses an existing ADR, and `--slug` when the repo's filenames use a style the default slug won't match.
 

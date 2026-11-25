@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { loadSkills, prSkill, skillsDir } from "../src/skills.ts";
+import { adrLayout, adrSkill, loadSkills, prSkill, skillsDir } from "../src/skills.ts";
 import { tempRepo } from "./helpers.ts";
 
 function addSkill(dir: string, folder: string, text: string) {
@@ -28,4 +28,13 @@ test("loadSkills reads each folder's SKILL.md in Claude Code's format", () => {
   expect(skills[0]).toMatchObject({ description: "", body: "Just a body." });
   expect(prSkill(skills)?.name).toBe("pull-request");
   expect(prSkill(skills.filter((s) => s.name !== "pull-request"))).toBeUndefined();
+});
+
+test("a skill is named by its folder, so a copied ADR skill becomes the adr skill", () => {
+  const repo = tempRepo();
+  addSkill(skillsDir(repo), "adr", "---\nname: documentation-and-adrs\ndescription: Records decisions.\n---\n\n```markdown\n# ADR-001: Title\n\n## Status\n\nAccepted\n```\n");
+  const skills = loadSkills(repo);
+  expect(adrSkill(skills)?.name).toBe("adr");
+  expect(adrLayout(skills)).toMatchObject({ title: "# ADR-{N}: {title}", status: { kind: "section" } });
+  expect(adrLayout([])).toBeUndefined();
 });
