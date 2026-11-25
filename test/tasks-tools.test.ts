@@ -8,7 +8,8 @@ import { loadNotes } from "../src/notes.ts";
 import { respond, TASKS, type Server } from "../src/mcp.ts";
 import type { Repo } from "../src/paths.ts";
 import { ensureForeman } from "../src/spawn.ts";
-import { TASK_TOOLS } from "../src/tools/tasks.ts";
+import { taskTools } from "../src/tools/tasks.ts";
+import type { WaitForChange } from "../src/watch.ts";
 import { tempRepo } from "./helpers.ts";
 
 const offer = { "io.modelcontextprotocol/clientCapabilities": { extensions: { [TASKS]: {} } } };
@@ -21,7 +22,8 @@ function runningRepo(): Repo {
   return repo;
 }
 
-const orchestrator = (repo: Repo): Server => ({ name: "foreman", version: "0", tools: TASK_TOOLS, session: { role: "orchestrator", repo } });
+const rescan: WaitForChange = () => Bun.sleep(50);
+const orchestrator = (repo: Repo): Server => ({ name: "foreman", version: "0", tools: taskTools(rescan), session: { role: "orchestrator", repo } });
 const ask = async (s: Server, method: string, params: Record<string, unknown>) => ((await respond({ jsonrpc: "2.0", id: 1, method, params }, s)) as { result: any }).result;
 
 async function settled(s: Server, taskId: string) {
