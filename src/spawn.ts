@@ -12,7 +12,7 @@ import { setTrust } from "./trust.ts";
 import { findTask, loadTasks, nextWorker, withTasks, type Task } from "./state.ts";
 import { logRun } from "./events.ts";
 
-export type SpawnOptions = { id: string; title?: string; brief: string; owns: string[]; base: string; session: string; stackedOn?: string; claudeConfig?: string };
+export type SpawnOptions = { id: string; title?: string; model?: string; brief: string; owns: string[]; base: string; session: string; stackedOn?: string; claudeConfig?: string };
 
 export function ensureForeman(repo: Repo): void {
   mkdirSync(join(repo.foreman, "tasks"), { recursive: true });
@@ -30,12 +30,25 @@ export function checkBrief(text: string): void {
   }
 }
 
+const ALIASES = ["sonnet", "opus", "haiku", "fable", "opusplan", "default"];
+
+// Claude Code only checks the name once the worker starts, and a misspelt "sonet" saved on the task would break every resume and restart after that.
+export function checkModel(model: string): void {
+  if (!model) throw new Error("the model is empty. Name one, like sonnet, opus or haiku");
+  const alias = ALIASES.includes(model.replace(/\[1m\]$/, ""));
+  const id = /^[A-Za-z0-9][\w.:@\/[\]-]*$/.test(model) && /^claude-|anthropic|^arn:/.test(model);
+  if (!alias && !id) throw new Error(`"${model}" isn't a model name. Use sonnet, opus, haiku, fable, opusplan or default, or a full id like claude-sonnet-5-5`);
+}
+
 export function spawn(repo: Repo, opts: SpawnOptions, term: Terminal): Task {
   const { id, owns, base } = opts;
   if (!/^[A-Za-z0-9][A-Za-z0-9-]*$/.test(id)) throw new Error(`task id must be letters, digits and dashes: ${id}`);
   if (loadTasks(repo).some((t) => t.id === id)) throw new Error(`task ${id} already exists`);
   if (!owns.length) throw new Error("a task needs at least one --owns path");
   if (opts.title !== undefined && !CONVENTIONAL.test(opts.title)) throw new Error(`a task's title becomes its PR title, so it must be a conventional commit, like "feat: add tags to notes"`);
+  const config = loadConfig(repo);
+  const model = opts.model ?? config.workerModel;
+  if (model !== undefined) checkModel(model);
   const briefText = readFileSync(opts.brief, "utf8");
   checkBrief(briefText);
 
@@ -52,12 +65,12 @@ export function spawn(repo: Repo, opts: SpawnOptions, term: Terminal): Task {
   mkdirSync(dir, { recursive: true });
   const briefPath = join(dir, "brief.md");
   const index = writeIndex(repo, base);
-  const context = loadConfig(repo).context ?? findContext(worktree);
+  const context = config.context ?? findContext(worktree);
   const from = parent ? `${parent.branch}, which isn't merged yet` : base;
   writeFileSync(briefPath, briefHeader({ id, worktree, branch, from, owns, index, context, notes: briefNotes(repo) }) + briefText);
   setTrust(worktree, true, opts.claudeConfig);
 
-  const task: Task = { id, ...(opts.title ? { title: opts.title } : {}), worker: nextWorker(loadTasks(repo)), status: "running", branch, base, worktree, owns, socket: socketPath(repo, id), startSha, ...(parent ? { stackedOn: parent.id, parentSha: startSha } : {}), createdAt: new Date().toISOString() };
+  const task: Task = { id, ...(opts.title ? { title: opts.title } : {}), worker: nextWorker(loadTasks(repo)), ...(model ? { model } : {}), status: "running", branch, base, worktree, owns, socket: socketPath(repo, id), startSha, ...(parent ? { stackedOn: parent.id, parentSha: startSha } : {}), createdAt: new Date().toISOString() };
   withTasks(repo, (tasks) => tasks.push(task));
   task.tab = term.open(opts.session, tabLabel(task), worktree, workerCommand(task, term, `Your brief is ${briefPath}. Read it and start. This repo's Foreman workflow explicitly allows you to commit and rebase on ${branch}, so commit there as you go, and never on any other branch.`));
   withTasks(repo, (tasks) => Object.assign(tasks.find((t) => t.id === id)!, { tab: task.tab }));
@@ -71,6 +84,7 @@ export function workerCommand(task: Task, term: Terminal, prompt: string, resume
     "env", ...term.sessionEnv.flatMap((v) => ["-u", v]), "FOREMAN_ROLE=worker", `FOREMAN_TASK=${task.id}`,
     "claude", ...pluginArgs(),
     "--agent", "foreman:worker",
+    ...(task.model ? ["--model", task.model] : []),
     "--permission-mode", "auto",
     // Auto mode's classifier weighs the user's global "never commit" rule, but this workflow allows commits on the task branch.
     // Allow rules only reach plain Bash calls: in code mode the classifier judges the whole script first.

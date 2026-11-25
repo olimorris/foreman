@@ -4,10 +4,10 @@ import { loadConfig } from "./config.ts";
 import { overlaps } from "./decisions.ts";
 import type { Repo } from "./paths.ts";
 import { latestVerdict } from "./review.ts";
-import { checkBrief } from "./spawn.ts";
+import { checkBrief, checkModel } from "./spawn.ts";
 import { writeJson, type Task } from "./state.ts";
 
-export type PlanTask = { id: string; title: string; owns: string[]; deps: string[]; contract: boolean; brief: string };
+export type PlanTask = { id: string; title: string; owns: string[]; deps: string[]; contract: boolean; model?: string; brief: string };
 export type Plan = { title: string; deadline?: string; approvedAt?: string; calls?: string[]; cut?: string[]; tasks: PlanTask[] };
 
 const list = (v: string) => v.split(",").map((s) => s.trim().replace(/^`|`$/g, "")).filter((s) => s && !/^(none|-)$/i.test(s));
@@ -28,12 +28,14 @@ export function parsePlan(md: string): Plan {
     const fieldsEnd = body.search(/^### /m);
     const fields = fieldsEnd < 0 ? body : body.slice(0, fieldsEnd);
     const field = (name: string) => fields.match(new RegExp(`^\\s*-\\s*${name}:\\s*(.*)$`, "im"))?.[1] ?? "";
+    const model = field("Model").trim().replace(/^`|`$/g, "");
     return {
       id: m[1]!,
       title: m[2]!.trim(),
       owns: list(field("Owns")),
       deps: list(field("Depends on")),
       contract: /^(yes|true)$/i.test(field("Contract").trim()),
+      ...(model ? { model } : {}),
       brief: fieldsEnd < 0 ? "" : body.slice(fieldsEnd).replace(/^### /gm, "## ").trim() + "\n",
     };
   });
@@ -54,6 +56,11 @@ export function validatePlan(plan: Plan): string[] {
       checkBrief(t.brief);
     } catch (err) {
       errors.push(`${t.id}: ${(err as Error).message.replace("brief is", "its brief is")}`);
+    }
+    try {
+      if (t.model) checkModel(t.model);
+    } catch (err) {
+      errors.push(`${t.id}: ${(err as Error).message}`);
     }
   }
   for (const t of plan.tasks) for (const d of t.deps) if (!ids.has(d)) errors.push(`${t.id} depends on ${d}, which isn't in the plan`);
@@ -148,13 +155,16 @@ export function savePlan(repo: Repo, plan: Plan): void {
 
 export const planBrief = (repo: Repo, id: string) => join(repo.foreman, "plan", `${id}.md`);
 
-export function describePlan(plan: Plan): string {
+export function describePlan(plan: Plan, workerModel?: string): string {
   return [
     `${plan.title}${plan.deadline ? ` (deadline: ${plan.deadline})` : ""}, ${plan.tasks.length} task(s)`,
     ...waves(plan).map((w, i) => `wave ${i + 1}: ${w.map((id) => {
       const t = plan.tasks.find((x) => x.id === id)!;
-      return `${id}${t.contract ? " (contract)" : ""}`;
+      const model = t.model ?? workerModel;
+      const notes = [...(t.contract ? ["contract"] : []), ...(model ? [model] : [])];
+      return `${id}${notes.length ? ` (${notes.join(", ")})` : ""}`;
     }).join(", ")}`),
     ...sharedPaths(plan),
+    ...(plan.tasks.some((t) => !t.model) ? [`tasks with no Model line run on ${workerModel ? `${workerModel}, from workerModel in .foreman/config.json` : "Claude Code's default model"}`] : []),
   ].join("\n");
 }

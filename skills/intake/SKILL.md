@@ -33,6 +33,7 @@ When you do have questions, ask them all in one batch, one line each, with your 
 - Owned paths are the smallest set each task changes. Two tasks that own overlapping paths never run at the same time. If that serialises too much, split the files or make a contract task.
 - Order tasks by what the user needs first. Within the dependency order, `foreman next` starts them in the order the plan lists them.
 - When a choice affects several tasks (naming, a library, a pattern), propose it with `foreman propose` now and mention it in the plan, so the user settles it with the plan.
+- **Models.** A task with no `Model` line runs on the default: `workerModel` in `.foreman/config.json` when it's set, or Claude Code's own default. `foreman plan` prints the model each task will run on. Give a task `- Model: sonnet` when it's small and its spec leaves little to decide: a contract task, a docs-only change, or a mechanical edit such as a rename. Use `haiku` only for mechanical edits. Anything that needs judgment, and all UI work, stays on the default. If `foreman plan` shows the default is itself a smaller model, such as sonnet or haiku, give those tasks `- Model: opus` instead. List each choice under `Calls:`, like "T3 and T5 run on sonnet: docs-only changes with a clear spec". Tasks on the default aren't listed.
 
 ## 4. Write the plan
 
@@ -64,7 +65,7 @@ Cut:
 - <name>: <route or launch arguments>
 ```
 
-Leave out `Calls:` or `Cut:` when there are none. Both appear again in the run summary at the end. Each task's `###` sections become its brief, so follow the dispatch skill's rules for Intent, Spec and Screens.
+Add `- Model: <name>` to a task's fields only when you chose a smaller model for it. Leave out `Calls:` or `Cut:` when there are none. Both appear again in the run summary at the end. Each task's `###` sections become its brief, so follow the dispatch skill's rules for Intent, Spec and Screens.
 
 ## 5. Check it, then start or ask
 
@@ -73,7 +74,7 @@ Leave out `Calls:` or `Cut:` when there are none. Both appear again in the run s
    - Tasks that don't map one-to-one to a backlog item: a split, a merge, or a contract task, with one line on why.
    - What goes first, only when the order isn't obvious or affects the deadline.
    - What you cut to meet the deadline.
-   - Calls that change what the user will see or use. Leave out calls they'd never notice.
+   - Calls that change what the user will see or use, and which tasks run on a smaller model. Leave out calls they'd never notice.
    - Open decisions.
    - The budget, if `foreman cost` shows a plan limit. If there's none, don't mention cost.
 

@@ -11,6 +11,7 @@ export type Task = {
   id: string;
   title?: string;
   worker?: string;
+  model?: string;
   status: TaskStatus;
   branch: string;
   base: string;

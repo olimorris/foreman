@@ -8,7 +8,7 @@ import { pluginRoot, taskDir, worktreeDir, type Repo } from "./paths.ts";
 import type { Terminal } from "./terminal.ts";
 import { sendToTask } from "./send.ts";
 import { capture, parseScreens, type Capture } from "./shots.ts";
-import { taskLabel } from "./spawn.ts";
+import { checkModel, taskLabel } from "./spawn.ts";
 import { diffBase, findTask, loadTasks, updateTask, type Task } from "./state.ts";
 import { budgetLeft } from "./cost.ts";
 
@@ -47,6 +47,7 @@ export const roundDir = (repo: Repo, id: string, round: number) => join(taskDir(
 
 export function startReview(repo: Repo, id: string, term: Terminal, session = term.currentSession()): void {
   const task = findTask(repo, id);
+  reviewerModel(repo);
   const target = session ?? task.tab?.session;
   if (!target) throw new Error(`run foreman review from inside ${term.name}, since the task has no tab to open the review beside`);
   term.open(target, `review ${taskLabel(task)}`, task.worktree, [join(pluginRoot, "bin", "foreman"), "review-run", id], false);
@@ -55,6 +56,14 @@ export function startReview(repo: Repo, id: string, term: Terminal, session = te
 export async function runReview(repo: Repo, id: string): Promise<string> {
   const task = findTask(repo, id);
   const round = (task.reviews ?? 0) + 1;
+  let model: string | undefined;
+  try {
+    model = reviewerModel(repo);
+  } catch (err) {
+    const line = `failed before round ${round}: ${(err as Error).message}`;
+    appendEvent(repo, id, "reviewed", line);
+    return line;
+  }
   updateTask(repo, id, { reviews: round });
   const dir = roundDir(repo, id, round);
   mkdirSync(dir, { recursive: true });
@@ -71,14 +80,7 @@ export async function runReview(repo: Repo, id: string): Promise<string> {
     const prompt = reviewPrompt({ task, against: against(task), round, diff, stat, dirty, shots, index: writeIndex(repo, task.base), previous: lastVerdict(repo, id, round), done: lastDone(repo, id), brief: join(taskDir(repo, id), "brief.md") });
     writeFileSync(join(dir, "prompt.md"), prompt);
 
-    const r = run(
-      // Not --agent: with it, --json-schema leaves structured_output empty.
-      ["claude", "-p", "--output-format", "json", "--json-schema", JSON.stringify(VERDICT_SCHEMA),
-        ...(left.usd !== undefined ? ["--max-budget-usd", left.usd.toFixed(2)] : []),
-        "--append-system-prompt-file", join(pluginRoot, "prompts", "reviewer.md"),
-        "--tools", "Read,Grep,Glob", "--allowedTools", "Read,Grep,Glob", "--add-dir", taskDir(repo, id), join(repo.foreman, "decisions")],
-      { cwd: task.worktree, stdin: prompt, env: { FOREMAN_ROLE: "reviewer" } },
-    );
+    const r = run(reviewerCommand(repo, id, left.usd, model), { cwd: task.worktree, stdin: prompt, env: { FOREMAN_ROLE: "reviewer" } });
     writeFileSync(join(dir, "reviewer.json"), r.stdout || r.stderr);
     const verdict = parseVerdict(r.stdout);
     if (r.code !== 0 || !verdict) throw new Error(`the reviewer returned no verdict (exit ${r.code}); see ${join(dir, "reviewer.json")}`);
@@ -92,6 +94,28 @@ export async function runReview(repo: Repo, id: string): Promise<string> {
     appendEvent(repo, id, "reviewed", line);
     return line;
   }
+}
+
+// Every review with a bad model would fail, each one counted as a round, so the check runs before a round starts.
+export function reviewerModel(repo: Repo): string | undefined {
+  const model = loadConfig(repo).reviewerModel;
+  try {
+    if (model !== undefined) checkModel(model);
+  } catch (err) {
+    throw new Error(`reviewerModel in .foreman/config.json: ${(err as Error).message}`);
+  }
+  return model;
+}
+
+export function reviewerCommand(repo: Repo, id: string, budget?: number, model?: string): string[] {
+  return [
+    // Not --agent: with it, --json-schema leaves structured_output empty.
+    "claude", "-p", "--output-format", "json", "--json-schema", JSON.stringify(VERDICT_SCHEMA),
+    ...(model ? ["--model", model] : []),
+    ...(budget !== undefined ? ["--max-budget-usd", budget.toFixed(2)] : []),
+    "--append-system-prompt-file", join(pluginRoot, "prompts", "reviewer.md"),
+    "--tools", "Read,Grep,Glob", "--allowedTools", "Read,Grep,Glob", "--add-dir", taskDir(repo, id), join(repo.foreman, "decisions"),
+  ];
 }
 
 // A reply that ran out of turns can still carry its verdict as a JSON block in the text.

@@ -50,11 +50,11 @@ export const GROUPS: Group[] = [
   {
     title: "Steer a task",
     commands: [
-      { usage: "spawn <task>", about: "Start a task outside the plan", full: 'spawn <task> --title "<type>: <summary>" --brief <file> --owns <path>... [--base <branch>]' },
+      { usage: "spawn <task>", about: "Start a task outside the plan", full: 'spawn <task> --title "<type>: <summary>" --brief <file> --owns <path>... [--base <branch>] [--model <name>]' },
       { usage: "send <task> <message>", about: "Message a task's worker" },
       { usage: "pause <task>", about: "Stop a task's worker" },
-      { usage: "resume <task>", about: "Reopen a stopped worker's session" },
-      { usage: "restart <task>", about: "Close a worker and reopen its session" },
+      { usage: "resume <task>", about: "Reopen a stopped worker's session", full: "resume <task> [--model <name>]" },
+      { usage: "restart <task>", about: "Close a worker and reopen its session", full: "restart <task> [--model <name>]" },
       { usage: "deliver <task>", about: "Push the branch and open the PR", full: 'deliver <task> [--title "<type>: <summary>"] [--dry-run]' },
       { usage: "teardown <task>", about: "Remove a finished task's tab, worktree and branch", full: "teardown <task> [--discard]" },
     ],
