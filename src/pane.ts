@@ -15,7 +15,7 @@ import { loadTasks, type Task } from "./state.ts";
 import { isFinished, isMerged, needsUser } from "./lifecycle.ts";
 import type { Tab, Terminal } from "./terminal.ts";
 import { pluginRoot } from "./paths.ts";
-import { writeJson } from "./state.ts";
+import { writeJson } from "./store.ts";
 import { STALL_MINUTES, watcherArmed } from "./watch.ts";
 import { blockParts, openBlocks, type PermissionBlock } from "./permissions.ts";
 import { permissionLabel } from "./status.ts";

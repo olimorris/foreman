@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { Repo } from "./paths.ts";
-import { writeJson } from "./state.ts";
+import { writeJson } from "./store.ts";
 
 // The whole account shares one usage limit, so one wait covers every worker and reviewer.
 export type UsageLimit = {

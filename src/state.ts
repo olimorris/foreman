@@ -1,8 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Repo } from "./paths.ts";
 import type { Tab } from "./terminal.ts";
-import { withLock } from "./store.ts";
+import { jsonStore } from "./store.ts";
 import { baseRef } from "./snapshot.ts";
 
 export type TaskStatus = "running" | "over-budget" | "limited" | "done" | "blocked" | "needs-decision" | "exited" | "pr-open" | "merged" | "torn-down";
@@ -34,12 +33,10 @@ export type Task = {
   createdAt: string;
 };
 
-const tasksPath = (repo: Repo) => join(repo.foreman, "tasks.json");
+const tasksStore = (repo: Repo) => jsonStore<{ tasks: Task[] }>(join(repo.foreman, "tasks.json"), () => ({ tasks: [] }));
 
 export function loadTasks(repo: Repo): Task[] {
-  const path = tasksPath(repo);
-  if (!existsSync(path)) return [];
-  return (JSON.parse(readFileSync(path, "utf8")).tasks ?? []).map(upgrade);
+  return (tasksStore(repo).read().tasks ?? []).map(upgrade);
 }
 
 // Tasks saved before terminal integrations kept their Rex tab under "rex", with the pane called a block.
@@ -59,12 +56,9 @@ export function inFlight(tasks: Task[]): Task[] {
 }
 
 export function withTasks<T>(repo: Repo, fn: (tasks: Task[]) => T): T {
-  mkdirSync(repo.foreman, { recursive: true });
-  return withLock(join(repo.foreman, "tasks.lock"), () => {
-    const tasks = loadTasks(repo);
-    const result = fn(tasks);
-    writeJson(tasksPath(repo), { tasks });
-    return result;
+  return tasksStore(repo).update((saved) => {
+    saved.tasks = (saved.tasks ?? []).map(upgrade);
+    return fn(saved.tasks);
   });
 }
 
@@ -84,8 +78,3 @@ export function diffBase(repo: Repo, task: Task): string {
   return parent && parent.status !== "torn-down" ? parent.branch : task.parentSha ?? baseRef(repo, task.base);
 }
 
-export function writeJson(path: string, value: unknown): void {
-  const tmp = `${path}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(value, null, 2) + "\n");
-  renameSync(tmp, path);
-}

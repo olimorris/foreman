@@ -5,7 +5,8 @@ import { loadConfig } from "./config.ts";
 import { run } from "./exec.ts";
 import type { Repo } from "./paths.ts";
 import { baseRef } from "./snapshot.ts";
-import { writeJson, type Task } from "./state.ts";
+import type { Task } from "./state.ts";
+import { writeJson } from "./store.ts";
 import { pidAlive } from "./procs.ts";
 import { readPid } from "./watch.ts";
 

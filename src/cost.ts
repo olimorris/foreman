@@ -1,9 +1,9 @@
 import { loadConfig, saveConfig } from "./config.ts";
 import type { Repo } from "./paths.ts";
-import { loadPlan, planPath, type Plan } from "./plan.ts";
+import { loadPlan, updatePlan, type Plan } from "./plan.ts";
 import { rounds } from "./rounds.ts";
 import { transcripts, type Reply, type Usage } from "./transcripts.ts";
-import { loadTasks, writeJson, type Task } from "./state.ts";
+import { loadTasks, type Task } from "./state.ts";
 
 // Dollars per million tokens at list price; other models go in config.json's "prices". Cache writes cost 1.25x input for 5 minutes and 2x for an hour.
 export type Price = { input: number; output: number; cacheRead: number };
@@ -131,9 +131,10 @@ export const planSpend = (repo: Repo, tasks: Task[]): number => planSpending(rep
 
 // Stored on the plan, so the next plan starts its own count without one.
 export function resetBudget(repo: Repo, now = new Date()): string[] {
-  const plan = loadPlan(repo);
-  if (!plan) throw new Error("no plan. foreman budget reset starts the current plan's count again, and the orchestrator stores a plan with the plan tool");
-  writeJson(planPath(repo), { ...plan, budgetResetAt: now.toISOString() });
+  updatePlan(repo, (plan) => {
+    if (!plan) throw new Error("no plan. foreman budget reset starts the current plan's count again, and the orchestrator stores a plan with the plan tool");
+    return { ...plan, budgetResetAt: now.toISOString() };
+  });
   const budget = budgetOf(repo);
   const tasks = loadTasks(repo);
   const resumable = tasks.filter((t) => t.status === "over-budget" && !budgetLeft(repo, tasks, t.id).reason).map((t) => t.id);

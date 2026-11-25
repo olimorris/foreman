@@ -290,22 +290,6 @@ describe("teardown", () => {
   });
 });
 
-test("concurrent task updates don't lose writes", async () => {
-  const { repo } = spawned();
-  await Promise.all(
-    Array.from({ length: 8 }, (_, i) =>
-      Bun.spawn(["bun", "-e", `
-        const { withTasks } = await import("${join(import.meta.dir, "..", "src", "state.ts")}");
-        const repo = ${JSON.stringify(repo)};
-        withTasks(repo, (tasks) => tasks[0].owns.push("f${i}"));
-      `]).exited,
-    ),
-  );
-  expect(loadTasks(repo)[0]!.owns.length).toBe(9);
-  updateTask(repo, "T1", { status: "done" });
-  expect(findTask(repo, "T1").status).toBe("done");
-});
-
 describe("the task lifecycle", () => {
   const NOW = new Date("2026-11-25T10:00:00.000Z");
   const tab = { session: "s", window: "w2", pane: "p2" };

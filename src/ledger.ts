@@ -1,8 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Repo } from "./paths.ts";
-import { writeJson } from "./state.ts";
-import { withLock } from "./store.ts";
+import { jsonStore } from "./store.ts";
 
 export type DecisionStatus = "proposed" | "accepted" | "rejected";
 
@@ -26,11 +25,13 @@ export type Proposal = { title: string; body: string; paths: string[]; supersede
 
 export const decisionsDir = (repo: Repo) => join(repo.foreman, "decisions");
 export const recordPath = (repo: Repo, id: string) => join(decisionsDir(repo), `${id}.md`);
-const ledgerPath = (repo: Repo) => join(decisionsDir(repo), "ledger.json");
+// Each decision's record is rewritten with the ledger, so the Markdown a worker opens always matches it.
+const ledger = (repo: Repo) => jsonStore<{ decisions: Decision[] }>(join(decisionsDir(repo), "ledger.json"), () => ({ decisions: [] }), ({ decisions }) => {
+  for (const d of decisions) writeFileSync(recordPath(repo, d.id), renderRecord(d));
+});
 
 export function loadDecisions(repo: Repo): Decision[] {
-  const path = ledgerPath(repo);
-  return existsSync(path) ? JSON.parse(readFileSync(path, "utf8")).decisions ?? [] : [];
+  return ledger(repo).read().decisions ?? [];
 }
 
 export function findDecision(repo: Repo, id: string): Decision {
@@ -40,14 +41,7 @@ export function findDecision(repo: Repo, id: string): Decision {
 }
 
 function withDecisions<T>(repo: Repo, fn: (decisions: Decision[]) => T): T {
-  mkdirSync(decisionsDir(repo), { recursive: true });
-  return withLock(join(decisionsDir(repo), "ledger.lock"), () => {
-    const decisions = loadDecisions(repo);
-    const result = fn(decisions);
-    writeJson(ledgerPath(repo), { decisions });
-    for (const d of decisions) writeFileSync(recordPath(repo, d.id), renderRecord(d));
-    return result;
-  });
+  return ledger(repo).update((saved) => fn((saved.decisions ??= [])));
 }
 
 export function propose(repo: Repo, p: Proposal): Decision {

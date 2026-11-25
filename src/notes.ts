@@ -1,33 +1,28 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ensureForeman, type Repo } from "./paths.ts";
 import type { Terminal } from "./terminal.ts";
 import { sendToTask } from "./send.ts";
 import { loadTasks, type Task } from "./state.ts";
 import { canHear } from "./lifecycle.ts";
-import { withLock } from "./store.ts";
+import { fileStore } from "./store.ts";
 
 export type Note = { text: string; by: string; at: string };
 
 const notesFile = (repo: Repo) => join(repo.foreman, "notes.jsonl");
 export const notesDoc = (repo: Repo) => join(repo.foreman, "notes.md");
 
-export function loadNotes(repo: Repo): Note[] {
-  const path = notesFile(repo);
-  if (!existsSync(path)) return [];
-  return readFileSync(path, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as Note);
-}
+// notes.md is what workers read, so it's rewritten with every change.
+const notesStore = (repo: Repo) => fileStore<Note[]>(notesFile(repo), {
+  parse: (text) => text.split("\n").filter(Boolean).map((line) => JSON.parse(line) as Note),
+  format: (notes) => notes.map((n) => JSON.stringify(n) + "\n").join(""),
+  empty: () => [],
+  written: (notes) => writeFileSync(notesDoc(repo), renderNotes(notes)),
+});
 
-function withNotes<T>(repo: Repo, fn: (notes: Note[]) => T): T {
-  mkdirSync(repo.foreman, { recursive: true });
-  return withLock(join(repo.foreman, "notes.lock"), () => {
-    const notes = loadNotes(repo);
-    const result = fn(notes);
-    writeFileSync(notesFile(repo), notes.map((n) => JSON.stringify(n) + "\n").join(""));
-    writeFileSync(notesDoc(repo), renderNotes(notes));
-    return result;
-  });
-}
+export const loadNotes = (repo: Repo): Note[] => notesStore(repo).read();
+
+const withNotes = <T>(repo: Repo, fn: (notes: Note[]) => T): T => notesStore(repo).update(fn);
 
 // A second baseline run finds the same hang, and workers shouldn't hear about it twice.
 export function addNote(repo: Repo, text: string, by: string): Note | undefined {

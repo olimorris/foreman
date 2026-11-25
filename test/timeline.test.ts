@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { recordSession, sessionsFile, transcriptDir } from "../src/transcripts.ts";
 import type { RunEntry, TaskEvent } from "../src/events.ts";
 import { styleFor } from "../src/help.ts";
-import { writeJson, type Task } from "../src/state.ts";
+import type { Task } from "../src/state.ts";
+import { writeJson } from "../src/store.ts";
 import { buildTimeline, duration, gatherTimeline, quietStretches, renderTimeline, type History, type TimelineInput } from "../src/timeline.ts";
 import { tempRepo } from "./helpers.ts";
 

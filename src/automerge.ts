@@ -2,9 +2,9 @@ import { loadConfig, neverRules } from "./config.ts";
 import { run } from "./exec.ts";
 import { usageError } from "./help.ts";
 import type { Repo } from "./paths.ts";
-import { loadPlan, planPath } from "./plan.ts";
+import { loadPlan, updatePlan } from "./plan.ts";
 import { latest } from "./rounds.ts";
-import { writeJson, type Task } from "./state.ts";
+import type { Task } from "./state.ts";
 
 export type Check = { name: string; state: "pass" | "fail" | "pending" };
 export type PrView = { state: string; base?: string; head?: string; sha?: string; draft?: boolean; checks?: Check[] };
@@ -73,11 +73,12 @@ const OFF = "Automerge is off. You merge every PR yourself";
 export function automerge(repo: Repo, args: string[]): string[] {
   const [arg, ...extra] = args;
   if (extra.length || (arg !== undefined && arg !== "on" && arg !== "off")) throw usageError("automerge");
-  const plan = loadPlan(repo);
-  if (arg === undefined) return [plan?.automerge ? ON : OFF];
-  if (!plan) throw new Error("no plan. This switches it for the current plan, and the orchestrator stores one with the plan tool");
+  if (arg === undefined) return [automergeOn(repo) ? ON : OFF];
   // Stored on the plan, not in config.json, so the next plan starts with it off.
-  writeJson(planPath(repo), { ...plan, automerge: arg === "on" });
+  updatePlan(repo, (plan) => {
+    if (!plan) throw new Error("no plan. This switches it for the current plan, and the orchestrator stores one with the plan tool");
+    return { ...plan, automerge: arg === "on" };
+  });
   if (arg === "off") return [OFF];
   const merging = neverRules(loadConfig(repo)).filter((r) => /merg/i.test(r));
   return [ON, ...(merging.length ? ["Your never list mentions merging, and it still applies:", ...merging.map((r) => `  - ${r}`)] : [])];

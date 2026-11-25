@@ -9,7 +9,8 @@ import { recordSession, sessionsFile, transcriptDir } from "../src/transcripts.t
 import { budgetOverview } from "../src/overview.ts";
 import { loadPlan, planPath, type Plan } from "../src/plan.ts";
 import type { Repo } from "../src/paths.ts";
-import { loadTasks, writeJson, type Task } from "../src/state.ts";
+import { loadTasks, type Task } from "../src/state.ts";
+import { writeJson } from "../src/store.ts";
 import { tempRepo, writeRound } from "./helpers.ts";
 
 process.env.CLAUDE_CONFIG_DIR = mkdtempSync(join(tmpdir(), "foreman-claude-"));

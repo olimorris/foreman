@@ -1,10 +1,10 @@
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { movedOnSince, tailLines, toolCalls, transcripts } from "./transcripts.ts";
 import type { Repo } from "./paths.ts";
 import { latest } from "./rounds.ts";
-import { withLock } from "./store.ts";
-import { writeJson, type Task } from "./state.ts";
+import { jsonStore } from "./store.ts";
+import type { Task } from "./state.ts";
 
 export type Role = "worker" | "reviewer" | "orchestrator";
 export type Who = { role: Role; task?: string; worker?: string };
@@ -27,11 +27,11 @@ export type PermissionBlock = Who & {
 
 export type ToolCall = { tool: string; input: Record<string, unknown> };
 
-const blocksFile = (repo: Repo) => join(repo.foreman, "blocks.json");
+const blocksStore = (repo: Repo) => jsonStore<{ blocks: PermissionBlock[] }>(join(repo.foreman, "blocks.json"), () => ({ blocks: [] }));
 
 export function loadBlocks(repo: Repo): PermissionBlock[] {
   try {
-    return JSON.parse(readFileSync(blocksFile(repo), "utf8")).blocks ?? [];
+    return blocksStore(repo).read().blocks ?? [];
   } catch {
     return [];
   }
@@ -40,13 +40,7 @@ export function loadBlocks(repo: Repo): PermissionBlock[] {
 export const openBlocks = (repo: Repo) => loadBlocks(repo).filter((b) => !b.closedAt);
 
 function withBlocks<T>(repo: Repo, fn: (blocks: PermissionBlock[]) => T): T {
-  mkdirSync(repo.foreman, { recursive: true });
-  return withLock(join(repo.foreman, "blocks.lock"), () => {
-    const blocks = loadBlocks(repo);
-    const result = fn(blocks);
-    writeJson(blocksFile(repo), { blocks });
-    return result;
-  });
+  return blocksStore(repo).update((saved) => fn((saved.blocks ??= [])));
 }
 
 // The hook and the transcript both see an auto mode refusal, so a block already known by its id isn't added twice.

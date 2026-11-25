@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfig } from "./config.ts";
 import { overlaps } from "./decisions.ts";
@@ -6,7 +6,8 @@ import type { Repo } from "./paths.ts";
 import { latest } from "./rounds.ts";
 import { holdsSlot, isFinished, isMerged } from "./lifecycle.ts";
 import { checkBrief, checkModel } from "./spawn.ts";
-import { loadTasks, writeJson, type Task } from "./state.ts";
+import { loadTasks, type Task } from "./state.ts";
+import { fileStore } from "./store.ts";
 import { usageError } from "./help.ts";
 
 export type PlanTask = { id: string; title: string; owns: string[]; deps: string[]; contract: boolean; model?: string; brief: string };
@@ -163,11 +164,11 @@ export function workers(repo: Repo, args: string[]): string[] {
   }
   const n = Number(args[0]);
   if (args.length > 1 || !/^\d+$/.test(args[0]!) || n <= 0) throw usageError("workers");
-  const p = loadPlan(repo);
-  if (!p) throw new Error("no plan. This sets the limit for the current plan, and the orchestrator stores one with the plan tool");
   // Stored on the plan, not in config.json, so the next plan goes back to the default.
-  const plan = { ...p, maxWorkers: n };
-  writeJson(planPath(repo), plan);
+  const plan = updatePlan(repo, (p) => {
+    if (!p) throw new Error("no plan. This sets the limit for the current plan, and the orchestrator stores one with the plan tool");
+    return { ...p, maxWorkers: n };
+  });
   const tasks = loadTasks(repo);
   const holding = tasks.filter(holdsSlot).length;
   return [
@@ -179,8 +180,18 @@ export function workers(repo: Repo, args: string[]): string[] {
 
 export const planPath = (repo: Repo) => join(repo.foreman, "plan.json");
 
-export function loadPlan(repo: Repo): Plan | undefined {
-  return existsSync(planPath(repo)) ? JSON.parse(readFileSync(planPath(repo), "utf8")) : undefined;
+// plan.json holds the plan itself, so the store keeps it in a box that can start out empty.
+const planStore = (repo: Repo) => fileStore<{ plan?: Plan }>(planPath(repo), {
+  parse: (text) => ({ plan: JSON.parse(text) }),
+  format: ({ plan }) => JSON.stringify(plan, null, 2) + "\n",
+  empty: () => ({}),
+});
+
+export const loadPlan = (repo: Repo): Plan | undefined => planStore(repo).read().plan;
+
+// Replaces the stored plan with what fn makes of it, under the plan's lock. fn gets undefined when no plan is stored.
+export function updatePlan(repo: Repo, fn: (plan: Plan | undefined) => Plan): Plan {
+  return planStore(repo).update((box) => (box.plan = fn(box.plan)));
 }
 
 const runningPlan = (repo: Repo, stored: Plan): boolean => {
@@ -192,10 +203,8 @@ const runningPlan = (repo: Repo, stored: Plan): boolean => {
 export function savePlan(repo: Repo, plan: Plan): void {
   mkdirSync(join(repo.foreman, "plan"), { recursive: true });
   for (const t of plan.tasks) writeFileSync(planBrief(repo, t.id), `# ${t.id}: ${t.title}\n\n${t.brief}`);
-  const before = loadPlan(repo);
   // Re-storing an edited plan mid-run would otherwise switch automerge off and leave approved PRs unmerged.
-  const keepAutomerge = plan.automerge === undefined && before?.automerge && runningPlan(repo, before);
-  writeJson(planPath(repo), keepAutomerge ? { ...plan, automerge: true } : plan);
+  updatePlan(repo, (before) => (plan.automerge === undefined && before?.automerge && runningPlan(repo, before) ? { ...plan, automerge: true } : plan));
 }
 
 export const planBrief = (repo: Repo, id: string) => join(repo.foreman, "plan", `${id}.md`);

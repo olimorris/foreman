@@ -6,7 +6,7 @@ import { addNote, newNoteMessage, shareNote } from "./notes.ts";
 import { ensureForeman, type Repo } from "./paths.ts";
 import { baseRef } from "./snapshot.ts";
 import type { Terminal } from "./terminal.ts";
-import { writeJson } from "./state.ts";
+import { writeJson } from "./store.ts";
 import { pidAlive } from "./procs.ts";
 import { readPid } from "./watch.ts";
 
