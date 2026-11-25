@@ -7,7 +7,7 @@ description: Review a finished Foreman task, relay feedback to its worker, and s
 
 ## When a worker reports done
 
-Run `foreman review <id>`. It opens a `review <id>` tab, which:
+Call `review` for the task. It opens a `review <id>` tab, which:
 
 1. Captures screenshots of every screen named in the brief's `## Screens` section: before (the base branch, cached by commit) and after (the task branch).
 2. Runs a fresh read-only reviewer on the diff, the brief, the decisions it touches and the screenshots.
@@ -17,8 +17,8 @@ Keep the screenshots out of your own context. The verdict line is all you need.
 
 ## When the verdict arrives
 
-- **approve**: run `foreman deliver <id>`. It pushes the branch and opens the PR with the review packet. Tell the user in one line with the PR link and the risk. With automerge off, the user merges it. With it on, Foreman merges it once every check passes, and the `merged` line wakes you as usual. You never merge a PR yourself. If its note names tasks that can start on top of it, run `foreman next`. If it says other tasks build on this branch, run `foreman sync`. If two or more PRs are now open, start `foreman together` in the background.
-- **changes**: run `foreman feedback <id>`. It sends the reviewer's issues, each anchored to a screenshot, screen or file and the intent it breaks, to the same running worker. The worker fixes them and reports done again. Review again.
+- **approve**: call `deliver` for the task. It pushes the branch and opens the PR with the review packet. Tell the user in one line with the PR link and the risk. With automerge off, the user merges it. With it on, Foreman merges it once every check passes, and the `merged` line wakes you as usual. You never merge a PR yourself. If its note names tasks that can start on top of it, call `next`. If it says other tasks build on this branch, call `sync`. If two or more PRs are now open, start `foreman together` in the background.
+- **changes**: call `feedback` for the task. It sends the reviewer's issues, each anchored to a screenshot, screen or file and the intent it breaks, to the same running worker. The worker fixes them and reports done again. Review again.
 - **"revision limit reached"**: after two revision rounds, stop. Tell the user what's still wrong, in one line per issue, and point them at the screenshots in `.foreman/tasks/<id>/review/round-<n>/`. Ask whether to send a third round, take over the task, or merge as is.
 - **failed**: read the capture log or `reviewer.json` named in the line, fix the setup if you can, then review again.
 
@@ -35,7 +35,7 @@ It runs in a fresh checkout with nothing installed or built, so include the setu
 
 ## Set up screenshots once per repo
 
-Add a `screenshots` entry to `.foreman/config.json`, then check it with `foreman shots <id>` on a running task.
+Add a `screenshots` entry to `.foreman/config.json`, then check it by calling `shots` for a running task.
 
 Web:
 
