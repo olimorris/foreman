@@ -82,3 +82,16 @@ Checked against the Telegram plugin 0.0.7 and Claude Code 2.1.332.
 - Without `--channels`, the `reply`, `react` and `edit_message` tools still work, so pings go out. Messages from Telegram only reach a session started with `--channels`, as `<channel source="telegram" chat_id="..." message_id="..." user="..." ts="...">`.
 - Plugin channels must be on Claude Code's approved allowlist, and a Team or Enterprise organisation can turn channels off. A `claude -p` run with `--channels` logged nothing about channels, so check messages from Telegram in an interactive session.
 - `reply` needs a `chat_id`. For a direct message it's the user's numeric id, which pairing adds to `allowFrom` in `~/.claude/channels/telegram/access.json`. The token lives in `~/.claude/channels/telegram/.env` as `TELEGRAM_BOT_TOKEN`, and `TELEGRAM_STATE_DIR` moves that whole folder.
+
+## Permission blocks
+
+Checked against Claude Code 2.1.332: its binary's strings, transcripts already on this machine, and a `claude -p` run with hooks that logged their input. A second run to see the PermissionDenied hook fire was itself refused by the auto mode of the session running it, so that hook's input comes from the binary's schema.
+
+- The PermissionRequest hook fires when a permission prompt shows. Its input has `session_id`, `transcript_path`, `cwd`, `permission_mode`, `tool_name`, `tool_input` and `permission_suggestions`, but no `tool_use_id`. A hook that prints nothing leaves the prompt as it is.
+- `claude -p` fires PermissionRequest too, then refuses the call at once without asking. So a PermissionRequest from the reviewer is never a prompt it waits at.
+- `claude -p --output-format json` lists each call it refused in `permission_denials`, with `tool_name`, `tool_use_id` and `tool_input`.
+- For a Bash command, `permission_suggestions` holds an `addRules` entry with the exact command, like `Bash(curl -sI https://example.com)`. That only allows the same call again, so Foreman suggests the command's leading words with a wildcard instead, like `Bash(curl *)`.
+- The PermissionDenied hook fires after auto mode refuses a call, with `tool_name`, `tool_input`, `tool_use_id` and `reason`. Returning `{"hookSpecificOutput":{"hookEventName":"PermissionDenied","retry":true}}` tells the model it may try again. Foreman returns nothing.
+- Auto mode's refusal lands in the transcript as the call's `tool_result`, with `is_error` and text starting "Permission for this action was denied by the Claude Code auto mode classifier. Reason: [Destructive or Unwanted Actions]". The text tells the model to carry on with other work, and the session does. Other refusals start "Permission for this action has been denied".
+- The Notification hook also fires for a prompt, with `notification_type` `permission_prompt`, but it only carries a message and a title. PermissionRequest names the tool and its input, so Foreman uses that.
+- A session at a prompt has already written the call's `tool_use` line and writes nothing more until the user answers. Yes runs the call. No writes a `tool_result` starting "The user doesn't want to proceed with this tool use". Either way the call gets its `tool_result`, which is how Foreman knows the prompt was answered.

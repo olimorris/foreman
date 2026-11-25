@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { saveConfig } from "../src/config.ts";
-import { areaLock, bashWriteTargets, owned, sessionStartContext, stopDecision, STOP_BLOCK_BUDGET, type LockContext } from "../src/hooks.ts";
+import { areaLock, bashWriteTargets, hookWho, owned, recordHookBlock, sessionStartContext, stopDecision, STOP_BLOCK_BUDGET, type LockContext } from "../src/hooks.ts";
+import { openBlocks } from "../src/permissions.ts";
 import type { Task } from "../src/state.ts";
 import { fakeTerminal, tempRepo } from "./helpers.ts";
 
@@ -153,5 +154,26 @@ describe("Telegram pings", () => {
 
   test("without the setting, nothing is said about Telegram", () => {
     expect(context(undefined, ["1"])).not.toContain("Telegram");
+  });
+});
+
+describe("permission hooks", () => {
+  const tasks = [{ ...task, worker: "W2" }];
+
+  test("name the worker from FOREMAN_TASK, and the reviewer from the worktree it runs in", () => {
+    expect(hookWho("worker", "T1", wt, tasks)).toEqual({ role: "worker", task: "T1", worker: "W2" });
+    expect(hookWho("reviewer", undefined, `${wt}/src`, tasks)).toEqual({ role: "reviewer", task: "T1" });
+    expect(hookWho("orchestrator", undefined, "/r", tasks)).toEqual({ role: "orchestrator" });
+    expect(hookWho(undefined, undefined, wt, tasks)).toBeUndefined();
+  });
+
+  test("record a refusal from the PermissionDenied hook once", () => {
+    const repo = tempRepo();
+    const input = { cwd: wt, tool_name: "Bash", tool_input: { command: "gh pr merge 41" }, tool_use_id: "toolu_1", reason: "Destructive" };
+    const who = hookWho("worker", "T1", wt, tasks);
+    expect(recordHookBlock(repo, "permission-denied", input, who)).toMatchObject({ kind: "auto-mode", task: "T1", rule: "Bash(gh pr merge *)" });
+    recordHookBlock(repo, "permission-denied", input, who);
+    expect(openBlocks(repo)).toHaveLength(1);
+    expect(recordHookBlock(repo, "stop", input, who)).toBeUndefined();
   });
 });

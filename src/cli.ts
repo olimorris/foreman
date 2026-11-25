@@ -16,7 +16,8 @@ import { runReview, sendFeedback, startReview } from "./review.ts";
 import { capture, parseScreens } from "./shots.ts";
 import { join } from "node:path";
 import { appendEvent, logRun, REPORT_TYPES, type ReportType } from "./events.ts";
-import { areaLock, sessionStartContext, stopHook, type HookInput, type LockContext } from "./hooks.ts";
+import { areaLock, hookWho, recordHookBlock, sessionStartContext, stopHook, type HookInput, type LockContext } from "./hooks.ts";
+import { blockSummary, unblock } from "./permissions.ts";
 import { defaultBase, findRepo, pluginArgs, socketPath, type Repo } from "./paths.ts";
 import { terminal } from "./integrations/index.ts";
 import { requireSession } from "./terminal.ts";
@@ -429,6 +430,15 @@ async function main(argv: string[]): Promise<number> {
       }
       return 0;
     }
+    case "unblock": {
+      const id = positional[0];
+      if (!id) throw usageError("unblock");
+      const repo = findRepo();
+      findTask(repo, id);
+      const closed = unblock(repo, id);
+      console.log(closed.length ? closed.map((b) => `closed: ${blockSummary(b)}`).join("\n") : `${id} has no open permission blocks`);
+      return 0;
+    }
     case "hook":
       return hook(positional[0]);
     default:
@@ -505,7 +515,7 @@ async function adr(sub: string | undefined, opts: Record<string, string[]>): Pro
 
 async function hook(event: string | undefined): Promise<number> {
   const role = process.env.FOREMAN_ROLE;
-  if (role !== "worker" && role !== "orchestrator") return 0;
+  if (role !== "worker" && role !== "orchestrator" && role !== "reviewer") return 0;
   const input = JSON.parse(await Bun.stdin.text()) as HookInput;
   let repo: Repo;
   try {
@@ -513,6 +523,12 @@ async function hook(event: string | undefined): Promise<number> {
   } catch {
     return 0;
   }
+  // Prints nothing, so the prompt still shows and the refusal stands.
+  if (event === "permission-request" || event === "permission-denied") {
+    recordHookBlock(repo, event, input, hookWho(role, process.env.FOREMAN_TASK, realpathSync(input.cwd), loadTasks(repo)));
+    return 0;
+  }
+  if (role === "reviewer") return 0;
   const ctx: LockContext =
     role === "orchestrator"
       ? { role, repo }

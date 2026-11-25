@@ -6,6 +6,7 @@ import { saveLimit } from "../src/limits.ts";
 import { statusView } from "../src/status.ts";
 import { PLAIN } from "../src/style.ts";
 import { tempRepo } from "./helpers.ts";
+import { recordBlocks } from "../src/permissions.ts";
 
 const task = (id: string, status: string, extra: object = {}) => ({ id, status, title: `feat: build ${id}`, branch: `foreman/${id}`, base: "main", worktree: `/w/${id}`, owns: [], socket: "", createdAt: "", ...extra });
 
@@ -37,4 +38,22 @@ test("status says work waits for the usage limit, and when it resets", () => {
   expect(lines[1]).toBe("Waiting for the usage limit to reset at 15:45. Workers are paused, and no task or review starts until then.");
   expect(lines.find((l) => l.startsWith("  T2"))).toContain("paused for the usage limit");
   expect(statusView(repo, PLAIN, true, new Date(2026, 10, 25, 16, 0).getTime())).not.toContain("Waiting for the usage limit");
+});
+
+test("status lists open permission blocks under Needs you, with the rule that would allow each one", () => {
+  const repo = tempRepo();
+  ensureForeman(repo);
+  writeFileSync(join(repo.foreman, "tasks.json"), JSON.stringify({ tasks: [task("T5", "running", { worker: "W2" }), task("T6", "running", { worker: "W3" })] }));
+  recordBlocks(repo, [
+    { role: "worker", task: "T5", worker: "W2", id: "x1", at: "", kind: "auto-mode", tool: "Bash", target: "gh pr merge 41", rule: "Bash(gh pr merge *)" },
+    { role: "orchestrator", id: "o1", at: "", kind: "prompt", tool: "Bash", target: "gh run list", rule: "Bash(gh run list *)" },
+  ]);
+  const lines = statusView(repo, PLAIN, true).split("\n");
+  const at = (s: string) => lines.findIndex((l) => l.includes(s));
+  expect(lines[at("Needs you") + 1]).toMatch(/^ +The orchestrator +waiting at a permission prompt$/);
+  expect(lines[at("Needs you") + 2]).toBe("          waiting at a permission prompt to run `gh run list`");
+  expect(lines[at("  T5")]).toMatch(/^  T5  W2  build T5 +needs a permission +\$0\.00$/);
+  expect(lines[at("  T5") + 1]).toBe("          blocked from running `gh pr merge 41` by auto mode, allow it with Bash(gh pr merge *)");
+  expect(at("  T5")).toBeLessThan(at("In progress"));
+  expect(at("In progress")).toBeLessThan(at("  T6"));
 });

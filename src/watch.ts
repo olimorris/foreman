@@ -16,12 +16,13 @@ import { clockAt, loadLimit, resetPhrase, resumeDue, saveLimit, workerLimit, typ
 import { taskDir } from "./paths.ts";
 import { inFlight, loadTasks, updateTask, type Task } from "./state.ts";
 import { approved, automergeOn, checksOf, mergeCall, mergePr, repoMergeMethod, type Check, type Merge, type MergeMethod } from "./automerge.ts";
+import { blockLine, syncBlocks, type PermissionBlock } from "./permissions.ts";
 import { busy, commandName, isWorker, pidAlive, processesIn, sample, tidy, unstoppableLine, type CpuSample, type Proc } from "./procs.ts";
 
 export type PrState = { state: string; comments: number; base?: string; head?: string; sha?: string; draft?: boolean; checks?: Check[] };
 export type TrackedPr = { key: string; number: number; base?: string };
 export type Stall = { since: number; nudged: boolean; escalated: boolean; cpu?: CpuSample; measuredAt?: number; busyAt?: number };
-export type Cursor = { events: Record<string, number>; main?: string; exited: string[]; prs?: Record<string, PrState>; budget?: Record<string, number>; stalls?: Record<string, Stall>; restarts?: Record<string, number>; unanswered?: string[]; unstoppable?: number[]; limit?: UsageLimit; limitEnded?: number; held?: string[]; unmergeable?: Record<string, string> };
+export type Cursor = { events: Record<string, number>; main?: string; exited: string[]; prs?: Record<string, PrState>; budget?: Record<string, number>; stalls?: Record<string, Stall>; restarts?: Record<string, number>; unanswered?: string[]; unstoppable?: number[]; limit?: UsageLimit; limitEnded?: number; held?: string[]; unmergeable?: Record<string, string>; blocks?: string[] };
 export type Nudge = { id: string; text: string };
 
 export type Probes = {
@@ -35,6 +36,7 @@ export type Probes = {
   limit?(task: Task): LimitHit | undefined;
   automerge?(): boolean;
   approved?(task: Task): boolean;
+  blocks?(): PermissionBlock[];
 };
 
 export type ScanResult = { reasons: string[]; cursor: Cursor; nudge: Nudge[]; restart: string[]; pause: string[]; resume: string[]; merge: Merge[]; notice?: string };
@@ -55,6 +57,9 @@ export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: Tracked
   const restart: string[] = [];
   const working: string[] = [];
   const merge: Merge[] = [];
+  const blocks = probes.blocks?.() ?? [];
+  // A worker waiting at a permission prompt is silent until the user answers, which isn't a hang.
+  const prompted = new Set(blocks.filter((b) => b.kind === "prompt" && b.role === "worker").map((b) => b.task));
 
   // A worker at the usage limit replies to nothing until the reset, so it must not look hung.
   for (const task of next.limit ? [] : tasks.filter((t) => t.tab && t.status === "running")) {
@@ -81,7 +86,8 @@ export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: Tracked
       next.exited.push(task.id);
     }
     if (alive && task.status === "running") working.push(task.id);
-    if (alive && clock && !next.limit) checkStall(task, probes, clock, next, reasons, nudge, restart);
+    if (prompted.has(task.id)) delete next.stalls![task.id];
+    else if (alive && clock && !next.limit) checkStall(task, probes, clock, next, reasons, nudge, restart);
   }
   for (const id of [...Object.keys(next.stalls!), ...Object.keys(next.restarts!)]) {
     if (!tasks.some((t) => t.id === id && t.status === "running")) delete next.stalls![id], delete next.restarts![id];
@@ -105,6 +111,11 @@ export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: Tracked
       next.unmergeable![`${number}`] = now.sha;
     }
   }
+
+  // The orchestrator already knows about its own blocks, so only the crew's wake it, once each.
+  const told = new Set(cursor.blocks ?? []);
+  for (const b of blocks) if (b.role !== "orchestrator" && !told.has(b.id)) reasons.push(`permission ${b.task}: ${blockLine(b)}`);
+  next.blocks = blocks.map((b) => b.id);
 
   const open = (probes.questions?.() ?? []).filter((q) => !q.answeredAt);
   next.unanswered = next.unanswered!.filter((id) => open.some((q) => q.id === id));
@@ -282,8 +293,12 @@ export async function watch(repo: Repo, base: string, term: Terminal): Promise<n
       const live = tasks.filter((t) => existsSync(t.worktree));
       processesIn(live.map((t) => t.worktree)).forEach((list, i) => procs.set(live[i]!.id, list));
       const untidy = tidyAll(live, procs, cursor);
+      let blocks: PermissionBlock[] = [];
+      try {
+        blocks = syncBlocks(repo, tasks);
+      } catch {}
       const prs = trackedPrs(tasks, loadDecisions(repo)).filter((p) => !["MERGED", "CLOSED"].includes(cursor.prs?.[`${p.number}`]?.state ?? ""));
-      const result = scan(tasks, cursor, { ...probes, pr: ghDue ? (n) => ghPr(repo.root, n) : undefined, processes: (t) => procs.get(t.id) ?? [] }, prs, { now: Date.now(), stallMs, answerMs: answerMs(repo), waiting });
+      const result = scan(tasks, cursor, { ...probes, pr: ghDue ? (n) => ghPr(repo.root, n) : undefined, processes: (t) => procs.get(t.id) ?? [], blocks: () => blocks }, prs, { now: Date.now(), stallMs, answerMs: answerMs(repo), waiting });
       cursor = result.cursor;
       for (const [id, patch] of prPatches(tasks, prs, cursor.prs ?? {})) updateTask(repo, id, patch);
       result.reasons.unshift(...untidy);
