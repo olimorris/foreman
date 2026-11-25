@@ -16,6 +16,6 @@
 
 ## How Foreman drives it
 
-`rex.sh` in this folder wraps the `rex` CLI. Each worker is a Rex tab, and the status pane opens beside the orchestrator. Rex only resolves a window or block id within the session it belongs to, so every tab keeps its session. Foreman clears `REX_SESSION` and `REX_BLOCK` in a worker, so a user hook in the worker can't act on the orchestrator's session.
+`rex.sh` in this folder wraps the `rex` CLI. Each worker is a Rex tab, and the status pane opens beside the orchestrator. Rex only resolves a window or block id within the session it belongs to, so every tab keeps its session. Foreman reads its own session from `REX_SESSION`. When that's empty, as in an MCP server started after a restart, it asks Rex which session holds `REX_BLOCK` with `rex block inspect`, and falls back to the block id if that fails. Foreman clears `REX_SESSION` and `REX_BLOCK` in a worker, so a user hook in the worker can't act on the orchestrator's session.
 
 Rex sets `TERM_PROGRAM=rex` in every block, and Foreman reads that to see it's in Rex. Foreman doesn't detect Rex from `REX_SESSION`, since workers run without it.
