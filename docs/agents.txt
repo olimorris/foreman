@@ -4,13 +4,13 @@ You're helping someone use Foreman. This file tells you how it works, how to set
 
 ## What it is
 
-Foreman is a Claude Code plugin. One Claude session, the orchestrator, runs a small crew of worker Claude sessions on one git repo. The orchestrator never writes code. It plans, writes a brief for each task and hands it to a worker. Each worker builds one task in its own git worktree, on a branch named `foreman/<task>`, in its own Rex tab. A reviewer checks each finished task against the user's intent. Approved work becomes a PR, and the user merges every PR themselves.
+Foreman is a Claude Code plugin. One Claude session, the orchestrator, runs a small crew of worker Claude sessions on one git repo. The orchestrator never writes code. It plans, writes a brief for each task and hands it to a worker. Each worker builds one task in its own git worktree, on a branch named `foreman/<task>`, in its own tab. A reviewer checks each finished task against the user's intent. Approved work becomes a PR, and the user merges every PR themselves.
 
 Tasks are named T1, T2 and so on. Workers are numbered W1, W2 and so on. Decisions are named D-1, D-2 and so on, and questions Q-1, Q-2 and so on.
 
 ## Requirements
 
-- macOS, inside the Rex terminal app (https://www.superlogical.com). Rex is the only terminal Foreman supports.
+- macOS, inside a terminal app Foreman can drive. Rex (https://www.superlogical.com) is the default. `FOREMAN_TERMINAL=<name>` picks another, `foreman doctor` lists the ones available, and each terminal's setup is in its folder under `src/integrations/`.
 - Claude Code 2.1.224 or later.
 - Bun, git, jq, fswatch, and gh signed in with `gh auth login`.
 - Web screenshots need Playwright's Chromium: `bunx playwright install chromium`.
@@ -30,7 +30,7 @@ foreman doctor
 
 ## How a run goes
 
-1. The user opens Rex in their repo and runs `foreman up`. This opens a Rex session named `foreman-<repo>` with the orchestrator, and a status pane beside it.
+1. The user opens their terminal in their repo and runs `foreman up`. This opens a terminal session named `foreman-<repo>` with the orchestrator, and a status pane beside it.
 2. The user gives the orchestrator a backlog and a deadline in plain words, or points it at a file.
 3. The orchestrator asks about anything unclear, then writes one plan: the tasks, what runs first, which model each task runs on and what it would cut. If each backlog item became one task, nothing is cut and no decision is open, it starts straight away and shows the plan. Otherwise it waits for the user to approve it.
 4. Workers start, up to `maxWorkers` at once. A task waits for the tasks it depends on, and for any running task that owns the same files.
@@ -39,7 +39,7 @@ foreman doctor
 7. When the user merges a PR, Foreman removes that task's worktree and tab, asks the other workers to rebase and starts the tasks that were waiting on it.
 8. At the end, Foreman writes `.foreman/summary.md`: the PRs in review order, how to test each, the assumptions to check and the calls Foreman made on its own.
 
-The user talks to the orchestrator in its Rex tab for anything about the plan or a task. Changing settings, checking on the run and fixing setup are things you can help with from outside.
+The user talks to the orchestrator in its tab for anything about the plan or a task. Changing settings, checking on the run and fixing setup are things you can help with from outside.
 
 ## Why a task is waiting
 
@@ -71,7 +71,7 @@ A decision is a rule that affects more than one task, like the shape of an API. 
 ## Steering and stopping
 
 - For anything about the plan, such as adding, changing or cutting a task, or stopping the run, the user tells the orchestrator in its tab. There's no single command that stops everything.
-- To steer one worker, the user can open its Rex tab, named like `W1 · T1: add tags to notes`, and type to it. `foreman send <task> "<message>"` does the same from any terminal.
+- To steer one worker, the user can open its tab, named like `W1 · T1: add tags to notes`, and type to it. `foreman send <task> "<message>"` does the same from any terminal.
 - `foreman pause <task>` stops a worker by closing its tab. Its commits stay on its branch and uncommitted work stays in its worktree. `foreman resume <task>` reopens its session where it left off.
 - If the user closes a worker's tab, the orchestrator notices and asks whether to resume the task or tear it down. It never discards unmerged work without the user's yes.
 
@@ -171,7 +171,7 @@ Each copy of a macOS app runs with its own bundle id and home folder, so screens
 ## When something goes wrong
 
 - Something won't start: run `foreman doctor`.
-- `foreman up` says the session already exists: the orchestrator is already running in that Rex session. Switch to it in Rex.
+- `foreman up` says the session already exists: the orchestrator is already running in that terminal session. Switch to it in your terminal.
 - The status pane is gone: run `foreman pane` from the orchestrator's tab.
 - A task stopped over budget: `foreman budget <task> <usd>`, then `foreman resume <task>`.
 - A worker seems stuck: `foreman timeline <task>` shows when it went quiet. Foreman restarts hung workers itself, and `foreman restart <task>` does it by hand.

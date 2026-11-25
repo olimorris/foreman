@@ -25,13 +25,13 @@ Foreman gives you the team and the manager, right inside Claude Code.
 - :clipboard: Writes a summary of the PRs to review, in order
 
 > [!IMPORTANT]
-> Foreman currently runs inside [Rex](https://www.superlogical.com), a terminal app. Each worker gets its own Rex tab, so you can watch any of them or step in.
+> Foreman runs inside a terminal app it can drive. [Rex](https://www.superlogical.com) is the default, and `FOREMAN_TERMINAL=<name>` picks another. Each worker gets its own tab, so you can watch any of them or step in. `foreman doctor` lists the terminals available, and each one's setup is in its folder under `src/integrations/`.
 
 ## :construction_worker: What is Foreman?
 
 Foreman is a Claude Code plugin that turns one Claude session into the manager of a small engineering team:
 
-- **The engineers** are worker Claude sessions, numbered W1, W2 and so on. Each gets its own git worktree and Rex tab, so they work in parallel without stepping on each other.
+- **The engineers** are worker Claude sessions, numbered W1, W2 and so on. Each gets its own git worktree and tab, so they work in parallel without stepping on each other.
 - **The manager** is Foreman. It never writes code. It plans, hands out work, keeps everyone aligned and checks the work before it reaches you.
 - **The leader** is you. You set the direction and approve every PR. Nothing merges without your say-so.
 
@@ -56,7 +56,7 @@ It's Claude Code only and works on one repo at a time. That's deliberate - fewer
 
 ## :package: Install
 
-Foreman runs on macOS inside [Rex](https://www.superlogical.com). You need:
+Foreman runs on macOS inside a terminal app it can drive. [Rex](https://www.superlogical.com) is the default. You need:
 
 - Claude Code 2.1.224 or later
 - [Bun](https://bun.sh), `git`, `jq`, `fswatch` and `gh` (signed in with `gh auth login`)
@@ -83,7 +83,7 @@ Read https://raw.githubusercontent.com/olimorris/foreman/main/docs/agents.txt an
 
 ## :rocket: Usage
 
-Open Rex in your repo and start Foreman:
+Open your terminal in your repo and start Foreman:
 
 ```sh
 foreman up
