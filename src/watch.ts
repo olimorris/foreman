@@ -382,7 +382,7 @@ export async function watchFor(repo: Repo, base: string, term: Terminal, { signa
     sync: () => {
       const r = sync(repo, base, term);
       for (const id of r.retargeted) logRun(repo, id, "pr-updated", `moved to ${base} by the watcher's sync`);
-      for (const id of r.asked) logRun(repo, id, "rebase-asked", base);
+      for (const id of r.asked) logRun(repo, id, "rebase-asked");
       return needsOrchestrator(repo, base, r);
     },
   };

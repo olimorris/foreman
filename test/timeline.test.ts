@@ -51,7 +51,7 @@ describe("the overnight run", () => {
     { at: iso("23:19", 24), task: "T5", what: "started", note: "W2" },
     { at: iso("00:44"), task: "T5", what: "nudged", note: "no reply for 20m" },
     { at: iso("08:33"), task: "T5", what: "merged", note: "#79" },
-    { at: iso("08:34"), task: "T5", what: "rebase-asked", note: "main" },
+    { at: iso("08:34"), task: "T5", what: "rebase-asked" },
   ];
   const input: TimelineInput = {
     title: "Strata", now: at("08:40"), stallMs: 20 * MIN, approvedAt: at("22:00", 24), log,
@@ -68,7 +68,7 @@ describe("the overnight run", () => {
   const lines = buildTimeline(input);
 
   test("shows a rebase request the watcher's sync sent", () => {
-    expect(lines.find((l) => l.text.startsWith("asked to rebase"))?.text).toBe("asked to rebase onto main");
+    expect(lines.find((l) => l.text.startsWith("asked to rebase"))?.text).toBe("asked to rebase");
   });
 
   test("marks the long quiet stretch and says who waited on it, and why", () => {
