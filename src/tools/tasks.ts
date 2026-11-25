@@ -4,17 +4,18 @@ import type { TaskTool } from "../mcp.ts";
 import { defaultBase } from "../paths.ts";
 import { openPrs } from "../summary.ts";
 import { together } from "../together.ts";
-import { watchFor } from "../watch.ts";
+import { watchFor, type WaitForChange } from "../watch.ts";
 import { noInput } from "./tool.ts";
 
-export const TASK_TOOLS: TaskTool[] = [
+// Tests pass their own wait, since the watcher otherwise waits on fswatch, which CI runners lack.
+export const taskTools = (wait?: WaitForChange): TaskTool[] => [
   {
     name: "watch",
     description: "Watch the run until something needs you: a worker reports, goes quiet or exits, main moves, a PR changes, a question or permission block arrives, or the budget runs over. Returns at once as a task, and its result wakes you with one line naming what happened. Call it again after handling that line.",
     inputSchema: noInput,
     roles: ["orchestrator"],
     task: true,
-    handler: (_args, s, context) => watchFor(s.repo, defaultBase(s.repo), terminal(), { signal: context?.signal, notice: context?.status }),
+    handler: (_args, s, context) => watchFor(s.repo, defaultBase(s.repo), terminal(), { signal: context?.signal, notice: context?.status, wait }),
   },
   {
     name: "baseline",
@@ -40,3 +41,5 @@ export const TASK_TOOLS: TaskTool[] = [
     handler: async (_args, s, context) => (await together(s.repo, defaultBase(s.repo), () => openPrs(s.repo), { fetch: true, signal: context?.signal })).line,
   },
 ];
+
+export const TASK_TOOLS = taskTools();

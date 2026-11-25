@@ -250,10 +250,11 @@ export async function watch(repo: Repo, base: string, term: Terminal): Promise<n
   return 0;
 }
 
-export type Watching = { signal?: AbortSignal; notice?: (notice: string) => void };
+export type WaitForChange = (paths: string[], ms: number, signal?: AbortSignal) => Promise<void>;
+export type Watching = { signal?: AbortSignal; notice?: (notice: string) => void; wait?: WaitForChange };
 
 // Runs the watcher's passes until one finds something for the orchestrator, and returns that line.
-export async function watchFor(repo: Repo, base: string, term: Terminal, { signal, notice }: Watching = {}): Promise<string> {
+export async function watchFor(repo: Repo, base: string, term: Terminal, { signal, notice, wait = waitForChange }: Watching = {}): Promise<string> {
   const pidFile = join(repo.foreman, "watch.pid");
   const other = readPid(pidFile);
   if (other && pidAlive(other)) return `watcher: already running (pid ${other})`;
@@ -366,7 +367,7 @@ export async function watchFor(repo: Repo, base: string, term: Terminal, { signa
       writeFileSync(cursorFile, JSON.stringify(cursor));
       if (result.notice) notice?.(result.notice);
       if (result.reasons.length) return result.reasons.join("; ");
-      if (lastGh) await waitForChange(watched, POLL_MS, signal);
+      if (lastGh) await wait(watched, POLL_MS, signal);
     }
   } finally {
     release(repo);
@@ -399,7 +400,7 @@ function tidyAll(tasks: Task[], procs: Map<string, Proc[]>, cursor: Cursor): str
   return reasons;
 }
 
-async function waitForChange(paths: string[], ms: number, signal?: AbortSignal): Promise<void> {
+const waitForChange: WaitForChange = async (paths, ms, signal) => {
   if (signal?.aborted) return;
   const proc = Bun.spawn(["fswatch", "-1", "-r", "-l", "0.5", ...paths], { stdout: "ignore", stderr: "ignore" });
   let timer: Timer | undefined;
@@ -409,7 +410,7 @@ async function waitForChange(paths: string[], ms: number, signal?: AbortSignal):
   signal?.removeEventListener("abort", onAbort);
   clearTimeout(timer);
   proc.kill();
-}
+};
 
 export function readPid(file: string): number | undefined {
   if (!existsSync(file)) return undefined;
