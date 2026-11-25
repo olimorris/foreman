@@ -1,5 +1,4 @@
 import { readFileSync, realpathSync } from "node:fs";
-import { basename } from "node:path";
 import { saveConfig } from "./config.ts";
 import { doctor } from "./doctor.ts";
 import { printBanner } from "./banner.ts";
@@ -24,6 +23,7 @@ import { setTrust } from "./trust.ts";
 import { workers } from "./plan.ts";
 import { forTerminal, page, summaryText, writeSummary } from "./summary.ts";
 import { timelineText } from "./timeline.ts";
+import { orchestratorSessionName, removeForeman } from "./remove.ts";
 import { automerge } from "./automerge.ts";
 import { budgetOf, costText, recordSession, sessionsFile, usd } from "./cost.ts";
 import { restartWorker, resume } from "./stop.ts";
@@ -44,7 +44,7 @@ function flags(args: string[]): { positional: string[]; opts: Record<string, str
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!;
     if (!a.startsWith("--")) positional.push(a);
-    else if (["--json", "--once", "--live"].includes(a)) opts[a.slice(2)] = ["true"];
+    else if (["--json", "--once", "--live", "--discard"].includes(a)) opts[a.slice(2)] = ["true"];
     else (opts[a.slice(2)] ??= []).push(args[++i] ?? "");
   }
   return { positional, opts };
@@ -85,7 +85,7 @@ async function main(argv: string[]): Promise<number> {
       const repo = findRepo();
       ensureForeman(repo);
       const model = orchestratorModel(repo, opts.model?.[0]);
-      const name = `foreman-${basename(repo.root)}`;
+      const name = orchestratorSessionName(repo);
       const existing = term.findSession(name);
       if (existing) return console.log(`${term.name} session ${name} already exists (${existing})`), 0;
       // Claude Code's trust prompt would otherwise swallow the user's first message and exit.
@@ -191,6 +191,11 @@ async function main(argv: string[]): Promise<number> {
       const notes = loadNotes(findRepo());
       console.log(notes.length ? listNotes(notes).join("\n") : 'no notes yet. Add one with foreman note "<fact>"');
       return 0;
+    }
+    case "remove": {
+      const result = removeForeman(findRepo(), !!opts.discard, term);
+      console.log(result.message);
+      return result.removed ? 0 : 1;
     }
     case "hook":
       return hook(positional[0]);
