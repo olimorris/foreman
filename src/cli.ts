@@ -24,7 +24,7 @@ import { describePlan, loadPlan, maxWorkers, parsePlan, planBrief, readyTasks, s
 import { sync } from "./sync.ts";
 import { writeSummary } from "./summary.ts";
 import { budgetLeft, budgetOf, orchestratorCost, recordSession, sessionsFile, taskCost, usd } from "./cost.ts";
-import { resume, stopWorker } from "./stop.ts";
+import { restartWorker, resume, stopWorker } from "./stop.ts";
 import { watch, watcherArmed } from "./watch.ts";
 
 const USAGE = `usage:
@@ -47,6 +47,7 @@ const USAGE = `usage:
   foreman budget [<id>] <usd> | budget --plan <usd>
   foreman pause <id>
   foreman resume <id>
+  foreman restart <id>
   foreman deliver <id> [--title "<type>: <summary>"] [--dry-run]
   foreman status [--json]
   foreman watch
@@ -269,6 +270,16 @@ async function main(argv: string[]): Promise<number> {
       const [id] = positional;
       if (!id) throw new Error(USAGE);
       console.log(stopWorker(repo, findTask(repo, id), rex) ? `stopped ${id}'s worker. Its work so far is in its worktree` : `${id} had no worker running`);
+      return 0;
+    }
+    case "restart": {
+      const repo = findRepo();
+      const [id] = positional;
+      const session = process.env.REX_SESSION;
+      if (!id) throw new Error(USAGE);
+      if (!session) throw new Error("REX_SESSION isn't set: run restart from inside Rex");
+      restartWorker(repo, findTask(repo, id), rex, session);
+      console.log(`restarted ${id}'s worker in a new tab, carrying on its last session`);
       return 0;
     }
     case "resume": {

@@ -119,9 +119,20 @@ foreman resume T3         # restart a stopped worker once its limit is raised
 
 Costs are worked out at Anthropic's list prices from each session's token use, so on a subscription treat them as a guide to how much work was done. Each PR's AI Usage section includes its task's cost.
 
+### Stuck workers
+
+A worker that waits on a hung command, such as a test run that deadlocks, can sit idle for hours. Any task that shares its files can't start until it finishes. Foreman watches for this:
+
+- After 20 minutes with no reply, Foreman messages the worker to check for a hung command.
+- After 40 minutes, Foreman restarts the worker's session in a new tab.
+- If a worker hangs again after two restarts, the orchestrator steps in.
+
+`foreman restart T3` restarts a worker by hand.
+
 ### Settings
 
 `.foreman/config.json` also takes:
 
 - `maxWorkers`: how many workers run at once (default 3)
+- `stallMinutes`: how long a worker can go without replying before Foreman nudges it (default 20)
 - `prScreenshots`: `"local"` keeps screenshots on your machine and lists their paths in the PR. `"branch"` pushes them to a `foreman-screenshots` branch so they show in the PR on GitHub

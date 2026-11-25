@@ -5,26 +5,37 @@ import { loadDecisions, type Decision } from "./ledger.ts";
 import { run } from "./exec.ts";
 import type { Repo } from "./paths.ts";
 import type { Rex } from "./rex.ts";
-import { notifyOrchestrator } from "./send.ts";
+import { notifyOrchestrator, sendToTask } from "./send.ts";
 import { baseRef } from "./snapshot.ts";
-import { budgetOf, overBudget, planSpend, taskCost } from "./cost.ts";
-import { stopWorker } from "./stop.ts";
+import { budgetOf, lastActivity, overBudget, planSpend, taskCost } from "./cost.ts";
+import { loadConfig } from "./config.ts";
+import { loadPlan, readyTasks, maxWorkers } from "./plan.ts";
+import { restartWorker, stopWorker } from "./stop.ts";
 import { inFlight, loadTasks, type Task } from "./state.ts";
 
 export type PrState = { state: string; comments: number };
 export type TrackedPr = { key: string; number: number };
-export type Cursor = { events: Record<string, number>; main?: string; exited: string[]; prs?: Record<string, PrState>; budget?: Record<string, number> };
+export type Stall = { since: number; nudged: boolean; escalated: boolean };
+export type Cursor = { events: Record<string, number>; main?: string; exited: string[]; prs?: Record<string, PrState>; budget?: Record<string, number>; stalls?: Record<string, Stall>; restarts?: Record<string, number> };
 
 export type Probes = {
   events(id: string): TaskEvent[];
   mainSha(): string | undefined;
   alive(task: Task): boolean;
   pr?(number: number): PrState | undefined;
+  lastActivity?(task: Task): number | undefined;
 };
 
-export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: TrackedPr[] = []): { reasons: string[]; cursor: Cursor } {
-  const next: Cursor = { events: { ...cursor.events }, main: cursor.main, exited: [...cursor.exited], prs: { ...cursor.prs } };
+export type StallCheck = { now: number; stallMs: number; waiting?: (id: string) => string[] };
+
+export const STALL_MINUTES = 20;
+export const MAX_RESTARTS = 2;
+
+export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: TrackedPr[] = [], stall?: StallCheck): { reasons: string[]; cursor: Cursor; nudge: string[]; restart: string[] } {
+  const next: Cursor = { ...cursor, events: { ...cursor.events }, exited: [...cursor.exited], prs: { ...cursor.prs }, stalls: { ...cursor.stalls }, restarts: { ...cursor.restarts } };
   const reasons: string[] = [];
+  const nudge: string[] = [];
+  const restart: string[] = [];
 
   for (const task of tasks) {
     const events = probes.events(task.id);
@@ -41,6 +52,10 @@ export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: Tracked
       reasons.push(`exited ${task.id}`);
       next.exited.push(task.id);
     }
+    if (alive && stall) checkStall(task, probes, stall, next, reasons, nudge, restart);
+  }
+  for (const id of [...Object.keys(next.stalls!), ...Object.keys(next.restarts!)]) {
+    if (!tasks.some((t) => t.id === id && t.status === "running")) delete next.stalls![id], delete next.restarts![id];
   }
 
   for (const { key, number } of prs) {
@@ -57,8 +72,35 @@ export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: Tracked
   if (sha && next.main && sha !== next.main) reasons.push(`main-moved ${sha.slice(0, 8)}`);
   if (sha) next.main = sha;
 
-  return { reasons, cursor: next };
+  return { reasons, cursor: next, nudge, restart };
 }
+
+// A worker idling on a hung background command never wakes by itself, so it's nudged, then restarted, and only a worker that keeps hanging reaches the orchestrator.
+function checkStall(task: Task, probes: Probes, check: StallCheck, cursor: Cursor, reasons: string[], nudge: string[], restart: string[]): void {
+  const stalls = cursor.stalls!;
+  const last = task.status === "running" ? probes.lastActivity?.(task) : undefined;
+  if (last === undefined) return void delete stalls[task.id];
+  let s = stalls[task.id];
+  if (!s || s.since !== last) s = stalls[task.id] = { since: last, nudged: false, escalated: false };
+  const idle = check.now - last;
+  if (idle >= 2 * check.stallMs && !s.escalated) {
+    s.escalated = true;
+    const restarts = cursor.restarts![task.id] ?? 0;
+    if (restarts < MAX_RESTARTS) {
+      cursor.restarts![task.id] = restarts + 1;
+      restart.push(task.id);
+      return;
+    }
+    const waiting = check.waiting?.(task.id) ?? [];
+    const blocks = waiting.length ? `, and ${waiting.join(", ")} ${waiting.length > 1 ? "wait" : "waits"} on it` : "";
+    reasons.push(`stuck ${task.id}: hung again after ${restarts} restarts${blocks}`);
+  } else if (idle >= check.stallMs && !s.nudged) {
+    s.nudged = true;
+    nudge.push(task.id);
+  }
+}
+
+export const NUDGE = "You've done nothing for a while. If you're waiting on a command, check it's still making progress: a test run that hasn't printed anything for minutes has usually hung. Kill it, then rerun it with a time limit, or report blocked with what you found. Never end your turn waiting on a command that has no time limit.";
 
 const clip = (s: string) => (s.length > 100 ? s.slice(0, 97) + "..." : s);
 
@@ -98,6 +140,13 @@ export async function watch(repo: Repo, base: string, rex: Rex): Promise<number>
     events: (id) => readEvents(repo, id),
     mainSha: () => run(["git", "-C", repo.root, "rev-parse", baseRef(repo, base)]).stdout.trim() || undefined,
     alive: (task) => (task.rex ? rex.alive(task.rex) : true),
+    lastActivity: (task) => lastActivity(repo, task),
+  };
+  const stallMs = (loadConfig(repo).stallMinutes ?? STALL_MINUTES) * 60_000;
+  const waiting = (id: string) => {
+    const plan = loadPlan(repo);
+    if (!plan?.approvedAt) return [];
+    return readyTasks(plan, loadTasks(repo), maxWorkers(repo)).waiting.filter((w) => new RegExp(`\\b${id}\\b`).test(w.reason)).map((w) => w.id);
   };
   let lastGh = 0;
   const watched = [join(repo.foreman, "tasks"), join(repo.root, ".git", "refs"), join(repo.root, ".git", "packed-refs")].filter(existsSync);
@@ -111,8 +160,21 @@ export async function watch(repo: Repo, base: string, rex: Rex): Promise<number>
       // Merges happen on GitHub, so origin's base only moves here when it's fetched.
       if (ghDue && hasOrigin) run(["git", "-C", repo.root, "fetch", "-q", "origin", base]);
       const prs = trackedPrs(tasks, loadDecisions(repo)).filter((p) => !["MERGED", "CLOSED"].includes(cursor.prs?.[`${p.number}`]?.state ?? ""));
-      const result = scan(tasks, cursor, { ...probes, pr: ghDue ? (n) => ghPr(repo.root, n) : undefined }, prs);
+      const result = scan(tasks, cursor, { ...probes, pr: ghDue ? (n) => ghPr(repo.root, n) : undefined }, prs, { now: Date.now(), stallMs, waiting });
       cursor = result.cursor;
+      for (const id of result.nudge) {
+        try {
+          sendToTask(repo, tasks.find((t) => t.id === id)!, NUDGE, rex);
+        } catch {}
+      }
+      for (const id of result.restart) {
+        const task = tasks.find((t) => t.id === id)!;
+        try {
+          restartWorker(repo, task, rex, task.rex!.session);
+        } catch (err) {
+          result.reasons.push(`stuck ${id}: restarting its hung worker failed: ${err instanceof Error ? err.message : err}`);
+        }
+      }
       {
         const over = overBudget(tasks.map((t) => taskCost(repo, t)), planSpend(repo, loadTasks(repo)), budgetOf(repo), cursor.budget ?? {});
         result.reasons.push(...over.reasons);
