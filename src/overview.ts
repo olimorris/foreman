@@ -46,18 +46,18 @@ export function budgetOverview(repo: Repo): string {
   const spent = [...costs.values()].reduce((s, c) => s + c.total, 0) + orch.usd;
   const plan = budget.plan !== undefined ? `${usd(spent)} of ${usd(budget.plan)} spent, ${usd(Math.max(0, budget.plan - spent))} left` : `${usd(spent)} spent, no plan limit`;
   const rows = [
-    ["Task", "What it builds", "Status", "Spent", "Limit"],
+    ["Task", "Worker", "What it builds", "Status", "Spent", "Limit"],
     ...tasks.map((t) => {
       const limit = taskLimit(budget, t.id);
-      return [t.id, taskTitle(repo, t), statusLabel(t), usd(costs.get(t.id)!.total), limit !== undefined ? usd(limit) : "none"];
+      return [t.id, t.worker ?? "", taskTitle(repo, t), statusLabel(t), usd(costs.get(t.id)!.total), limit !== undefined ? usd(limit) : "none"];
     }),
-    ["", "Foreman itself", "", usd(orch.usd), ""],
+    ["", "", "Foreman itself", "", usd(orch.usd), ""],
   ];
   const unpriced = [...new Set([...[...costs.values()].flatMap((c) => c.unpriced), ...orch.unpriced])];
   return [
     `Plan: ${plan}, at list prices`,
     "",
-    ...table(rows, [3, 4]),
+    ...table(rows, [4, 5]),
     "",
     ...(unpriced.length ? [`Not counted: ${unpriced.join(", ")} has no price. Add it under "prices" in .foreman/config.json`, ""] : []),
     "Change a limit with foreman budget <usd> for every task, foreman budget <task> <usd> for one, or foreman budget --plan <usd>.",

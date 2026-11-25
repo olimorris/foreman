@@ -9,6 +9,7 @@ export type TaskStatus = "running" | "over-budget" | "done" | "blocked" | "needs
 export type Task = {
   id: string;
   title?: string;
+  worker?: string;
   status: TaskStatus;
   branch: string;
   base: string;
@@ -38,6 +39,14 @@ export function loadTasks(repo: Repo): Task[] {
 function upgrade(task: Task & { rex?: { session: string; window: string; block: string } }): Task {
   const { rex, ...rest } = task;
   return rex && !rest.tab ? { ...rest, tab: { session: rex.session, window: rex.window, pane: rex.block } } : rest;
+}
+
+// Numbers go back into use once a task merges or is torn down, so the crew reads as W1 to W3 when three workers run at once.
+export function nextWorker(tasks: Task[]): string {
+  const busy = new Set(tasks.filter((t) => t.worker && t.status !== "torn-down" && t.status !== "merged").map((t) => t.worker));
+  let n = 1;
+  while (busy.has(`W${n}`)) n++;
+  return `W${n}`;
 }
 
 export function findTask(repo: Repo, id: string): Task {

@@ -11,13 +11,16 @@ Building and deploying software takes a team of engineers. Those engineers need 
 
 Foreman gives you the team and the manager, right inside Claude Code.
 
+> [!IMPORTANT]
+> Foreman runs inside [Rex](https://www.superlogical.com), a terminal app. Each worker gets its own Rex tab, so you can watch any of them or step in. Rex is the only terminal Foreman supports today, and others can be added as integrations in `src/integrations/`.
+
 ## :construction_worker: What is Foreman?
 
 Foreman is a Claude Code plugin that turns one Claude session into the manager of a small engineering team.
 
 You talk to Foreman. Foreman runs the crew:
 
-- **The engineers** are worker Claude sessions. Each one gets its own git worktree and rex window, so they can work in parallel without stepping on each other - and you can attach to any of them to watch or steer.
+- **The engineers** are worker Claude sessions. Each one is numbered W1, W2 and so on, and gets its own git worktree and Rex tab, so they can work in parallel without stepping on each other - and you can open any of them to watch or steer.
 - **The manager** is Foreman. It never writes code itself. It plans, hands out work, keeps everyone aligned, and checks the work before it reaches you.
 - **The leader** is you. You set the direction and approve every PR. Nothing merges without your say-so.
 
@@ -42,7 +45,7 @@ It's Claude Code only and works on one repo at a time. That's deliberate - fewer
 
 ## :package: Install
 
-Foreman runs on macOS inside Rex. You need:
+Foreman runs on macOS inside [Rex](https://www.superlogical.com). You need:
 
 - Claude Code 2.1.224 or later
 - [Bun](https://bun.sh), `git`, `jq`, `fswatch` and `gh` (signed in with `gh auth login`)
@@ -74,7 +77,7 @@ This opens a `foreman-<repo>` session with the orchestrator in it. Give it your 
 From there:
 
 1. Foreman asks about anything unclear, then shows you one plan: tasks, what runs first, and what it would cut to meet the deadline. Approve it or ask for changes.
-2. Workers open in their own tabs. Open one to watch or steer it.
+2. Workers open in their own tabs, named like `W1 · T1: add tags to notes`: the worker, then the task it's building. Open one to watch or steer it.
 3. When a worker proposes a decision that affects others, Foreman asks you before accepting it.
 4. Each finished task gets a review. Approved work arrives as a PR with its review packet. You merge it.
 5. When a PR merges, Foreman tears down that task, asks the remaining workers to rebase and starts the tasks that were waiting on it.

@@ -291,11 +291,11 @@ async function main(argv: string[]): Promise<number> {
       if (p) console.log(`plan: ${p.title}${p.deadline ? `, deadline ${p.deadline}` : ""}${p.approvedAt ? "" : " (not approved yet)"}`);
       const waiting = p?.approvedAt ? readyTasks(p, tasks, maxWorkers(repo)).waiting : [];
       const rows = [
-        ["Task", "What it builds", "Status", "Spent", "PR"],
-        ...byActivity(tasks).map((t) => [t.id, taskTitle(repo, t), statusLabel(t), usd(taskCost(repo, t).total), t.pr ? `#${t.pr}` : ""]),
-        ...waiting.map((w) => [w.id, plainTitle(p!.tasks.find((t) => t.id === w.id)!.title), `planned, ${w.reason}`, "", ""]),
+        ["Task", "Worker", "What it builds", "Status", "Spent", "PR"],
+        ...byActivity(tasks).map((t) => [t.id, t.worker ?? "", taskTitle(repo, t), statusLabel(t), usd(taskCost(repo, t).total), t.pr ? `#${t.pr}` : ""]),
+        ...waiting.map((w) => [w.id, "", plainTitle(p!.tasks.find((t) => t.id === w.id)!.title), `planned, ${w.reason}`, "", ""]),
       ];
-      if (rows.length > 1) console.log(table(rows, [3]).join("\n"));
+      if (rows.length > 1) console.log(table(rows, [4]).join("\n"));
       console.log(`watcher: ${watcherArmed(repo) ? "armed" : "not armed"}`);
       return 0;
     }

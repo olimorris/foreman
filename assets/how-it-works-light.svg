@@ -38,14 +38,14 @@
   <text x="652" y="264" class="label">briefs</text>
 
   <rect x="200" y="320" width="260" height="96" rx="14" fill="#FFFFFF" stroke="#D9D5CC" stroke-width="1.5"/>
-  <text x="330" y="361" text-anchor="middle" class="title">Worker T1</text>
-  <text x="330" y="387" text-anchor="middle" class="sub">Own worktree and tab</text>
+  <text x="330" y="361" text-anchor="middle" class="title">Worker W1</text>
+  <text x="330" y="387" text-anchor="middle" class="sub">On task T1, own worktree</text>
   <rect x="510" y="320" width="260" height="96" rx="14" fill="#FFFFFF" stroke="#D9D5CC" stroke-width="1.5"/>
-  <text x="640" y="361" text-anchor="middle" class="title">Worker T2</text>
-  <text x="640" y="387" text-anchor="middle" class="sub">Own worktree and tab</text>
+  <text x="640" y="361" text-anchor="middle" class="title">Worker W2</text>
+  <text x="640" y="387" text-anchor="middle" class="sub">On task T2, own worktree</text>
   <rect x="820" y="320" width="260" height="96" rx="14" fill="#FFFFFF" stroke="#D9D5CC" stroke-width="1.5"/>
-  <text x="950" y="361" text-anchor="middle" class="title">Worker T3</text>
-  <text x="950" y="387" text-anchor="middle" class="sub">Own worktree and tab</text>
+  <text x="950" y="361" text-anchor="middle" class="title">Worker W3</text>
+  <text x="950" y="387" text-anchor="middle" class="sub">On task T3, own worktree</text>
 
   <path d="M330 416 L330 456 M640 416 L640 456 M950 416 L950 456 M330 456 L950 456" fill="none" stroke="#9EA3A9" stroke-width="2"/>
   <path d="M640 456 L640 492" fill="none" stroke="#9EA3A9" stroke-width="2" marker-end="url(#head)" />
