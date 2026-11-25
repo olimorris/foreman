@@ -1,0 +1,4 @@
+#!/bin/sh
+# A pull with pull.rebase=true that has local commits to rebase fires this hook instead of post-merge.
+[ "$1" = rebase ] || exit 0
+exec "$(dirname "$0")/update-foreman" </dev/null
