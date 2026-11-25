@@ -21,6 +21,7 @@ import { approved, automergeOn, checksOf, mergeCall, mergePr, repoMergeMethod, t
 import { blockLine, syncBlocks, type PermissionBlock } from "./permissions.ts";
 import { busy, commandName, isWorker, pidAlive, processesIn, sample, tidy, unstoppableLine, type CpuSample, type Proc } from "./procs.ts";
 import { andList, clip } from "./text.ts";
+import { needsOrchestrator, sync } from "./sync.ts";
 
 export type PrState = { state: string; comments: number; base?: string; head?: string; sha?: string; draft?: boolean; checks?: Check[] };
 export type TrackedPr = { key: string; number: number; base?: string };
@@ -46,7 +47,7 @@ export type Probes = {
 export type Spend = { costs: TaskCost[]; plan: number; budget: Budget };
 export type Stop = { id: string; note: string };
 
-export type ScanResult = { reasons: string[]; cursor: Cursor; nudge: Nudge[]; restart: string[]; pause: string[]; resume: string[]; merge: Merge[]; stop: Stop[]; notice?: string };
+export type ScanResult = { reasons: string[]; cursor: Cursor; nudge: Nudge[]; restart: string[]; pause: string[]; resume: string[]; merge: Merge[]; stop: Stop[]; sync: boolean; notice?: string };
 
 export type Clock = { now: number; stallMs: number; answerMs?: number; waiting?: (id: string) => string[] };
 
@@ -80,6 +81,7 @@ export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: Tracked
   for (const task of tasks) {
     const events = probes.events(task.id);
     for (const e of events.slice(next.events[task.id] ?? 0)) {
+      if (settledRebase(task, e)) continue;
       reasons.push(e.note ? `${e.type} ${task.id}: ${clip(e.note, 100)}` : `${e.type} ${task.id}`);
     }
     next.events[task.id] = events.length;
@@ -133,12 +135,24 @@ export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: Tracked
   }
 
   const sha = probes.mainSha();
-  if (sha && next.main && sha !== next.main) reasons.push(`main-moved ${sha.slice(0, 8)}`);
+  const moved = !!sha && !!next.main && sha !== next.main;
+  // A merge arrives as its own line, and the orchestrator only ever called sync for any other move, so the watcher syncs itself.
+  // During the usage limit the workers can't take a rebase request, so the line is held for the orchestrator instead.
+  const syncNow = moved && !next.limit && !reasons.some((r) => r.startsWith("merged "));
+  if (moved && !syncNow) reasons.push(`main-moved ${sha!.slice(0, 8)}`);
   if (sha) next.main = sha;
 
   const stop = checkBudget(probes.spend?.(tasks), next, reasons);
   const { pause, resume, notice } = waitOutLimit(tasks, next, working, reasons, clock?.now);
-  return { reasons, cursor: next, nudge, restart, pause, resume, merge, stop, notice };
+  return { reasons, cursor: next, nudge, restart, pause, resume, merge, stop, sync: syncNow, notice };
+}
+
+// Words a worker uses when a rebase didn't go cleanly. A false match only costs the orchestrator a look.
+const UNSETTLED = /conflict|fail|error|broke|block|abort|skip|undone|unfinished|left|todo|still|pending|manual|warn|not (yet|done|run|finished)|couldn.?t|can.?t|cannot|didn.?t|won.?t/i;
+
+// A clean rebase of a task with no PR leaves the orchestrator nothing to do. One with a PR needs deliver, and a stacked one may be what deliver is waiting on.
+export function settledRebase(task: Task, e: TaskEvent): boolean {
+  return e.type === "rebased" && !task.pr && !task.stackedOn && !UNSETTLED.test(e.note ?? "");
 }
 
 function checkBudget(spend: Spend | undefined, cursor: Cursor, reasons: string[]): Stop[] {
@@ -163,6 +177,8 @@ export type Effects = {
   merge(pr: Merge): string | undefined;
   // Returns false when the worker's tab was already closed.
   stop(task: Task, note: string): boolean;
+  // Returns what the sync found that needs the orchestrator, such as a task it marked merged.
+  sync(): string[];
 };
 
 // Carries out what a pass found, adding what the orchestrator should hear about it to the pass's reasons. Returns how many PRs merged.
@@ -170,6 +186,15 @@ export function applyPass(result: ScanResult, tasks: Task[], effects: Effects, n
   const task = (id: string) => tasks.find((t) => t.id === id)!;
   const why = (err: unknown) => (err instanceof Error ? err.message : String(err));
   let merged = 0;
+  if (result.sync) {
+    const moved = `main-moved ${result.cursor.main!.slice(0, 8)}`;
+    try {
+      const found = effects.sync();
+      if (found.length) result.reasons.push(`${moved}, and the watcher's sync found: ${found.join("; ")}`);
+    } catch (err) {
+      result.reasons.push(`${moved}, and the watcher's sync failed, so call sync: ${clip(why(err), 100)}`);
+    }
+  }
   for (const id of result.pause) {
     try {
       effects.pause(task(id), `usage limit, resets ${clockAt(result.cursor.limit!.resetsAt, now)}`);
@@ -354,6 +379,11 @@ export async function watchFor(repo: Repo, base: string, term: Terminal, { signa
     restart: (task) => void restartWorker(repo, task, term, task.tab!.session, { note: `no reply for ${(2 * stallMs) / 60_000}m` }),
     merge: (pr) => mergePr(repo.root, pr, (method ??= repoMergeMethod(repo.root))),
     stop: (task, note) => stopWorker(repo, task, term, "budget", note),
+    sync: () => {
+      const r = sync(repo, base, term);
+      for (const id of r.retargeted) logRun(repo, id, "pr-updated", `moved to ${base} by the watcher's sync`);
+      return needsOrchestrator(repo, base, r);
+    },
   };
   const watched = [join(repo.foreman, "tasks"), join(repo.root, ".git", "refs"), join(repo.root, ".git", "packed-refs")].filter(existsSync);
   const hasOrigin = run(["git", "-C", repo.root, "remote", "get-url", "origin"]).code === 0;

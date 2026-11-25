@@ -91,6 +91,7 @@ The `foreman` CLI is for people. The orchestrator and workers call tools on Fore
 
 - While it waits, the orchestrator's tab shows "MCP task still running".
 - When it completes, the tab shows "MCP task ... completed", then the orchestrator's reply. The user no longer sees a message from another session.
+- The watcher wakes the orchestrator only for lines that can need its judgment. When the base branch moves and no task merged, the watcher runs `sync` itself, which asks workers to rebase, and wakes the orchestrator only if sync marked a task merged or couldn't reach a worker. A worker's rebased report doesn't wake it when the task has no PR, doesn't build on another task's branch and the note mentions no conflict, failing test or work left undone.
 - The orchestrator calls `watch` again after each line. A Stop hook stops it ending a turn with tasks in flight and no watch running.
 - Tasks don't survive a restart. The orchestrator calls `watch` again after one. A baseline or together check that was running is lost.
 

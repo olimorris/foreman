@@ -11,7 +11,7 @@ import { checkBrief, checkModel, CONVENTIONAL, plainTitle } from "./brief.ts";
 import { briefNotes } from "./notes.ts";
 import { setTrust } from "./trust.ts";
 import { findTask, loadTasks, withTasks, type Task } from "./state.ts";
-import { nextWorker } from "./lifecycle.ts";
+import { isFinished, nextWorker } from "./lifecycle.ts";
 import { logRun } from "./events.ts";
 import { mcpArgs, SERVER_NAME } from "./mcp.ts";
 import { WORKER_TOOLS } from "./tools/worker.ts";
@@ -19,7 +19,7 @@ import { WORKER_TOOLS } from "./tools/worker.ts";
 export type SpawnOptions = { id: string; title?: string; model?: string; brief: string; owns: string[]; base: string; session: string; stackedOn?: string; claudeConfig?: string };
 
 export function spawn(repo: Repo, opts: SpawnOptions, term: Terminal): Task {
-  const { id, owns, base } = opts;
+  const { id, owns } = opts;
   if (!/^[A-Za-z0-9][A-Za-z0-9-]*$/.test(id)) throw new Error(`task id must be letters, digits and dashes: ${id}`);
   if (loadTasks(repo).some((t) => t.id === id)) throw new Error(`task ${id} already exists`);
   if (!owns.length) throw new Error("a task needs at least one owns path");
@@ -33,7 +33,9 @@ export function spawn(repo: Repo, opts: SpawnOptions, term: Terminal): Task {
   ensureForeman(repo);
   const branch = `foreman/${id}`;
   const worktree = worktreeDir(repo, id);
-  const parent = opts.stackedOn ? findTask(repo, opts.stackedOn) : undefined;
+  // A base that is another task's branch builds on that task, or sync would never move it to the real base once that task merges.
+  const parent = opts.stackedOn ? findTask(repo, opts.stackedOn) : loadTasks(repo).find((t) => t.branch === opts.base && !isFinished(t));
+  const base = parent ? parent.base : opts.base;
   // Start from origin's copy when there is one, because the user's local branch lags behind merged PRs.
   const start = parent ? parent.branch : baseRef(repo, base);
   const startSha = must(["git", "-C", repo.root, "rev-parse", start]).trim();
