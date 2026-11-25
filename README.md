@@ -169,6 +169,14 @@ foreman note --remove 2         # remove a note that turned out wrong
 foreman baseline --runs 3       # run the tests on the base branch again
 ```
 
+### PRs that clash
+
+Each PR is reviewed on its own, so two approved PRs can still conflict, or pass alone and break together. You'd find out after merging one.
+
+So once two or more PRs are open, Foreman merges them all into a throwaway copy of the base branch and runs your tests on the result. It tells you which PRs conflict and which to merge first, or that the tests fail with them combined. The run summary carries the same advice, and says when a PR has changed since it was checked.
+
+The tests run with the `test` command in `.foreman/config.json`. If there isn't one, Foreman works it out from the repo and saves it. `foreman together` runs the check by hand.
+
 ### Settings
 
 `.foreman/config.json` also takes:
@@ -176,6 +184,6 @@ foreman baseline --runs 3       # run the tests on the base branch again
 - `maxWorkers`: how many workers run at once (default 3)
 - `stallMinutes`: how long a worker can go without replying before Foreman nudges it (default 20)
 - `stackTasks`: `false` makes a task wait for its dependency to merge, instead of starting on top of its approved PR (default `true`)
-- `test`: the command that runs the repo's tests, like `swift test`. Foreman works it out when it plans the work
+- `test`: the command that runs the repo's tests, like `swift test`. Foreman uses it for the baseline run and to check the open PRs together, both in a fresh checkout, so include any setup, like `bun install && bun test`. Foreman works it out when it plans the work
 - `testMinutes`: how long one test run can take before Foreman stops it as hung (default 15)
 - `prScreenshots`: `"local"` keeps screenshots on your machine and lists their paths in the PR. `"branch"` pushes them to a `foreman-screenshots` branch so they show in the PR on GitHub

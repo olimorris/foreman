@@ -17,10 +17,21 @@ Keep the screenshots out of your own context. The verdict line is all you need.
 
 ## When the verdict arrives
 
-- **approve**: run `foreman deliver <id>`. It pushes the branch and opens the PR with the review packet. Tell the user in one line with the PR link and the risk. The user merges; you never do. If its note names tasks that can start on top of it, run `foreman next`. If it says other tasks build on this branch, run `foreman sync`.
+- **approve**: run `foreman deliver <id>`. It pushes the branch and opens the PR with the review packet. Tell the user in one line with the PR link and the risk. The user merges; you never do. If its note names tasks that can start on top of it, run `foreman next`. If it says other tasks build on this branch, run `foreman sync`. If two or more PRs are now open, start `foreman together` in the background.
 - **changes**: run `foreman feedback <id>`. It sends the reviewer's issues, each anchored to a screenshot, screen or file and the intent it breaks, to the same running worker. The worker fixes them and reports done again. Review again.
 - **"revision limit reached"**: after two revision rounds, stop. Tell the user what's still wrong, in one line per issue, and point them at the screenshots in `.foreman/tasks/<id>/review/round-<n>/`. Ask whether to send a third round, take over the task, or merge as is.
 - **failed**: read the capture log or `reviewer.json` named in the line, fix the setup if you can, then review again.
+
+## Set up the test command once per repo
+
+`foreman together` runs the repo's tests on the open PRs merged together. If `.foreman/config.json` has no `test` entry, work the command out from the repo: its README, `package.json` scripts, `Package.swift`, `Makefile` or CI workflow. Add `test` and `testMinutes` entries to the existing file, keeping everything else in it:
+
+```json
+"test": "bun install && bun test",
+"testMinutes": 15
+```
+
+It runs in a fresh checkout with nothing installed or built, so include the setup the tests need. Foreman stops it after `testMinutes` (default 15), so raise that for a slow suite.
 
 ## Set up screenshots once per repo
 
