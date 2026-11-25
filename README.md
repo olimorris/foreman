@@ -54,6 +54,15 @@ Foreman is a Claude Code plugin that turns one Claude session into the manager o
 
 It's Claude Code only and works on one repo at a time. That's deliberate - fewer moving parts, less to break.
 
+### Why not Claude Code's agent teams?
+
+Agent teams are great for research and review inside one session. Foreman is built for unattended builds that end in PRs, so it needs things teams don't offer:
+
+- Each worker gets its own worktree, so workers never share a checkout
+- A run survives restarts, since its state lives in `.foreman/`
+- Workers commit without asking you for permission, and Foreman opens the PR once the reviewer approves
+- Every task has its own budget, and a hung worker is spotted and restarted
+
 ## :package: Install
 
 Foreman runs on macOS inside a terminal app it can drive. [Rex](https://www.superlogical.com) is the default. You need:
