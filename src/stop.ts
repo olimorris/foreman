@@ -41,7 +41,7 @@ export function resume(repo: Repo, id: string, term: Terminal, session: string, 
   if (wait) throw new Error(`${limitLine(wait)}, and the watcher resumes ${id} then`);
   const task = { ...findTask(repo, id), ...(model !== undefined ? { model } : {}) };
   if (task.tab && term.alive(task.tab)) throw new Error(`${id}'s worker is still running`);
-  if (!existsSync(task.worktree)) throw new Error(`${id}'s worktree is gone, so it can't resume. Tear it down with foreman teardown ${id}`);
+  if (!existsSync(task.worktree)) throw new Error(`${id}'s worktree is gone, so it can't resume. The orchestrator can tear it down with the teardown tool`);
   const left = budgetLeft(repo, loadTasks(repo), id);
   if (left.reason) throw new Error(`${left.reason}, then resume`);
   const last = loadSessions(sessionsFile(repo, id)).at(-1);

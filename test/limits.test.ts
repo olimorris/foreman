@@ -85,6 +85,12 @@ test("foreman resume refuses while the account waits, since the watcher resumes 
   expect(() => resume(repo, "T1", fakeTerminal(false), "session:1")).toThrow(/waiting for its usage limit to reset at .*, and the watcher resumes T1 then/);
 });
 
+test("resume on a task whose worktree is gone points at the teardown tool, not a CLI command", () => {
+  const repo = tempRepo();
+  withTasks(repo, (ts) => ts.push({ id: "T1", status: "exited", branch: "foreman/T1", base: "main", worktree: join(repo.root, "gone"), owns: [], socket: "", createdAt: "" }));
+  expect(() => resume(repo, "T1", fakeTerminal(false), "session:1")).toThrow("T1's worktree is gone, so it can't resume. The orchestrator can tear it down with the teardown tool");
+});
+
 test("spawn and next start nothing while the account waits", async () => {
   const repo = tempRepo();
   saveLimit(repo, waitingNow());
