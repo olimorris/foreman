@@ -73,6 +73,14 @@ foreman doctor
 
 `foreman doctor` checks every requirement and says what's missing.
 
+### Working with an agent
+
+Paste this to your coding agent, so it can answer questions about Foreman and help you set it up:
+
+```text
+Read https://raw.githubusercontent.com/olimorris/foreman/main/docs/agents.txt and help me with Foreman.
+```
+
 ## :rocket: Usage
 
 Open Rex in your repo and start Foreman:
@@ -87,7 +95,7 @@ Then tell it what you want done:
 Here's my backlog: BACKLOG.md. The deadline is tomorrow. Do it as cheaply as you can.
 ```
 
-Foreman asks about anything unclear, then shows you a plan to approve. Workers open in their own tabs, and approved work arrives as PRs for you to merge. When the run ends, Foreman writes a summary of what to review.
+Foreman asks about anything unclear, then plans the work. If the plan differs from your backlog, such as splitting or cutting an item, it waits for your approval first. Workers open in their own tabs, and approved work arrives as PRs for you to merge. When the run ends, Foreman writes a summary of what to review.
 
 ### What each task is doing
 
@@ -135,7 +143,7 @@ foreman pane
 
 <img alt="foreman pane" src="assets/README/foreman-pane.png">
 
-`foreman up` opens a status pane beside the orchestrator, so you can see the run at a glance:
+Open a status pane beside the orchestrator, so you can see the run at a glance:
 
 - **Needs you**: questions waiting on you, and tasks that are blocked or stopped
 - **Working**: what each worker is doing right now, and for how long
@@ -187,10 +195,3 @@ For a macOS app, `screenshots` builds the app instead of starting a server:
 { "screenshots": { "adapter": "macos", "build": "xcodebuild -scheme App -derivedDataPath {derivedData} build", "app": "{derivedData}/Build/Products/Debug/App.app" } }
 ```
 
-## :sos: Help
-
-Paste this to your coding agent, so it can answer questions about Foreman and help you set it up:
-
-```text
-Read https://raw.githubusercontent.com/olimorris/foreman/main/docs/agents.txt and help me with Foreman.
-```

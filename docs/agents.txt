@@ -32,7 +32,7 @@ foreman doctor
 
 1. The user opens Rex in their repo and runs `foreman up`. This opens a Rex session named `foreman-<repo>` with the orchestrator, and a status pane beside it.
 2. The user gives the orchestrator a backlog and a deadline in plain words, or points it at a file.
-3. The orchestrator asks about anything unclear, then shows one plan: the tasks, what runs first, which model each task runs on and what it would cut. The user approves it.
+3. The orchestrator asks about anything unclear, then writes one plan: the tasks, what runs first, which model each task runs on and what it would cut. If each backlog item became one task, nothing is cut and no decision is open, it starts straight away and shows the plan. Otherwise it waits for the user to approve it.
 4. Workers start, up to `maxWorkers` at once. A task waits for the tasks it depends on, and for any running task that owns the same files.
 5. When a worker finishes, the reviewer checks it and sends feedback until it's right. Then Foreman pushes the branch and opens the PR.
 6. A task that depends on one other task starts on top of that task's branch once its PR is approved and open, unless `stackTasks` is `false`. Its PR says which PR to merge first.
@@ -40,6 +40,48 @@ foreman doctor
 8. At the end, Foreman writes `.foreman/summary.md`: the PRs in review order, how to test each, the assumptions to check and the calls Foreman made on its own.
 
 The user talks to the orchestrator in its Rex tab for anything about the plan or a task. Changing settings, checking on the run and fixing setup are things you can help with from outside.
+
+## Why a task is waiting
+
+`foreman status` gives each waiting task's reason. A planned task starts once all of these are true:
+
+- A worker slot is free. At most `maxWorkers` workers run at once.
+- No running task owns files that overlap its own. Each task owns the smallest set of paths it changes, so two tasks that touch the same files run one after the other.
+- The tasks it depends on have merged. A task with exactly one unmerged dependency is the exception: it starts on top of that dependency's branch once its PR is approved and open, unless `stackTasks` is `false`. With two or more unmerged dependencies, it waits for them to merge.
+
+Contract tasks go first. They're small tasks that set up a type, API or schema that other tasks share.
+
+## Decisions
+
+A decision is a rule that affects more than one task, like the shape of an API. Decisions are named D-1, D-2 and so on.
+
+- Every brief points the worker at the repo's ADR folder and the decisions accepted so far.
+- A worker that needs a new decision proposes it. The orchestrator accepts or rejects it. When it affects other tasks, the orchestrator asks the user first, and if they don't answer within `answerMinutes`, it decides and marks the decision as its own call.
+- Accepted decisions reach every running worker straight away. They reach the repo as ADRs in one batched decisions PR, which the user merges like any other.
+- A PR comment that states a rule, like "always store times in UTC", can become a decision too.
+- To overrule a decision, the user tells the orchestrator, such as "overrule D-4". It rejects the decision and tells the workers.
+- `foreman decisions` lists proposed and accepted decisions.
+
+## Review
+
+- When a worker reports done, a separate reviewer session checks the change against the user's intent. For a change to the app's screens, it takes before and after screenshots.
+- If the reviewer finds problems, the same worker gets the issues, fixes them and reports done again. After two rounds of changes, the orchestrator stops and asks the user whether to send a third round, take over the task or merge it as is. Each round's screenshots are in `.foreman/tasks/<task>/review/round-<n>/`.
+- Approved work becomes a PR. Its description has the user's intent, what changed, the decisions it touched, before and after screenshots, the reviewer's verdict and risk, and an AI Usage section with the task's cost. A PR built on another task's branch says which PR to merge first.
+
+## Steering and stopping
+
+- For anything about the plan, such as adding, changing or cutting a task, or stopping the run, the user tells the orchestrator in its tab. There's no single command that stops everything.
+- To steer one worker, the user can open its Rex tab, named like `W1 · T1: add tags to notes`, and type to it. `foreman send <task> "<message>"` does the same from any terminal.
+- `foreman pause <task>` stops a worker by closing its tab. Its commits stay on its branch and uncommitted work stays in its worktree. `foreman resume <task>` reopens its session where it left off.
+- If the user closes a worker's tab, the orchestrator notices and asks whether to resume the task or tear it down. It never discards unmerged work without the user's yes.
+
+## Updating Foreman
+
+```sh
+cd ~/Code/Foreman && git pull && bun install
+```
+
+Running orchestrators and workers load Foreman from that folder, so update between runs rather than in the middle of one.
 
 ## Commands for the user
 
@@ -124,7 +166,7 @@ Each copy of a macOS app runs with its own bundle id and home folder, so screens
 - `.foreman/config.json` is the only file in there for people to edit. Change the rest through `foreman` commands.
 - `.foreman/summary.md` is the run summary.
 - `.foreman/worktrees/<task>` is each task's worktree.
-- The repo's ADR folder, such as `docs/decisions` or `docs/adr`, is read by every worker. Accepted decisions reach it in one batched PR the user merges.
+- The repo's ADR folder, such as `docs/decisions` or `docs/adr`, holds the decisions that have merged.
 
 ## When something goes wrong
 
