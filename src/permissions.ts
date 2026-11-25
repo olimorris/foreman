@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { latestTranscript, tailLines } from "./limits.ts";
+import { movedOnSince, tailLines, toolCalls, transcripts } from "./transcripts.ts";
 import type { Repo } from "./paths.ts";
 import { latest } from "./rounds.ts";
 import { withLock } from "./store.ts";
@@ -176,42 +176,12 @@ export function hookBlock(event: string, input: HookFields, who: Who, at: string
   return undefined;
 }
 
-type Content = { type?: string; id?: string; name?: string; input?: Record<string, unknown>; tool_use_id?: string; is_error?: boolean; content?: unknown };
-type Entry = { type?: string; timestamp?: string; message?: { content?: Content[] | string } };
-
 const AUTO_MODE = "Permission for this action was denied by the Claude Code auto mode classifier";
 const DENIED = "Permission for this action has been denied";
 
-const textOf = (c: unknown): string => (typeof c === "string" ? c : Array.isArray(c) ? c.map((x) => (typeof x === "string" ? x : str(x?.text))).join(" ") : "");
-
-type Call = ToolCall & { id: string; at: string; result?: { error: boolean; text: string; at: string } };
-
-function calls(lines: string[]): Call[] {
-  const byId = new Map<string, Call>();
-  for (const line of lines) {
-    if (!line.includes('"tool_use"') && !line.includes('"tool_result"')) continue;
-    let entry: Entry;
-    try {
-      entry = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    const content = Array.isArray(entry.message?.content) ? entry.message!.content : [];
-    const at = entry.timestamp ?? "";
-    for (const c of content) {
-      if (entry.type === "assistant" && c.type === "tool_use" && c.id) byId.set(c.id, { id: c.id, at, tool: c.name ?? "", input: c.input ?? {} });
-      if (entry.type === "user" && c.type === "tool_result" && c.tool_use_id) {
-        const call = byId.get(c.tool_use_id);
-        if (call) call.result = { error: !!c.is_error, text: textOf(c.content), at };
-      }
-    }
-  }
-  return [...byId.values()];
-}
-
 // The refusal comes back as the call's tool_result, so the call it answers gives the tool and command.
 export function transcriptBlocks(lines: string[], who: Who, transcript?: string): PermissionBlock[] {
-  return calls(lines).flatMap((c): PermissionBlock[] => {
+  return toolCalls(lines).flatMap((c): PermissionBlock[] => {
     const text = c.result?.error ? c.result.text : "";
     const kind: BlockKind | undefined = text.startsWith(AUTO_MODE) ? "auto-mode" : text.startsWith(DENIED) ? "denied" : undefined;
     if (!kind) return [];
@@ -235,11 +205,11 @@ export function reviewerBlocks(stdout: string, who: Who, round: number, at: stri
 
 // A session at a prompt writes nothing until the user answers, and the answer, yes or no, is the waiting call's tool_result.
 export function settled(b: PermissionBlock, lines: string[]): boolean {
-  const same = calls(lines).filter((c) => c.tool === b.tool && targetOf(c) === b.target);
+  const same = toolCalls(lines).filter((c) => c.tool === b.tool && targetOf(c) === b.target);
   if (b.kind === "prompt") {
     const waiting = same.filter((c) => c.at <= b.at).at(-1);
     if (waiting) return !!waiting.result;
-    return lines.some((l) => (l.includes('"tool_result"') || l.includes('"type":"assistant"')) && (l.match(/"timestamp":"([^"]+)"/)?.[1] ?? "") > b.at);
+    return movedOnSince(lines, b.at);
   }
   // A refused call that later runs is one the user allowed.
   return same.some((c) => c.at > b.at && c.result && !c.result.error);
@@ -250,7 +220,7 @@ const LIVE: Task["status"][] = ["running", "blocked", "needs-decision", "done", 
 export type BlockSources = { transcript(task: Task): string | undefined; lines(file: string): string[]; reviewerOutput(task: Task): string | undefined };
 
 export const fileSources = (repo: Repo): BlockSources => ({
-  transcript: (task) => latestTranscript(repo, task),
+  transcript: (task) => transcripts(repo, task).latest(),
   lines: (file) => (existsSync(file) ? tailLines(file) : []),
   reviewerOutput: (task) => latest(repo, task)?.output,
 });

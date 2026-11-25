@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { saveConfig } from "../src/config.ts";
-import { budgetLeft, lastReplyAt, overBudget, planSpend, priceFor, recordSession, resetBudget, sessionsFile, taskCost, transcriptDir, transcriptSpend, usageCost } from "../src/cost.ts";
+import { budgetLeft, overBudget, planSpend, priceFor, resetBudget, taskCost, usageCost } from "../src/cost.ts";
+import { recordSession, sessionsFile, transcriptDir } from "../src/transcripts.ts";
 import { budgetOverview } from "../src/overview.ts";
 import { loadPlan, planPath, type Plan } from "../src/plan.ts";
 import type { Repo } from "../src/paths.ts";
@@ -21,25 +22,6 @@ test("priceFor prefers the longest matching id and takes overrides", () => {
   expect(priceFor("claude-opus-5-5")!.input).toBe(4);
   expect(priceFor("claude-opus-4-8")).toBeUndefined();
   expect(priceFor("claude-opus-4-8", { "claude-opus-4-8": { input: 5, output: 25, cacheRead: 0.5 } })!.input).toBe(5);
-});
-
-test("transcriptSpend counts each reply once and only recorded sessions", () => {
-  const dir = mkdtempSync(join(tmpdir(), "foreman-cost-"));
-  const reply = (id: string, model = "claude-opus-5-5") => JSON.stringify({ message: { id, model, usage: { input_tokens: 1_000_000 } } });
-  writeFileSync(join(dir, "worker-1.jsonl"), [reply("a"), reply("a"), reply("b"), reply("c", "claude-mystery-1")].join("\n"));
-  writeFileSync(join(dir, "reviewer-9.jsonl"), reply("z"));
-  mkdirSync(join(dir, "worker-1", "subagents"), { recursive: true });
-  writeFileSync(join(dir, "worker-1", "subagents", "agent.jsonl"), reply("s"));
-  const spend = transcriptSpend(dir, ["worker-1"]);
-  expect(spend.usd).toBeCloseTo(12, 6);
-  expect(spend.unpriced).toEqual(["claude-mystery-1"]);
-});
-
-test("lastReplyAt skips messages queued into an idle session", () => {
-  const file = join(mkdtempSync(join(tmpdir(), "foreman-idle-")), "s.jsonl");
-  const line = (type: string, timestamp: string) => JSON.stringify({ type, timestamp });
-  writeFileSync(file, [line("assistant", "2026-11-25T00:24:24Z"), line("system", "2026-11-25T01:19:26Z"), line("queue-operation", "2026-11-25T07:17:49Z")].join("\n") + "\n");
-  expect(lastReplyAt(file)).toBe(Date.parse("2026-11-25T00:24:24Z"));
 });
 
 test("overBudget alerts once per limit, and again after the limit is raised", () => {

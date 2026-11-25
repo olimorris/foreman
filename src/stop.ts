@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { budgetLeft, loadSessions, sessionsFile } from "./cost.ts";
+import { budgetLeft } from "./cost.ts";
+import { loadSessions, sessionsFile } from "./transcripts.ts";
 import type { Repo } from "./paths.ts";
 import type { Terminal } from "./terminal.ts";
 import { checkModel, tabLabel, workerCommand } from "./spawn.ts";

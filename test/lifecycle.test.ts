@@ -11,7 +11,7 @@ import { canHear, isFinished, isMerged, needsUser, next, nextWorker, tabOpen, tr
 import { teardown } from "../src/teardown.ts";
 import { restartWorker, resume, stopWorker } from "../src/stop.ts";
 import { pidAlive, processesIn } from "../src/procs.ts";
-import { recordSession, sessionsFile } from "../src/cost.ts";
+import { recordSession, sessionsFile } from "../src/transcripts.ts";
 import { fakeTerminal, tempRepo } from "./helpers.ts";
 
 process.env.CLAUDE_CONFIG_DIR = mkdtempSync(join(tmpdir(), "foreman-claude-"));

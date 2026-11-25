@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { limitHit, limitLine, loadLimit, RETRY_MS, reviewerLimit, saveLimit, transcriptLimit, waitForReset, type UsageLimit } from "../src/limits.ts";
+import { limitHit, limitLine, loadLimit, RETRY_MS, reviewerLimit, saveLimit, waitForReset, type UsageLimit } from "../src/limits.ts";
 import { respond, type Server } from "../src/mcp.ts";
 import { resume } from "../src/stop.ts";
 import { orchestratorTools } from "../src/tools/orchestrator.ts";
@@ -27,19 +27,6 @@ test("a limit message with no readable time tries again in an hour, and throttli
   expect(limitHit("You've hit your session limit", HIT)).toEqual({ at: HIT, resetsAt: HIT + RETRY_MS, guessed: true });
   expect(limitHit("API Error: Rate limit reached", HIT)).toBeUndefined();
   expect(limitHit("API Error: Can't reach the API server", HIT)).toBeUndefined();
-});
-
-const line = (o: object) => JSON.stringify(o);
-const reply = (hhmm: string) => line({ type: "assistant", timestamp: new Date(at(hhmm)).toISOString(), message: { model: "claude-opus-5-5", content: [{ type: "text", text: "Done." }] } });
-const limitError = (hhmm: string, text = "You've hit your session limit · resets 3:45pm", error = "rate_limit") =>
-  line({ type: "assistant", timestamp: new Date(at(hhmm)).toISOString(), isApiErrorMessage: true, error, message: { model: "<synthetic>", content: [{ type: "text", text }] } });
-
-test("a worker is at the limit only while Claude Code's limit error is its last reply", () => {
-  const queued = line({ type: "user", timestamp: new Date(at("14:20")).toISOString(), message: { content: "[foreman] nudge" } });
-  expect(transcriptLimit([reply("13:50"), limitError("14:00"), queued])).toEqual({ at: HIT, resetsAt: at("15:45"), guessed: false });
-  expect(transcriptLimit([limitError("14:00"), reply("15:46")])).toBeUndefined();
-  expect(transcriptLimit([reply("13:50"), limitError("14:00", "Login expired · Please run /login", "authentication_failed")])).toBeUndefined();
-  expect(transcriptLimit(["{not json", reply("13:50")])).toBeUndefined();
 });
 
 test("a reviewer's -p run that stops at the limit is told apart from a review that quotes the words", () => {

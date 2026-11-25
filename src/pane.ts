@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
-import { basename, join, relative } from "node:path";
+import { basename, join } from "node:path";
 import { loadConfig } from "./config.ts";
 import { budgetOf, orchestratorCost, planSpend, taskCost, usd } from "./cost.ts";
-import { activeLimit, latestTranscript, resetPhrase, tailLines, type UsageLimit } from "./limits.ts";
+import { activeLimit, resetPhrase, type UsageLimit } from "./limits.ts";
+import { transcripts, type Activity } from "./transcripts.ts";
 import { readEvents } from "./events.ts";
 import { loadDecisions } from "./ledger.ts";
 import { statusLabel } from "./overview.ts";
@@ -19,70 +20,7 @@ import { STALL_MINUTES, watcherArmed } from "./watch.ts";
 import { blockParts, openBlocks, type PermissionBlock } from "./permissions.ts";
 import { permissionLabel } from "./status.ts";
 
-export type Activity = { what: string; since: number; idle: boolean };
-
-type Block = { type: string; id?: string; name?: string; input?: Record<string, unknown>; tool_use_id?: string };
-
-// Each content block is its own transcript line, so a tool call still waiting for its result is what the worker is doing now.
-export function readActivity(lines: string[], cwd: string): Activity | undefined {
-  const pending = new Map<string, Activity>();
-  let last: Activity | undefined;
-  for (const line of lines) {
-    if (!line.includes('"type":"assistant"') && !line.includes('"tool_result"')) continue;
-    let entry: { type?: string; timestamp?: string; message?: { content?: Block[] | string; stop_reason?: string } };
-    try {
-      entry = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    const at = Date.parse(entry.timestamp ?? "");
-    const blocks = Array.isArray(entry.message?.content) ? entry.message!.content : [];
-    if (Number.isNaN(at)) continue;
-    if (entry.type === "assistant") {
-      for (const b of blocks) if (b.type === "tool_use" && b.id) pending.set(b.id, { what: describeTool(b, cwd), since: at, idle: false });
-      last = entry.message?.stop_reason === "end_turn" ? { what: "waiting", since: at, idle: true } : { what: "thinking", since: at, idle: false };
-    } else if (entry.type === "user") {
-      for (const b of blocks) if (b.type === "tool_result" && b.tool_use_id) pending.delete(b.tool_use_id);
-      last = { what: "thinking", since: at, idle: false };
-    }
-  }
-  return [...pending.values()].at(-1) ?? last;
-}
-
-function describeTool(b: Block, cwd: string): string {
-  const input = b.input ?? {};
-  const path = (p: unknown) => (typeof p === "string" ? (p.startsWith(cwd) ? relative(cwd, p) : basename(p)) : "");
-  switch (b.name) {
-    case "Bash": {
-      const first = String(input.command ?? "").split("\n")[0]!;
-      // Workers often start a command by changing into their own worktree, which says nothing.
-      return `$ ${first.replace(/^cd\s+\S+\s*(;|&&)\s*/, "")}`;
-    }
-    case "Edit":
-    case "MultiEdit":
-    case "Write":
-      return `editing ${path(input.file_path)}`;
-    case "Read":
-      return `reading ${path(input.file_path)}`;
-    case "Grep":
-    case "Glob":
-      return `searching for ${input.pattern ?? "files"}`;
-    case "Agent":
-    case "Task":
-      return "running a subagent";
-    case "TodoWrite":
-      return "planning";
-    default:
-      return `using ${b.name}`;
-  }
-}
-
 const clip = (s: string, width: number) => (s.length > width ? s.slice(0, width - 3).trimEnd() + "..." : s);
-
-export function workerActivity(repo: Repo, task: Task): Activity | undefined {
-  const latest = latestTranscript(repo, task);
-  return latest ? readActivity(tailLines(latest), task.worktree) : undefined;
-}
 
 export type PaneTask = { task: Task; title: string; spent: number; risk?: Verdict["risk"]; note?: string; activity?: Activity; closed?: boolean };
 export type OpenDecision = { id: string; title: string; by: string };
@@ -213,7 +151,7 @@ export function gatherPane(repo: Repo, now = Date.now(), costs: Map<string, numb
       spent: costs.get(task.id) ?? 0,
       risk: latest(repo, task)?.verdict?.risk,
       note: lastNote,
-      activity: task.status === "running" ? workerActivity(repo, task) : undefined,
+      activity: task.status === "running" ? transcripts(repo, task).activity() : undefined,
       closed: task.status === "running" && closed.has(task.id),
     };
   });

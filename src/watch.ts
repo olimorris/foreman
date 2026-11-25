@@ -8,11 +8,12 @@ import type { Repo } from "./paths.ts";
 import type { Terminal } from "./terminal.ts";
 import { sendToTask } from "./send.ts";
 import { baseRef } from "./snapshot.ts";
-import { budgetOf, lastActivity, overBudget, planSpend, taskCost, taskLimit, usd } from "./cost.ts";
+import { budgetOf, overBudget, planSpend, taskCost, taskLimit, usd } from "./cost.ts";
+import { transcripts } from "./transcripts.ts";
 import { loadConfig } from "./config.ts";
 import { loadPlan, readyTasks, maxWorkers, stackable } from "./plan.ts";
 import { pauseForLimit, restartWorker, resume, stopWorker } from "./stop.ts";
-import { clockAt, loadLimit, resetPhrase, resumeDue, saveLimit, workerLimit, type LimitHit, type UsageLimit } from "./limits.ts";
+import { clockAt, loadLimit, resetPhrase, resumeDue, saveLimit, type LimitHit, type UsageLimit } from "./limits.ts";
 import { taskDir } from "./paths.ts";
 import { inFlight, loadTasks, updateTask, type Task } from "./state.ts";
 import { tabOpen } from "./lifecycle.ts";
@@ -261,9 +262,9 @@ export async function watchFor(repo: Repo, base: string, term: Terminal, { signa
     events: (id) => readEvents(repo, id),
     mainSha: () => run(["git", "-C", repo.root, "rev-parse", baseRef(repo, base)]).stdout.trim() || undefined,
     alive: (task) => (task.tab ? term.alive(task.tab) : true),
-    lastActivity: (task) => lastActivity(repo, task),
+    lastActivity: (task) => transcripts(repo, task).lastReply(),
     questions: () => loadQuestions(repo),
-    limit: (task) => workerLimit(repo, task),
+    limit: (task) => transcripts(repo, task).limit(),
     automerge: () => automergeOn(repo),
     approved: (task) => approved(repo, task),
   };

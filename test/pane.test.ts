@@ -1,30 +1,10 @@
 import { expect, test } from "bun:test";
-import { readActivity, renderPane, type PaneInput, type PaneTask } from "../src/pane.ts";
+import { renderPane, type PaneInput, type PaneTask } from "../src/pane.ts";
 import type { Task } from "../src/state.ts";
 
 const NOW = Date.parse("2026-11-25T08:40:00Z");
 const ago = (min: number) => NOW - min * 60_000;
 const at = (min: number) => new Date(ago(min)).toISOString();
-
-const assistant = (min: number, content: object[], stop: string | null = "tool_use") =>
-  JSON.stringify({ type: "assistant", timestamp: at(min), message: { content, stop_reason: stop } });
-const result = (min: number, id: string) => JSON.stringify({ type: "user", timestamp: at(min), message: { content: [{ type: "tool_result", tool_use_id: id }] } });
-
-test("a tool call still waiting for its result is what the worker is doing", () => {
-  const lines = [
-    assistant(10, [{ type: "tool_use", id: "a", name: "Edit", input: { file_path: "/w/T1/src/tags.ts" } }]),
-    result(9, "a"),
-    assistant(8, [{ type: "tool_use", id: "b", name: "Bash", input: { command: "cd /w/T1; timeout 900 swift test -j 1\necho done" } }]),
-  ];
-  expect(readActivity(lines, "/w/T1")).toEqual({ what: "$ timeout 900 swift test -j 1", since: ago(8), idle: false });
-});
-
-test("a worker whose last reply ended its turn is waiting, and one with a fresh tool result is thinking", () => {
-  const edit = assistant(10, [{ type: "tool_use", id: "a", name: "Read", input: { file_path: "/w/T1/README.md" } }]);
-  expect(readActivity([edit, result(9, "a"), assistant(7, [{ type: "text", text: "Done." }], "end_turn")], "/w/T1")).toEqual({ what: "waiting", since: ago(7), idle: true });
-  expect(readActivity([edit, result(9, "a")], "/w/T1")).toEqual({ what: "thinking", since: ago(9), idle: false });
-  expect(readActivity([edit], "/w/T1")?.what).toBe("reading README.md");
-});
 
 const task = (id: string, status: Task["status"], extra: Partial<Task> = {}): Task =>
   ({ id, status, branch: `foreman/${id}`, base: "main", worktree: `/w/${id}`, owns: [], socket: "", createdAt: at(60), ...extra });

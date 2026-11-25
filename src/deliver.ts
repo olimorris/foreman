@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "./config.ts";
@@ -10,7 +10,8 @@ import { CONVENTIONAL, loadPlan, stackable } from "./plan.ts";
 import { latest, rounds, type PrDraft, type Shot, type Verdict } from "./rounds.ts";
 import { diffBase, findTask, loadTasks, type Task } from "./state.ts";
 import { transition } from "./lifecycle.ts";
-import { loadSessions, sessionsFile, taskCost, transcriptDir } from "./cost.ts";
+import { taskCost } from "./cost.ts";
+import { transcripts } from "./transcripts.ts";
 
 export type { Shot } from "./rounds.ts";
 export type PacketInput = {
@@ -97,15 +98,6 @@ export function renderPacket(p: PacketInput & { models: Models; cost?: number })
   ].join("\n");
 }
 
-export function workerModels(repo: Repo, task: Task): string[] {
-  const sessions = loadSessions(sessionsFile(repo, task.id));
-  const dir = transcriptDir(task.worktree);
-  if (!existsSync(dir)) return [];
-  const ids = readdirSync(dir).filter((f) => f.endsWith(".jsonl") && sessions.some((s) => f.includes(s)))
-    .flatMap((f) => [...readFileSync(join(dir, f), "utf8").matchAll(/"model":"(claude-[^"]+)"/g)].map((m) => m[1]!));
-  return [...new Set(ids)];
-}
-
 function approvedRound(repo: Repo, task: Task): { verdict: Verdict; round: number; dir: string; shots: Shot[] } {
   const r = latest(repo, task);
   if (!r?.verdict) throw new Error(`${task.id} has no finished review. Call review for ${task.id} first`);
@@ -163,7 +155,7 @@ export function deliver(repo: Repo, id: string, opts: { dryRun?: boolean; title?
     shotsNote = undefined;
   }
   const packet = join(taskDir(repo, id), "pr.md");
-  writeFileSync(packet, renderPacket({ task, intent: section(brief, "Intent"), doneNote, test: done?.test, assumptions: done?.assumptions, stat, verdict, round, decisions, shots, shotsNote, buildsOn, draft: verdict.pr?.description.trim() ? verdict.pr : undefined, automerge: loadPlan(repo)?.automerge === true, models: { worker: workerModels(repo, task), reviewer: [...new Set(rounds(repo, task).flatMap((r) => r.models))] }, cost: taskCost(repo, task).total }));
+  writeFileSync(packet, renderPacket({ task, intent: section(brief, "Intent"), doneNote, test: done?.test, assumptions: done?.assumptions, stat, verdict, round, decisions, shots, shotsNote, buildsOn, draft: verdict.pr?.description.trim() ? verdict.pr : undefined, automerge: loadPlan(repo)?.automerge === true, models: { worker: transcripts(repo, task).models(), reviewer: [...new Set(rounds(repo, task).flatMap((r) => r.models))] }, cost: taskCost(repo, task).total }));
 
   if (opts.dryRun) return { packet, title, note: `wrote the PR packet to ${packet}${titleNote}` };
   if (!origin) return { packet, title, note: `this repo has no origin remote, so nothing was pushed. The PR packet is at ${packet}${titleNote}` };

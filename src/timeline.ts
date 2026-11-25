@@ -1,6 +1,6 @@
 import { basename } from "node:path";
 import { loadConfig } from "./config.ts";
-import { workerReplies } from "./cost.ts";
+import { transcripts } from "./transcripts.ts";
 import { shared } from "./decisions.ts";
 import { readEvents, readRunLog, type RunEntry, type RunWhat, type TaskEvent } from "./events.ts";
 import { styleFor, type Style } from "./style.ts";
@@ -195,7 +195,7 @@ export function gatherTimeline(repo: Repo, now = Date.now(), only?: string): Tim
     const task = tasks.find((t) => t.id === h.id);
     if (!task) continue;
     h.events = readEvents(repo, h.id);
-    h.replies = workerReplies(repo, task);
+    h.replies = transcripts(repo, task).replyTimes();
   }
   const stallMs = (loadConfig(repo).stallMinutes ?? STALL_MINUTES) * MIN;
   return { title: plan?.title ?? "Foreman tasks", now, stallMs, approvedAt: ms(plan?.approvedAt), log: readRunLog(repo), tasks: histories };

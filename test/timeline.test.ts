@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { recordSession, replyTimes, sessionsFile, transcriptDir } from "../src/cost.ts";
+import { recordSession, sessionsFile, transcriptDir } from "../src/transcripts.ts";
 import type { RunEntry, TaskEvent } from "../src/events.ts";
 import { styleFor } from "../src/help.ts";
 import { writeJson, type Task } from "../src/state.ts";
@@ -105,13 +105,6 @@ describe("the overnight run", () => {
   });
 });
 
-test("replyTimes reads only the model's replies, across chunk boundaries", () => {
-  const file = join(mkdtempSync(join(tmpdir(), "foreman-replies-")), "s.jsonl");
-  const line = (type: string, timestamp: string, text = "") => JSON.stringify({ type, message: { content: text }, timestamp });
-  writeFileSync(file, [line("assistant", "2026-11-25T00:24:00Z", "café ☕ ".repeat(20)), line("user", "2026-11-25T00:25:00Z"), line("assistant", "2026-11-25T07:17:00Z")].join("\n"));
-  expect(replyTimes(file, 7)).toEqual([at("00:24"), at("07:17")]);
-});
-
 describe("which reports excuse a quiet stretch", () => {
   const ev = (type: TaskEvent["type"], when: string, note: string): TaskEvent => ({ at: iso(when), type, note });
   const quietAfter = (event: TaskEvent) => {
@@ -161,12 +154,6 @@ test("one task's timeline reads only its own transcripts and those of tasks it c
   } finally {
     process.env.CLAUDE_CONFIG_DIR = before;
   }
-});
-
-test("replyTimes takes the line's own timestamp, not one inside a tool's input", () => {
-  const file = join(mkdtempSync(join(tmpdir(), "foreman-replies-")), "s.jsonl");
-  writeFileSync(file, JSON.stringify({ message: { content: [{ type: "tool_use", input: { timestamp: "2020-01-01T00:00:00Z" } }] }, type: "assistant", timestamp: "2026-11-25T00:24:00Z" }) + "\n");
-  expect(replyTimes(file)).toEqual([at("00:24")]);
 });
 
 test("the timeline shows each worker's wait for the usage limit, and one still waiting", () => {
