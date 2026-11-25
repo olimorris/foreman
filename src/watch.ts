@@ -244,17 +244,29 @@ export function prPatches(tasks: Task[], prs: TrackedPr[], seen: Record<string, 
 }
 
 export async function watch(repo: Repo, base: string, term: Terminal): Promise<number> {
+  process.on("SIGTERM", () => (release(repo), process.exit(143)));
+  process.on("SIGINT", () => (release(repo), process.exit(130)));
+  const end = await watchFor(repo, base, term, {
+    notice: (notice) => {
+      console.log(notice);
+      notifyOrchestrator(repo, `[foreman watcher] ${notice}. The watcher stays armed through the wait and wakes you when work resumes.`);
+    },
+  });
+  console.log(end.line);
+  if (end.woke) notifyOrchestrator(repo, `[foreman watcher] ${end.line}. Handle it, then re-arm with \`foreman watch\` in the background.`);
+  return 0;
+}
+
+export type Watching = { signal?: AbortSignal; notice?: (notice: string) => void };
+export type WatchEnd = { line: string; woke: boolean };
+
+// Runs the watcher's passes until one finds something for the orchestrator, and returns that line.
+export async function watchFor(repo: Repo, base: string, term: Terminal, { signal, notice }: Watching = {}): Promise<WatchEnd> {
   const pidFile = join(repo.foreman, "watch.pid");
   const other = readPid(pidFile);
-  if (other && pidAlive(other)) {
-    console.log(`watcher: already armed (pid ${other})`);
-    return 0;
-  }
+  if (other && pidAlive(other)) return { line: `watcher: already armed (pid ${other})`, woke: false };
   mkdirSync(join(repo.foreman, "tasks"), { recursive: true });
   writeFileSync(pidFile, String(process.pid));
-  const release = () => rmSync(pidFile, { force: true });
-  process.on("SIGTERM", () => (release(), process.exit(143)));
-  process.on("SIGINT", () => (release(), process.exit(130)));
 
   const cursorFile = join(repo.foreman, "watch.cursor");
   let cursor: Cursor = existsSync(cursorFile) ? JSON.parse(readFileSync(cursorFile, "utf8")) : { events: {}, exited: [] };
@@ -281,6 +293,7 @@ export async function watch(repo: Repo, base: string, term: Terminal): Promise<n
 
   try {
     for (;;) {
+      if (signal?.aborted) return { line: "watcher: stopped", woke: false };
       // A reviewer that hits the limit records it itself, and the watcher pauses the workers on its next pass.
       const saved = cursor.limit ? undefined : loadLimit(repo);
       if (saved && saved.since > (cursor.limitEnded ?? 0)) cursor.limit = saved;
@@ -359,21 +372,19 @@ export async function watch(repo: Repo, base: string, term: Terminal): Promise<n
       }
       if (cursor.limit) cursor.held = [...(cursor.held ?? []), ...result.reasons.splice(0)];
       writeFileSync(cursorFile, JSON.stringify(cursor));
-      if (result.notice) {
-        console.log(result.notice);
-        notifyOrchestrator(repo, `[foreman watcher] ${result.notice}. The watcher stays armed through the wait and wakes you when work resumes.`);
-      }
-      if (result.reasons.length) {
-        const line = result.reasons.join("; ");
-        console.log(line);
-        notifyOrchestrator(repo, `[foreman watcher] ${line}. Handle it, then re-arm with \`foreman watch\` in the background.`);
-        return 0;
-      }
-      if (lastGh) await waitForChange(watched, POLL_MS);
+      if (result.notice) notice?.(result.notice);
+      if (result.reasons.length) return { line: result.reasons.join("; "), woke: true };
+      if (lastGh) await waitForChange(watched, POLL_MS, signal);
     }
   } finally {
-    release();
+    release(repo);
   }
+}
+
+// Only the watcher that armed may disarm, so a second one turned away can't clear the first one's pid.
+function release(repo: Repo): void {
+  const pidFile = join(repo.foreman, "watch.pid");
+  if (readPid(pidFile) === process.pid) rmSync(pidFile, { force: true });
 }
 
 export const resumePrompt = (repo: Repo, id: string) =>
@@ -396,10 +407,14 @@ function tidyAll(tasks: Task[], procs: Map<string, Proc[]>, cursor: Cursor): str
   return reasons;
 }
 
-async function waitForChange(paths: string[], ms: number): Promise<void> {
+async function waitForChange(paths: string[], ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return;
   const proc = Bun.spawn(["fswatch", "-1", "-r", "-l", "0.5", ...paths], { stdout: "ignore", stderr: "ignore" });
   let timer: Timer | undefined;
-  await Promise.race([proc.exited, new Promise((r) => (timer = setTimeout(r, ms)))]);
+  let onAbort = () => {};
+  const stopped = new Promise<void>((r) => signal?.addEventListener("abort", (onAbort = () => r()), { once: true }));
+  await Promise.race([proc.exited, stopped, new Promise((r) => (timer = setTimeout(r, ms)))]);
+  signal?.removeEventListener("abort", onAbort);
   clearTimeout(timer);
   proc.kill();
 }

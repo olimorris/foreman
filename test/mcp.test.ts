@@ -17,12 +17,12 @@ const server = (role?: "orchestrator" | "worker", task?: string): Server => ({ n
 const ask = (s: Server, method: string, params: Record<string, unknown> = {}) => respond({ jsonrpc: "2.0", id: 1, method, params }, s) as Promise<{ result?: any; error?: { code: number; message: string } }>;
 const names = async (s: Server) => (await ask(s, "tools/list")).result.tools.map((t: { name: string }) => t.name);
 
-test("initialize agrees a version Claude Code asks for and says the server has tools", async () => {
+test("initialize agrees a version Claude Code asks for, and server/discover offers tasks too", async () => {
   const s = server("orchestrator");
   const r = (await ask(s, "initialize", { protocolVersion: "2025-06-18" })).result;
   expect(r).toEqual({ protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "foreman", version: "9.9.9" } });
   expect((await ask(s, "initialize", { protocolVersion: "1999-01-01" })).result.protocolVersion).toBe("2025-11-25");
-  expect((await ask(s, "server/discover")).result.capabilities).toEqual({ tools: {} });
+  expect((await ask(s, "server/discover")).result.capabilities).toEqual({ tools: {}, extensions: { "io.modelcontextprotocol/tasks": {} } });
 });
 
 test("each role lists only its own tools, and a session with no role gets none", async () => {
