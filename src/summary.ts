@@ -7,12 +7,15 @@ import type { Repo } from "./paths.ts";
 import { loadPlan, type Plan } from "./plan.ts";
 import { latestVerdict, type Verdict } from "./review.ts";
 import { loadTasks, type Task } from "./state.ts";
+import { run } from "./exec.ts";
+import { loadTogether, renderTogether, staleness, type Together } from "./together.ts";
 
 export type Ready = { task: Task; title: string; verdict?: Verdict; done?: TaskEvent; blocks: string[] };
 export type Unfinished = { id: string; title: string; reason: string };
 export type SummaryInput = {
   title: string; ready: Ready[]; merged: string[]; unfinished: Unfinished[];
   calls: string[]; cut: string[]; open: Decision[]; spent: number; limit?: number;
+  together?: { result: Together; stale: string[] };
 };
 
 const RISK = { high: 0, medium: 1, low: 2 } as const;
@@ -58,6 +61,7 @@ export function renderSummary(s: SummaryInput): string {
       `   - Risk: ${r.verdict?.risk ?? "not reviewed"}${r.verdict?.risk_note ? `. ${r.verdict.risk_note}` : ""}`,
     ]) : ["Nothing is ready yet."]),
     "",
+    ...(s.together ? renderTogether(s.together.result, s.together.stale) : []),
     ...(s.merged.length ? ["## Already merged", "", list(s.merged), ""] : []),
     ...(s.unfinished.length ? ["## Not finished", "", ...s.unfinished.map((u) => `- **${u.title}** (${u.id}): ${u.reason}`), ""] : []),
     ...(s.calls.length ? ["## Calls Foreman made for you", "", ...s.calls.map((c) => `- ${c}`), ""] : []),
@@ -89,10 +93,14 @@ export function gather(repo: Repo, plan: Plan | undefined): SummaryInput {
     } else unfinished.push({ id: task.id, title: titleOf(task.id), reason: UNFINISHED[task.status] ?? task.status });
   }
   for (const p of plan?.tasks ?? []) if (!tasks.some((t) => t.id === p.id)) unfinished.push({ id: p.id, title: p.title, reason: "not started" });
+  const result = loadTogether(repo);
+  const prs = tasks.filter(hasOpenPr)
+    .map((t) => ({ id: t.id, pr: t.pr!, branch: t.branch, sha: run(["git", "-C", repo.root, "rev-parse", "--verify", "-q", t.branch]).stdout.trim() }));
   const spent = tasks.reduce((sum, t) => sum + taskCost(repo, t).total, 0) + orchestratorCost(repo).usd;
   return {
     title: plan?.title ?? "Foreman tasks", ready, merged, unfinished, calls: plan?.calls ?? [], cut: plan?.cut ?? [],
     open: loadDecisions(repo).filter((d) => d.status === "proposed"), spent, limit: budgetOf(repo).plan,
+    ...(result && prs.length ? { together: { result, stale: staleness(result, prs) } } : {}),
   };
 }
 
@@ -126,6 +134,13 @@ export async function page(text: string): Promise<void> {
   } finally {
     process.off("SIGINT", ignore);
   }
+}
+
+// A task keeps its PR open while its worker is blocked, over budget or fixing review feedback.
+const hasOpenPr = (t: Task) => !!t.pr && !t.mergedAt && t.status !== "torn-down";
+
+export function openPrs(repo: Repo): Task[] {
+  return reviewOrder(gather(repo, loadPlan(repo)).ready).map((r) => r.task).filter(hasOpenPr);
 }
 
 export function writeSummary(repo: Repo): string {

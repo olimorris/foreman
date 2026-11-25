@@ -24,6 +24,7 @@ export const GROUPS: Group[] = [
       { usage: "status [--json]", about: "What each task is doing" },
       { usage: "pane", about: "Open the status pane beside this tab" },
       { usage: "summary", about: "Write the run summary of PRs to review and show it" },
+      { usage: "together", about: "Merge the open PRs together and run the tests" },
     ],
   },
   {

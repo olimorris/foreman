@@ -28,7 +28,8 @@ import { setTrust } from "./trust.ts";
 import { deliver } from "./deliver.ts";
 import { describePlan, loadPlan, maxWorkers, parsePlan, planBrief, readyTasks, savePlan, stackable, validatePlan } from "./plan.ts";
 import { sync } from "./sync.ts";
-import { forTerminal, page, writeSummary } from "./summary.ts";
+import { forTerminal, openPrs, page, writeSummary } from "./summary.ts";
+import { together } from "./together.ts";
 import { budgetLeft, budgetOf, orchestratorCost, recordSession, sessionsFile, taskCost, usd } from "./cost.ts";
 import { restartWorker, resume, stopWorker } from "./stop.ts";
 import { watch, watcherArmed } from "./watch.ts";
@@ -241,6 +242,13 @@ async function main(argv: string[]): Promise<number> {
       if (!process.stdout.isTTY) return console.log(`wrote ${path}`), 0;
       const md = readFileSync(path, "utf8");
       await page(process.env.NO_COLOR ? md : forTerminal(md));
+      return 0;
+    }
+    case "together": {
+      const repo = findRepo();
+      const r = await together(repo, defaultBase(repo), () => openPrs(repo), { fetch: true });
+      console.log(r.line);
+      if (r.result) notifyOrchestrator(repo, r.line);
       return 0;
     }
     case "cost": {
