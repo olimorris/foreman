@@ -75,7 +75,7 @@ foreman doctor
 
 This installs the `foreman` command along with [Bun](https://bun.sh), `jq`, `fswatch` and `gh`. `foreman up` loads the Claude Code plugin from the same install, so the command and the plugin are always the same version. `brew upgrade foreman` updates both, and sessions that are already running keep working.
 
-Foreman runs on macOS inside a terminal app it can drive. [Rex](https://www.superlogical.com) is the default, and `FOREMAN_TERMINAL=<name>` picks another from `src/integrations/`. You also need:
+Foreman runs on macOS inside a terminal app it can drive. It detects which one you're in, so you only need `FOREMAN_TERMINAL=<name>` to override that and pick another from `src/integrations/`. [Rex](https://www.superlogical.com) is the default when it can't tell. You also need:
 
 - Claude Code 2.1.224 or later (`brew install --cask claude-code`)
 - `gh` signed in with `gh auth login`
@@ -83,6 +83,19 @@ Foreman runs on macOS inside a terminal app it can drive. [Rex](https://www.supe
 - For macOS app screenshots: Xcode, and Screen Recording permission for your terminal in System Settings > Privacy & Security > Screen & System Audio Recording
 
 `foreman doctor` checks each of these.
+
+### Uninstall
+
+`brew uninstall foreman` removes the command and the plugin, but not what Foreman made in your repos. In each repo it ran in:
+
+```sh
+git worktree remove --force .foreman/worktrees/<task>   # once per leftover worktree
+rm -rf .foreman
+git worktree prune                                       # if you deleted .foreman/ first
+git branch -D $(git branch --list 'foreman/*' | tr -d ' *+')
+```
+
+Then delete the `.foreman/` line from `.git/info/exclude`. Foreman added it so `.foreman/` stays out of git. Its PRs and any branches it pushed are on GitHub, so close or delete those there.
 
 ### Working on Foreman
 
