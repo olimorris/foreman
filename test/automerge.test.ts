@@ -3,7 +3,7 @@ import { automerge, automergeOn, checksOf, mergeMethod, type Check } from "../sr
 import { saveConfig } from "../src/config.ts";
 import { UsageError } from "../src/help.ts";
 import { loadPlan, parsePlan, savePlan } from "../src/plan.ts";
-import type { Task } from "../src/state.ts";
+import { withTasks, type Task } from "../src/state.ts";
 import { scan, type Cursor, type PrState, type Probes, type TrackedPr } from "../src/watch.ts";
 import { tempRepo } from "./helpers.ts";
 
@@ -125,8 +125,24 @@ describe("foreman automerge", () => {
     expect(automergeOn(repo)).toBe(true);
     expect(automerge(repo, ["off"])[0]).toStartWith("Automerge is off");
     automerge(repo, ["on"]);
-    savePlan(repo, parsePlan(PLAN));
+    withTasks(repo, (tasks) => void tasks.push(...loadPlan(repo)!.tasks.map((t) => task(t.id, { status: "merged" }))));
+    savePlan(repo, parsePlan(PLAN.replaceAll("T1", "T2")));
     expect(automergeOn(repo)).toBe(false);
+  });
+
+  test("changing and re-approving the plan mid-run keeps it on", () => {
+    const repo = tempRepo();
+    const T2 = PLAN.replaceAll("T1", "T2");
+    savePlan(repo, parsePlan(PLAN + T2));
+    automerge(repo, ["on"]);
+    savePlan(repo, { ...loadPlan(repo)!, approvedAt: "now" });
+    withTasks(repo, (tasks) => void tasks.push(task("T1", { status: "merged" })));
+    savePlan(repo, parsePlan(PLAN + T2.replace("feat: notes carry tags", "feat: notes carry colours")));
+    expect(automergeOn(repo)).toBe(true);
+    savePlan(repo, parsePlan(PLAN + T2 + PLAN.replaceAll("T1", "T3")));
+    expect(automergeOn(repo)).toBe(true);
+    savePlan(repo, { ...loadPlan(repo)!, approvedAt: "later" });
+    expect(automergeOn(repo)).toBe(true);
   });
 
   test("switching it on lists the never rules about merging", () => {

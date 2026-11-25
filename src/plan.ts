@@ -183,10 +183,19 @@ export function loadPlan(repo: Repo): Plan | undefined {
   return existsSync(planPath(repo)) ? JSON.parse(readFileSync(planPath(repo), "utf8")) : undefined;
 }
 
+const runningPlan = (repo: Repo, stored: Plan): boolean => {
+  const tasks = loadTasks(repo);
+  const done = (id: string) => tasks.some((t) => t.id === id && (t.status === "merged" || t.status === "torn-down"));
+  return !stored.tasks.every((t) => done(t.id));
+};
+
 export function savePlan(repo: Repo, plan: Plan): void {
   mkdirSync(join(repo.foreman, "plan"), { recursive: true });
   for (const t of plan.tasks) writeFileSync(planBrief(repo, t.id), `# ${t.id}: ${t.title}\n\n${t.brief}`);
-  writeJson(planPath(repo), plan);
+  const before = loadPlan(repo);
+  // Re-storing an edited plan mid-run would otherwise switch automerge off and leave approved PRs unmerged.
+  const keepAutomerge = plan.automerge === undefined && before?.automerge && runningPlan(repo, before);
+  writeJson(planPath(repo), keepAutomerge ? { ...plan, automerge: true } : plan);
 }
 
 export const planBrief = (repo: Repo, id: string) => join(repo.foreman, "plan", `${id}.md`);
