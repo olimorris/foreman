@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { must } from "../src/exec.ts";
 import { findRepo, type Repo } from "../src/paths.ts";
-import type { Rex } from "../src/rex.ts";
+import type { Terminal } from "../src/terminal.ts";
 
 export function tempRepo(): Repo {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "foreman-test-")));
@@ -17,7 +17,7 @@ export function tempRepo(): Repo {
   return findRepo(dir);
 }
 
-export function fakeRex(alive = true): Rex & { sent: string[]; closed: string[]; labels: string[] } {
+export function fakeTerminal(alive = true): Terminal & { sent: string[]; closed: string[]; labels: string[] } {
   const sent: string[] = [];
   const labels: string[] = [];
   const closed: string[] = [];
@@ -25,7 +25,11 @@ export function fakeRex(alive = true): Rex & { sent: string[]; closed: string[];
     sent,
     closed,
     labels,
-    open: (session, label) => (labels.push(label), { session, window: "window:1", block: "block:1" }),
+    name: "Fake",
+    currentSession: () => "session:1",
+    sessionEnv: ["FAKE_SESSION"],
+    requires: [],
+    open: (session, label) => (labels.push(label), { session, window: "window:1", pane: "block:1" }),
     newSession: () => "session:1",
     findSession: () => undefined,
     alive: () => alive,

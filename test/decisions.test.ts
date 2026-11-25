@@ -9,11 +9,11 @@ import { must, run } from "../src/exec.ts";
 import { findDecision, propose, recordPath } from "../src/ledger.ts";
 import type { Repo } from "../src/paths.ts";
 import { withTasks, type Task } from "../src/state.ts";
-import { fakeRex, tempRepo } from "./helpers.ts";
+import { fakeTerminal, tempRepo } from "./helpers.ts";
 
 const task = (id: string, owns: string[], status: Task["status"] = "running"): Task => ({
   id, status, owns, branch: `foreman/${id}`, base: "main", worktree: `/w/${id}`, socket: "/nonexistent.sock",
-  rex: { session: "s", window: `w-${id}`, block: `b-${id}` }, createdAt: "",
+  tab: { session: "s", window: `w-${id}`, pane: `b-${id}` }, createdAt: "",
 });
 
 function withAdrs(repo: Repo): void {
@@ -54,25 +54,25 @@ describe("propose, accept and reject", () => {
     withAdrs(repo);
     withTasks(repo, (ts) => ts.push(task("T1", ["src/export/"]), task("T2", ["src/export/Codec.swift"]), task("T3", ["src/ui/"])));
     propose(repo, { title: "Exports are H.264", body: "Draft.", paths: ["src/export/**"], supersedes: [], by: "T1" });
-    const rex = fakeRex();
-    const r = accept(repo, "D-1", { title: "Exports are H.264 so every player opens them", body: "Final." }, rex);
+    const term = fakeTerminal();
+    const r = accept(repo, "D-1", { title: "Exports are H.264 so every player opens them", body: "Final." }, term);
     expect(r.sent).toEqual(["T1", "T2"]);
-    expect(rex.sent).toHaveLength(2);
+    expect(term.sent).toHaveLength(2);
     expect(findDecision(repo, "D-1")).toMatchObject({ status: "accepted", title: "Exports are H.264 so every player opens them", body: "Final.", paths: ["src/export/**"] });
     const index = readFileSync(writeIndex(repo), "utf8");
     expect(index).toContain("- ADR 2: One file per layer - docs/decisions/0002-files.md");
     expect(index).toContain("- D-1: Exports are H.264 so every player opens them");
-    expect(() => accept(repo, "D-1", {}, rex)).toThrow("already accepted");
+    expect(() => accept(repo, "D-1", {}, term)).toThrow("already accepted");
   });
 
   test("reject needs a reason and tells only the proposer", () => {
     const repo = tempRepo();
     withTasks(repo, (ts) => ts.push(task("T1", ["src/"]), task("T2", ["src/"])));
     propose(repo, { title: "Use tabs", body: "Why.", paths: ["src/"], supersedes: [], by: "T1" });
-    const rex = fakeRex();
-    expect(() => reject(repo, "D-1", " ", rex)).toThrow("needs a reason");
-    expect(reject(repo, "D-1", "the repo uses spaces", rex).sent).toEqual(["T1"]);
-    const inbox = rex.sent[0]!.match(/read (\S+) and act/)![1]!;
+    const term = fakeTerminal();
+    expect(() => reject(repo, "D-1", " ", term)).toThrow("needs a reason");
+    expect(reject(repo, "D-1", "the repo uses spaces", term).sent).toEqual(["T1"]);
+    const inbox = term.sent[0]!.match(/read (\S+) and act/)![1]!;
     expect(readFileSync(inbox, "utf8")).toContain("the repo uses spaces");
   });
 });
@@ -82,7 +82,7 @@ test("writeAdrs commits records on their own branch without touching the main ch
   withAdrs(repo);
   saveConfig(repo, {});
   propose(repo, { title: "Workers own their folders", body: "Body.", paths: [], supersedes: [2], by: "T1" });
-  accept(repo, "D-1", {}, fakeRex());
+  accept(repo, "D-1", {}, fakeTerminal());
   const dry = writeAdrs(repo, { dryRun: true, push: false, base: "main", reserved: [] });
   expect(dry.files.map((f) => f.file)).toEqual(["docs/decisions/0003-workers-own-their-folders.md", "docs/decisions/superseded/0002-files.md"]);
   expect(findDecision(repo, "D-1").adr).toBeUndefined();

@@ -5,7 +5,7 @@ import { baseRef } from "./snapshot.ts";
 import { loadConfig } from "./config.ts";
 import { findContext, writeIndex } from "./decisions.ts";
 import { pluginArgs, socketPath, taskDir, worktreeDir, type Repo } from "./paths.ts";
-import type { Rex } from "./rex.ts";
+import type { Terminal } from "./terminal.ts";
 import { CONVENTIONAL } from "./plan.ts";
 import { setTrust } from "./trust.ts";
 import { loadTasks, withTasks, type Task } from "./state.ts";
@@ -28,7 +28,7 @@ export function checkBrief(text: string): void {
   }
 }
 
-export function spawn(repo: Repo, opts: SpawnOptions, rex: Rex): Task {
+export function spawn(repo: Repo, opts: SpawnOptions, term: Terminal): Task {
   const { id, owns, base } = opts;
   if (!/^[A-Za-z0-9][A-Za-z0-9-]*$/.test(id)) throw new Error(`task id must be letters, digits and dashes: ${id}`);
   if (loadTasks(repo).some((t) => t.id === id)) throw new Error(`task ${id} already exists`);
@@ -55,15 +55,15 @@ export function spawn(repo: Repo, opts: SpawnOptions, rex: Rex): Task {
 
   const task: Task = { id, ...(opts.title ? { title: opts.title } : {}), status: "running", branch, base, worktree, owns, socket: socketPath(repo, id), startSha, createdAt: new Date().toISOString() };
   withTasks(repo, (tasks) => tasks.push(task));
-  task.rex = rex.open(opts.session, tabLabel(task), worktree, workerCommand(task, `Your brief is ${briefPath}. Read it and start. This repo's Foreman workflow explicitly allows you to commit and rebase on ${branch}, so commit there as you go, and never on any other branch.`));
-  withTasks(repo, (tasks) => Object.assign(tasks.find((t) => t.id === id)!, { rex: task.rex }));
+  task.tab = term.open(opts.session, tabLabel(task), worktree, workerCommand(task, term, `Your brief is ${briefPath}. Read it and start. This repo's Foreman workflow explicitly allows you to commit and rebase on ${branch}, so commit there as you go, and never on any other branch.`));
+  withTasks(repo, (tasks) => Object.assign(tasks.find((t) => t.id === id)!, { tab: task.tab }));
   return task;
 }
 
-export function workerCommand(task: Task, prompt: string, resume?: string): string[] {
+export function workerCommand(task: Task, term: Terminal, prompt: string, resume?: string): string[] {
   return [
-    // Without Rex's ids a user hook that names "your Rex session" can't rename the orchestrator's session from a worker.
-    "env", "-u", "REX_SESSION", "-u", "REX_BLOCK", "FOREMAN_ROLE=worker", `FOREMAN_TASK=${task.id}`,
+    // Without the terminal's session ids, a user hook that names "your session" can't rename the orchestrator's session from a worker.
+    "env", ...term.sessionEnv.flatMap((v) => ["-u", v]), "FOREMAN_ROLE=worker", `FOREMAN_TASK=${task.id}`,
     "claude", ...pluginArgs(),
     "--agent", "foreman:worker",
     "--permission-mode", "auto",

@@ -15,7 +15,8 @@ import { join } from "node:path";
 import { appendEvent, REPORT_TYPES, type ReportType } from "./events.ts";
 import { areaLock, sessionStartContext, stopHook, type HookInput, type LockContext } from "./hooks.ts";
 import { defaultBase, findRepo, pluginArgs, socketPath, type Repo } from "./paths.ts";
-import { rex } from "./rex.ts";
+import { terminal } from "./integrations/index.ts";
+import { requireSession } from "./terminal.ts";
 import { sendToTask } from "./send.ts";
 import { ensureForeman, plainTitle, spawn } from "./spawn.ts";
 import { budgetOverview, byActivity, statusLabel, table, taskTitle } from "./overview.ts";
@@ -45,6 +46,7 @@ function flags(args: string[]): { positional: string[]; opts: Record<string, str
 
 async function main(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv;
+  const term = terminal();
   const { positional, opts } = flags(rest);
 
   switch (cmd) {
@@ -69,11 +71,11 @@ async function main(argv: string[]): Promise<number> {
       const repo = findRepo();
       ensureForeman(repo);
       const name = `foreman-${basename(repo.root)}`;
-      const existing = rex.findSession(name);
-      if (existing) return console.log(`Rex session ${name} already exists (${existing})`), 0;
+      const existing = term.findSession(name);
+      if (existing) return console.log(`${term.name} session ${name} already exists (${existing})`), 0;
       // Claude Code's trust prompt would otherwise swallow the user's first message and exit.
       setTrust(repo.root, true);
-      const session = rex.newSession(name, repo.root, [
+      const session = term.newSession(name, repo.root, [
         "env", "FOREMAN_ROLE=orchestrator",
         "claude", ...pluginArgs(),
         "--agent", "foreman:orchestrator",
@@ -81,19 +83,18 @@ async function main(argv: string[]): Promise<number> {
         "--messaging-socket-path", socketPath(repo, "orchestrator"),
         "-n", "foreman",
       ]);
-      console.log(`Started the orchestrator in Rex session ${name} (${session})`);
+      console.log(`Started the orchestrator in ${term.name} session ${name} (${session})`);
       return 0;
     }
     case "spawn": {
       const repo = findRepo();
       const [id] = positional;
-      const session = process.env.REX_SESSION;
       if (!id || !opts.brief?.[0]) throw usageError("spawn");
-      if (!session) throw new Error("REX_SESSION isn't set: run spawn from inside Rex");
+      const session = requireSession(term, "spawn");
       const left = budgetLeft(repo, loadTasks(repo));
       if (left.reason) throw new Error(`no new tasks start: ${left.reason}`);
-      const task = spawn(repo, { id, title: opts.title?.[0], brief: opts.brief[0], owns: opts.owns ?? [], base: opts.base?.[0] ?? defaultBase(repo), session }, rex);
-      console.log(`spawned ${task.id}: ${task.worktree} on ${task.branch}, Rex tab ${task.rex?.window}`);
+      const task = spawn(repo, { id, title: opts.title?.[0], brief: opts.brief[0], owns: opts.owns ?? [], base: opts.base?.[0] ?? defaultBase(repo), session }, term);
+      console.log(`spawned ${task.id}: ${task.worktree} on ${task.branch}, ${term.name} tab ${task.tab?.window}`);
       return 0;
     }
     case "send": {
@@ -101,7 +102,7 @@ async function main(argv: string[]): Promise<number> {
       const [id, ...words] = positional;
       if (!id) throw usageError("send");
       const text = words.length ? words.join(" ") : await Bun.stdin.text();
-      console.log(`sent to ${id} via ${sendToTask(repo, findTask(repo, id), text.trim(), rex)}`);
+      console.log(`sent to ${id} via ${sendToTask(repo, findTask(repo, id), text.trim(), term)}`);
       return 0;
     }
     case "report": {
@@ -133,7 +134,7 @@ async function main(argv: string[]): Promise<number> {
       const [id] = positional;
       if (!id) throw usageError("accept");
       const body = opts["body-file"]?.[0] ? await Bun.file(opts["body-file"][0]).text() : undefined;
-      const r = accept(repo, id, { title: opts.title?.[0], body, paths: opts.paths, slug: opts.slug?.[0], supersedes: opts.supersedes?.map(Number) }, rex);
+      const r = accept(repo, id, { title: opts.title?.[0], body, paths: opts.paths, slug: opts.slug?.[0], supersedes: opts.supersedes?.map(Number) }, term);
       console.log(`accepted ${id}. Told: ${r.sent.join(", ") || "nobody"}${r.failed.length ? `. Couldn't reach: ${r.failed.join(", ")}` : ""}`);
       return 0;
     }
@@ -141,7 +142,7 @@ async function main(argv: string[]): Promise<number> {
       const repo = findRepo();
       const [id] = positional;
       if (!id) throw usageError("reject");
-      const r = reject(repo, id, opts.reason?.[0] ?? "", rex);
+      const r = reject(repo, id, opts.reason?.[0] ?? "", term);
       console.log(`rejected ${id}. Told: ${r.sent.join(", ") || "nobody"}`);
       return 0;
     }
@@ -155,7 +156,7 @@ async function main(argv: string[]): Promise<number> {
     case "review": {
       const [id] = positional;
       if (!id) throw usageError("review");
-      startReview(findRepo(), id, rex);
+      startReview(findRepo(), id, term);
       console.log(`review of ${id} started in its own tab. The verdict arrives through the watcher.`);
       return 0;
     }
@@ -168,7 +169,7 @@ async function main(argv: string[]): Promise<number> {
     case "feedback": {
       const [id] = positional;
       if (!id) throw usageError("feedback");
-      console.log(sendFeedback(findRepo(), id, rex));
+      console.log(sendFeedback(findRepo(), id, term));
       return 0;
     }
     case "shots": {
@@ -194,14 +195,14 @@ async function main(argv: string[]): Promise<number> {
       const repo = findRepo();
       const p = loadPlan(repo);
       if (!p?.approvedAt) throw new Error("no approved plan. Write one with the intake skill, then run foreman plan approve once the user agrees");
-      const session = process.env.REX_SESSION;
-      if (!session) throw new Error("REX_SESSION isn't set: run next from inside Rex");
+      
+      const session = requireSession(term, "next");
       const room = budgetLeft(repo, loadTasks(repo));
       if (room.reason) throw new Error(`no new tasks start: ${room.reason}`);
       const max = maxWorkers(repo, opts.max?.[0]);
       const { start, waiting } = readyTasks(p, loadTasks(repo), max);
       for (const t of start) {
-        spawn(repo, { id: t.id, title: t.title, brief: planBrief(repo, t.id), owns: t.owns, base: defaultBase(repo), session }, rex);
+        spawn(repo, { id: t.id, title: t.title, brief: planBrief(repo, t.id), owns: t.owns, base: defaultBase(repo), session }, term);
         console.log(`spawned ${t.id}: ${t.title}`);
       }
       for (const w of waiting) console.log(`waiting ${w.id}: ${w.reason}`);
@@ -212,7 +213,7 @@ async function main(argv: string[]): Promise<number> {
     case "sync": {
       const repo = findRepo();
       const base = defaultBase(repo);
-      const r = sync(repo, base, rex);
+      const r = sync(repo, base, term);
       console.log(`${base} is at ${r.head.slice(0, 8)}`);
       if (r.merged.length) console.log(`merged: ${r.merged.join(", ")}. Tear them down, then run foreman next`);
       if (r.asked.length) console.log(`asked to rebase: ${r.asked.join(", ")}`);
@@ -255,26 +256,24 @@ async function main(argv: string[]): Promise<number> {
       const repo = findRepo();
       const [id] = positional;
       if (!id) throw usageError("pause");
-      console.log(stopWorker(repo, findTask(repo, id), rex) ? `stopped ${id}'s worker. Its work so far is in its worktree` : `${id} had no worker running`);
+      console.log(stopWorker(repo, findTask(repo, id), term) ? `stopped ${id}'s worker. Its work so far is in its worktree` : `${id} had no worker running`);
       return 0;
     }
     case "restart": {
       const repo = findRepo();
       const [id] = positional;
-      const session = process.env.REX_SESSION;
       if (!id) throw usageError("restart");
-      if (!session) throw new Error("REX_SESSION isn't set: run restart from inside Rex");
-      restartWorker(repo, findTask(repo, id), rex, session);
+      const session = requireSession(term, "restart");
+      restartWorker(repo, findTask(repo, id), term, session);
       console.log(`restarted ${id}'s worker in a new tab, carrying on its last session`);
       return 0;
     }
     case "resume": {
       const repo = findRepo();
       const [id] = positional;
-      const session = process.env.REX_SESSION;
       if (!id) throw usageError("resume");
-      if (!session) throw new Error("REX_SESSION isn't set: run resume from inside Rex");
-      resume(repo, id, rex, session);
+      const session = requireSession(term, "resume");
+      resume(repo, id, term, session);
       console.log(`resumed ${id}'s worker in a new tab`);
       return 0;
     }
@@ -301,11 +300,11 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     }
     case "watch":
-      return watch(findRepo(), defaultBase(findRepo()), rex);
+      return watch(findRepo(), defaultBase(findRepo()), term);
     case "teardown": {
       const [id] = positional;
       if (!id) throw usageError("teardown");
-      const r = teardown(findRepo(), id, !!opts.discard, rex);
+      const r = teardown(findRepo(), id, !!opts.discard, term);
       console.log(r.message);
       return r.removed ? 0 : 3;
     }
@@ -408,7 +407,7 @@ async function hook(event: string | undefined): Promise<number> {
     if (role === "orchestrator") console.log(JSON.stringify(stopHook(repo)));
   } else if (event === "session-start") {
     if (input.session_id) recordSession(sessionsFile(repo, role === "worker" ? process.env.FOREMAN_TASK : undefined), input.session_id);
-    const additionalContext = sessionStartContext(input, ctx, rex);
+    const additionalContext = sessionStartContext(input, ctx, terminal());
     console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext } }));
   }
   return 0;

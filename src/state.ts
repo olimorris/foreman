@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Repo } from "./paths.ts";
-import type { Tab } from "./rex.ts";
+import type { Tab } from "./terminal.ts";
 import { withLock } from "./store.ts";
 
 export type TaskStatus = "running" | "over-budget" | "done" | "blocked" | "needs-decision" | "exited" | "pr-open" | "merged" | "torn-down";
@@ -15,7 +15,7 @@ export type Task = {
   worktree: string;
   owns: string[];
   socket: string;
-  rex?: Tab;
+  tab?: Tab;
   pr?: number;
   startSha?: string;
   mergedAt?: string;
@@ -31,7 +31,13 @@ const tasksPath = (repo: Repo) => join(repo.foreman, "tasks.json");
 export function loadTasks(repo: Repo): Task[] {
   const path = tasksPath(repo);
   if (!existsSync(path)) return [];
-  return JSON.parse(readFileSync(path, "utf8")).tasks ?? [];
+  return (JSON.parse(readFileSync(path, "utf8")).tasks ?? []).map(upgrade);
+}
+
+// Tasks saved before terminal integrations kept their Rex tab under "rex", with the pane called a block.
+function upgrade(task: Task & { rex?: { session: string; window: string; block: string } }): Task {
+  const { rex, ...rest } = task;
+  return rex && !rest.tab ? { ...rest, tab: { session: rex.session, window: rex.window, pane: rex.block } } : rest;
 }
 
 export function findTask(repo: Repo, id: string): Task {

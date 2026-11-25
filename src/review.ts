@@ -5,7 +5,7 @@ import { indexPath, writeIndex } from "./decisions.ts";
 import { appendEvent, lastDone } from "./events.ts";
 import { must, run } from "./exec.ts";
 import { pluginRoot, taskDir, worktreeDir, type Repo } from "./paths.ts";
-import type { Rex } from "./rex.ts";
+import type { Terminal } from "./terminal.ts";
 import { sendToTask } from "./send.ts";
 import { capture, parseScreens, type Capture } from "./shots.ts";
 import { tabLabel } from "./spawn.ts";
@@ -46,11 +46,11 @@ export const VERDICT_SCHEMA = {
 
 export const roundDir = (repo: Repo, id: string, round: number) => join(taskDir(repo, id), "review", `round-${round}`);
 
-export function startReview(repo: Repo, id: string, rex: Rex, session = process.env.REX_SESSION): void {
+export function startReview(repo: Repo, id: string, term: Terminal, session = term.currentSession()): void {
   const task = findTask(repo, id);
-  const target = session ?? task.rex?.session;
-  if (!target) throw new Error("REX_SESSION isn't set and the task has no Rex tab");
-  rex.open(target, tabLabel(task, "review "), task.worktree, [join(pluginRoot, "bin", "foreman"), "review-run", id], false);
+  const target = session ?? task.tab?.session;
+  if (!target) throw new Error(`run foreman review from inside ${term.name}, since the task has no tab to open the review beside`);
+  term.open(target, tabLabel(task, "review "), task.worktree, [join(pluginRoot, "bin", "foreman"), "review-run", id], false);
 }
 
 export async function runReview(repo: Repo, id: string): Promise<string> {
@@ -145,7 +145,7 @@ export function renderFeedback(v: Verdict, round: number): string {
   ].join("\n");
 }
 
-export function sendFeedback(repo: Repo, id: string, rex: Rex): string {
+export function sendFeedback(repo: Repo, id: string, term: Terminal): string {
   const task = findTask(repo, id);
   const round = task.reviews ?? 0;
   const file = join(roundDir(repo, id, round), "verdict.json");
@@ -156,7 +156,7 @@ export function sendFeedback(repo: Repo, id: string, rex: Rex): string {
   if (revisions >= MAX_REVISIONS) {
     throw new Error(`${id} has had ${revisions} revision rounds. Escalate to the user with the screenshots in ${roundDir(repo, id, round)} instead`);
   }
-  sendToTask(repo, task, renderFeedback(verdict, round), rex);
+  sendToTask(repo, task, renderFeedback(verdict, round), term);
   updateTask(repo, id, { revisions: revisions + 1, status: "running" });
   return `sent round ${round} feedback to ${id} (revision ${revisions + 1} of ${MAX_REVISIONS})`;
 }

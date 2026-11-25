@@ -9,7 +9,7 @@ import { spawn } from "../src/spawn.ts";
 import { findTask, updateTask } from "../src/state.ts";
 import { sync } from "../src/sync.ts";
 import { teardown } from "../src/teardown.ts";
-import { fakeRex, tempRepo } from "./helpers.ts";
+import { fakeTerminal, tempRepo } from "./helpers.ts";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 
@@ -21,11 +21,11 @@ const noProbes = { fetch: () => {}, prState: () => undefined };
 
 function setup(ids: string[]) {
   const repo = tempRepo();
-  const rex = fakeRex();
+  const term = fakeTerminal();
   for (const id of ids) {
     const brief = join(repo.root, "..", `brief-${id}-${Date.now()}.md`);
     writeFileSync(brief, `## Intent\n\nGreet in ${id}.\n\n## Spec\n\nWrite ${id}.txt.\n`);
-    spawn(repo, { id, brief, owns: [`${id}.txt`], base: "main", session: "s" }, rex);
+    spawn(repo, { id, brief, owns: [`${id}.txt`], base: "main", session: "s" }, term);
   }
   const commit = (id: string) => {
     const wt = findTask(repo, id).worktree;
@@ -33,7 +33,7 @@ function setup(ids: string[]) {
     must(["git", "-C", wt, "add", "."]);
     must(["git", "-C", wt, "commit", "-qm", `add ${id}`]);
   };
-  return { repo, rex, commit };
+  return { repo, term, commit };
 }
 
 test("section reads one Markdown section", () => {
@@ -78,28 +78,28 @@ test("deliver refuses until the latest review approves, then writes the packet",
 });
 
 test("sync marks a merged task, asks the others to rebase once, and teardown accepts the merge", () => {
-  const { repo, rex, commit } = setup(["T1", "T2", "T3"]);
+  const { repo, term, commit } = setup(["T1", "T2", "T3"]);
   commit("T1");
   commit("T2");
-  expect(sync(repo, "main", rex, noProbes)).toMatchObject({ merged: [], asked: [] });
+  expect(sync(repo, "main", term, noProbes)).toMatchObject({ merged: [], asked: [] });
 
   must(["git", "-C", repo.root, "merge", "-q", "--no-ff", "-m", "merge T1", "foreman/T1"]);
-  const r = sync(repo, "main", rex, noProbes);
+  const r = sync(repo, "main", term, noProbes);
   expect(r.merged).toEqual(["T1"]);
   expect(r.asked.sort()).toEqual(["T2", "T3"]);
   expect(findTask(repo, "T1")).toMatchObject({ status: "merged" });
-  const inbox = rex.sent.join("\n");
+  const inbox = term.sent.join("\n");
   expect(inbox).toContain("Foreman message waiting");
-  expect(sync(repo, "main", rex, noProbes).asked).toEqual([]);
+  expect(sync(repo, "main", term, noProbes).asked).toEqual([]);
 
-  expect(teardown(repo, "T1", false, rex).removed).toBe(true);
+  expect(teardown(repo, "T1", false, term).removed).toBe(true);
 });
 
 test("sync trusts a merged PR even when the branch was squashed", () => {
-  const { repo, rex, commit } = setup(["T1"]);
+  const { repo, term, commit } = setup(["T1"]);
   commit("T1");
   updateTask(repo, "T1", { pr: 7 });
-  const r = sync(repo, "main", rex, { fetch: () => {}, prState: (n) => (n === 7 ? "MERGED" : undefined) });
+  const r = sync(repo, "main", term, { fetch: () => {}, prState: (n) => (n === 7 ? "MERGED" : undefined) });
   expect(r.merged).toEqual(["T1"]);
   expect(readEvents(repo, "T1")).toEqual([]);
 });
