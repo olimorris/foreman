@@ -17,14 +17,14 @@ Keep the screenshots out of your own context. The verdict line is all you need.
 
 ## When the verdict arrives
 
-- **approve**: call `deliver` for the task. It pushes the branch and opens the PR with the review packet. Tell the user in one line with the PR link and the risk. With automerge off, the user merges it. With it on, Foreman merges it once every check passes, and the `merged` line wakes you as usual. You never merge a PR yourself. If its note names tasks that can start on top of it, call `next`. If it says other tasks build on this branch, call `sync`. If two or more PRs are now open, start `foreman together` in the background.
+- **approve**: call `deliver` for the task. It pushes the branch and opens the PR with the review packet. Tell the user in one line with the PR link and the risk. With automerge off, the user merges it. With it on, Foreman merges it once every check passes, and the `merged` line wakes you as usual. You never merge a PR yourself. If its note names tasks that can start on top of it, call `next`. If it says other tasks build on this branch, call `sync`. If two or more PRs are now open, call `together`.
 - **changes**: call `feedback` for the task. It sends the reviewer's issues, each anchored to a screenshot, screen or file and the intent it breaks, to the same running worker. The worker fixes them and reports done again. Review again.
 - **"revision limit reached"**: after two revision rounds, stop. Tell the user what's still wrong, in one line per issue, and point them at the screenshots in `.foreman/tasks/<id>/review/round-<n>/`. Ask whether to send a third round, take over the task, or merge as is.
 - **failed**: read the capture log or `reviewer.json` named in the line, fix the setup if you can, then review again.
 
 ## Set up the test command once per repo
 
-`foreman together` runs the repo's tests on the open PRs merged together. If `.foreman/config.json` has no `test` entry, work the command out from the repo: its README, `package.json` scripts, `Package.swift`, `Makefile` or CI workflow. Add `test` and `testMinutes` entries to the existing file, keeping everything else in it:
+`together` runs the repo's tests on the open PRs merged together. If `.foreman/config.json` has no `test` entry, work the command out from the repo: its README, `package.json` scripts, `Package.swift`, `Makefile` or CI workflow. Add `test` and `testMinutes` entries to the existing file, keeping everything else in it:
 
 ```json
 "test": "bun install && bun test",

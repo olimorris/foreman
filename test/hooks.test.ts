@@ -182,7 +182,7 @@ test("owned treats a trailing slash as everything under it", () => {
 });
 
 describe("stopDecision", () => {
-  test("allows a stop with nothing in flight or the watcher armed", () => {
+  test("allows a stop with nothing in flight or a watch task running", () => {
     expect(stopDecision({ inflight: 0, armed: false, blocks: 0 }).block).toBe(false);
     expect(stopDecision({ inflight: 2, armed: true, blocks: 2 })).toEqual({ block: false, blocks: 0 });
   });
@@ -192,11 +192,12 @@ describe("stopDecision", () => {
     for (let i = 0; i < STOP_BLOCK_BUDGET; i++) {
       const d = stopDecision({ inflight: 1, armed: false, blocks });
       expect(d.block).toBe(true);
+      expect(d.reason).toContain("Call the watch tool");
       blocks = d.blocks;
     }
     const last = stopDecision({ inflight: 1, armed: false, blocks });
     expect(last.block).toBe(false);
-    expect(last.warn).toContain("no watcher");
+    expect(last.warn).toContain("no watch task");
     expect(last.blocks).toBe(0);
   });
 });

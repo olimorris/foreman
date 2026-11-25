@@ -1,10 +1,11 @@
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { must, run } from "./exec.ts";
+import { loadConfig, saveConfig } from "./config.ts";
 import { addNote, newNoteMessage, shareNote } from "./notes.ts";
 import type { Repo } from "./paths.ts";
-import { notifyOrchestrator } from "./send.ts";
 import { baseRef } from "./snapshot.ts";
+import { ensureForeman } from "./spawn.ts";
 import type { Terminal } from "./terminal.ts";
 import { writeJson } from "./state.ts";
 import { pidAlive } from "./procs.ts";
@@ -17,7 +18,7 @@ const MAX_NAMES = 10;
 
 export type TestRun = { code: number | null; signal?: string; timedOut: boolean; failures?: string[]; tail: string };
 export type BaselineResult = { base: string; sha: string; command: string; startedAt: string; finishedAt: string; runs: TestRun[]; notes: string[] };
-export type BaselineOptions = { base: string; command: string; minutes: number; runs: number; term: Terminal };
+export type BaselineOptions = { base: string; command: string; minutes: number; runs: number; term: Terminal; signal?: AbortSignal };
 
 export const baselineDir = (repo: Repo) => join(repo.foreman, "baseline");
 const resultFile = (repo: Repo) => join(baselineDir(repo), "result.json");
@@ -97,7 +98,7 @@ export async function baseline(repo: Repo, opts: BaselineOptions): Promise<{ res
   const dir = baselineDir(repo);
   mkdirSync(dir, { recursive: true });
   const other = readPid(pidFile(repo));
-  if (other && other !== process.pid && pidAlive(other)) throw new Error(`a baseline run is already going (pid ${other})`);
+  if (other && pidAlive(other)) throw new Error(`a baseline run is already going (pid ${other})`);
   // A result left from an earlier plan would make status say this run passed before it has finished.
   for (const f of readdirSync(dir)) if (f === "result.json" || /^run-\d+\./.test(f)) rmSync(join(dir, f), { force: true });
   writeFileSync(pidFile(repo), String(process.pid));
@@ -111,6 +112,12 @@ export async function baseline(repo: Repo, opts: BaselineOptions): Promise<{ res
   // Closing the orchestrator or stopping its background task signals this process, and without this the hung test it started would run on for hours.
   const onSignal = (signal: keyof typeof SIGNALS) => (cleanUp(), process.exit(SIGNALS[signal]));
   for (const s of Object.keys(SIGNALS) as (keyof typeof SIGNALS)[]) process.on(s, onSignal);
+  // Ending the session or cancelling the task would otherwise leave the test run going until its time limit.
+  const onAbort = () => group && killGroup(group);
+  opts.signal?.addEventListener("abort", onAbort, { once: true });
+  const stopped = () => {
+    if (opts.signal?.aborted) throw new Error("baseline: stopped before it finished");
+  };
 
   const startedAt = new Date().toISOString();
   const notes: string[] = [];
@@ -129,9 +136,12 @@ export async function baseline(repo: Repo, opts: BaselineOptions): Promise<{ res
     removeWorktree(repo, worktree);
     must(["git", "-C", repo.root, "worktree", "add", "-q", "--detach", worktree, sha]);
     for (let i = 1; i <= opts.runs; i++) {
+      stopped();
       const log = join(dir, `run-${i}.log`);
       const r = await runTests(opts.command, worktree, opts.minutes * 60_000, log, (pid) => (group = pid));
       group = undefined;
+      // A run killed because the task was cancelled says nothing about the base branch.
+      stopped();
       const tail = join(dir, `run-${i}.txt`);
       writeFileSync(tail, r.output.trimEnd().split("\n").slice(-TAIL_LINES).join("\n") + "\n");
       rmSync(log, { force: true });
@@ -148,11 +158,24 @@ export async function baseline(repo: Repo, opts: BaselineOptions): Promise<{ res
   } finally {
     cleanUp();
     for (const s of Object.keys(SIGNALS) as (keyof typeof SIGNALS)[]) process.off(s, onSignal);
+    opts.signal?.removeEventListener("abort", onAbort);
   }
 
-  const line = baselineLine(result, [...told]);
-  notifyOrchestrator(repo, `[foreman baseline] ${line}`);
-  return { result, line };
+  return { result, line: baselineLine(result, [...told]) };
+}
+
+export type BaselineRequest = { base: string; term: Terminal; runs?: number; test?: string; signal?: AbortSignal };
+
+// The first call saves the test command, so later baselines and the together check run the same one.
+export async function runBaseline(repo: Repo, req: BaselineRequest): Promise<string> {
+  const runs = req.runs ?? BASELINE_RUNS;
+  if (!Number.isInteger(runs) || runs < 1) throw new Error("runs must be a whole number of at least 1");
+  ensureForeman(repo);
+  if (req.test?.trim()) saveConfig(repo, { test: req.test.trim() });
+  const config = loadConfig(repo);
+  if (!config.test) throw new Error("there's no test command in .foreman/config.json. Call baseline again with test set to the command that runs the repo's tests");
+  const r = await baseline(repo, { base: req.base, command: config.test, minutes: config.testMinutes ?? TEST_MINUTES, runs, term: req.term, signal: req.signal });
+  return r.line;
 }
 
 function killGroup(pid: number): void {

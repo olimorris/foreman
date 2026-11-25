@@ -29,6 +29,7 @@ test("the orchestrator gets the commands it shares with the CLI and its own, and
     "status", "timeline", "summary", "cost", "budget",
     "plan", "next", "spawn", "send", "review", "feedback", "deliver", "sync", "teardown", "pause", "resume", "restart", "tidy", "unblock",
     "workers", "automerge", "set_budget", "decisions", "accept", "reject", "propose", "adr", "ask", "answer", "note", "notes", "shots",
+    "watch", "baseline", "together",
   ]);
   expect(await list("worker")).toEqual(["report", "propose", "note", "tidy"]);
 });

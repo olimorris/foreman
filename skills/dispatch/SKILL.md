@@ -53,6 +53,6 @@ Add `model` set to `sonnet` for a small task whose spec leaves little to decide,
 
 Use short ids such as `T1` or `settings-pane`. The title is a conventional commit that becomes the PR title, and its first few words label the tab, such as `T1: add an export button`. Tell the user the id and that they can open the tab to watch.
 
-## 4. Arm the watcher
+## 4. Start the watch task
 
-Start `foreman watch` in the background if it isn't armed already, then end your turn.
+Call `watch` if no watch task is running already, then end your turn.
