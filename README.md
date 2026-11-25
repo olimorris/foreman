@@ -157,7 +157,7 @@ Foreman can ping you on Telegram when something needs you, and you can answer fr
    { "telegram": { "when": "only when a question has waited 10 minutes, or the run is finished" } }
    ```
 
-4. Run `foreman up`, then DM your bot. It replies with a pairing code. In the orchestrator's tab, run `/telegram:access pair <code>`.
+4. Run `foreman up`, then DM your bot. It replies with a pairing code. In the orchestrator's tab, run `/telegram:access pair <code>`. Pings start straight away, with no restart.
 5. Run `foreman doctor` to check the plugin is installed and paired.
 
 The orchestrator pings you when your words say to, in a line or two that names the task and worker. Anything you send the bot reaches the orchestrator as if you'd typed it in its tab. Workers and the reviewer never load the plugin, because each session that loads it takes the bot over. Messages you send only reach the orchestrator if your Claude Code account allows channels. Some Team and Enterprise organisations turn them off, and pings still go out.

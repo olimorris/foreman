@@ -132,7 +132,7 @@ describe("Telegram pings", () => {
   const context = (telegram: { when?: string } | undefined, chats: string[]) => {
     const repo = tempRepo();
     if (telegram) saveConfig(repo, { telegram });
-    return sessionStartContext({ cwd: repo.root }, { role: "orchestrator", repo }, fakeTerminal(), () => ({ token: true, chats }));
+    return sessionStartContext({ cwd: repo.root }, { role: "orchestrator", repo }, fakeTerminal(), () => ({ token: true, chats, access: "/state/access.json" }));
   };
 
   test("the orchestrator gets the user's words for when to ping, and the chat to send to", () => {
@@ -144,8 +144,11 @@ describe("Telegram pings", () => {
     expect(context({}, ["1"])).toContain("in their words: when a question needs the user's answer, or the run is finished");
   });
 
-  test("before pairing, the orchestrator is told no ping can reach the user", () => {
-    expect(context({ when: "always" }, [])).toContain("isn't paired with the user yet");
+  test("before pairing, the orchestrator learns where to find the chat once the user pairs in its tab", () => {
+    const text = context({ when: "always" }, []);
+    expect(text).toContain("isn't paired with the user yet");
+    expect(text).toContain("the chat_id is the first entry in allowFrom in /state/access.json");
+    expect(text).toContain("your words for when to ping are: always");
   });
 
   test("without the setting, nothing is said about Telegram", () => {

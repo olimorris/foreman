@@ -52,7 +52,7 @@ export const channelPlugin = (plugins: string[]): string =>
 export const withoutTelegram = (plugins: string[]): { enabledPlugins?: Record<string, false> } =>
   plugins.length ? { enabledPlugins: Object.fromEntries(plugins.map((p) => [p, false])) } : {};
 
-export type TelegramSetup = { token: boolean; chats: string[] };
+export type TelegramSetup = { token: boolean; chats: string[]; access: string };
 
 // Mirrors where the plugin itself keeps its token and allowlist.
 export function telegramSetup(state = process.env.TELEGRAM_STATE_DIR ?? join(claudeDir(), "channels", "telegram")): TelegramSetup {
@@ -62,5 +62,5 @@ export function telegramSetup(state = process.env.TELEGRAM_STATE_DIR ?? join(cla
   try {
     chats = (JSON.parse(read("access.json")).allowFrom ?? []).map(String);
   } catch {}
-  return { token, chats };
+  return { token, chats, access: join(state, "access.json") };
 }

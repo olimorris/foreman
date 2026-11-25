@@ -73,22 +73,22 @@ describe("Telegram", () => {
     const saved = process.env.TELEGRAM_BOT_TOKEN;
     delete process.env.TELEGRAM_BOT_TOKEN;
     try {
-      expect(telegramSetup(dir)).toEqual({ token: false, chats: [] });
+      expect(telegramSetup(dir)).toEqual({ token: false, chats: [], access: join(dir, "access.json") });
       writeFileSync(join(dir, ".env"), "TELEGRAM_BOT_TOKEN=123:abc\n");
       writeFileSync(join(dir, "access.json"), JSON.stringify({ dmPolicy: "allowlist", allowFrom: ["412587349"] }));
-      expect(telegramSetup(dir)).toEqual({ token: true, chats: ["412587349"] });
+      expect(telegramSetup(dir)).toEqual({ token: true, chats: ["412587349"], access: join(dir, "access.json") });
     } finally {
       if (saved !== undefined) process.env.TELEGRAM_BOT_TOKEN = saved;
     }
   });
 
   test("foreman doctor checks the plugin only when the setting is on", () => {
-    const paired = () => ({ token: true, chats: ["1"] });
+    const paired = () => ({ token: true, chats: ["1"], access: "" });
     const on = { telegram: { when: "the run is finished" } };
     expect(telegramChecks({}, [], paired)).toEqual([]);
     expect(telegramChecks(on, [], paired)[0]).toMatchObject({ ok: false, detail: expect.stringContaining("/plugin install telegram@claude-plugins-official") });
-    expect(telegramChecks(on, ["telegram@x"], () => ({ token: false, chats: [] }))[0]).toMatchObject({ ok: false, detail: expect.stringContaining("/telegram:configure") });
-    expect(telegramChecks(on, ["telegram@x"], () => ({ token: true, chats: [] }))[0]).toMatchObject({ ok: false, detail: expect.stringContaining("/telegram:access pair") });
+    expect(telegramChecks(on, ["telegram@x"], () => ({ token: false, chats: [], access: "" }))[0]).toMatchObject({ ok: false, detail: expect.stringContaining("/telegram:configure") });
+    expect(telegramChecks(on, ["telegram@x"], () => ({ token: true, chats: [], access: "" }))[0]).toMatchObject({ ok: false, detail: expect.stringContaining("/telegram:access pair") });
     expect(telegramChecks(on, ["telegram@x"], paired)[0]).toMatchObject({ ok: true });
   });
 

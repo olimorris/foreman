@@ -149,8 +149,11 @@ export function sessionStartContext(input: HookInput, ctx: LockContext, term: Te
 
 function telegramSection(when: string | undefined, setup: () => TelegramSetup): string[] {
   if (!when) return [];
-  const chat = setup().chats[0];
-  if (!chat) return ["", "Telegram pings are on, but the Telegram plugin isn't paired with the user yet, so no ping can reach them. Tell them to run `foreman doctor`."];
+  const { chats, access } = setup();
+  const chat = chats[0];
+  if (!chat) {
+    return ["", `Telegram pings are on, but the Telegram plugin isn't paired with the user yet. Once they pair in this tab with /telegram:access pair, the chat_id is the first entry in allowFrom in ${access}, and your words for when to ping are: ${when}`];
+  }
   return ["", `Telegram pings are on. Ping the user with the Telegram plugin's reply tool, chat_id ${chat}, when this holds, in their words: ${when}`];
 }
 

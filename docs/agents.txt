@@ -164,7 +164,7 @@ With `telegram` set in `.foreman/config.json`, the orchestrator pings the user t
 1. The user creates a bot: they message @BotFather on Telegram, send `/newbot` and copy the token.
 2. In any Claude Code session: `/plugin install telegram@claude-plugins-official`, then `/telegram:configure <token>`. The token goes to `~/.claude/channels/telegram/.env`.
 3. Add `telegram` to `.foreman/config.json` with the user's own words for when to ping.
-4. Run `foreman up`. The user DMs the bot, which replies with a pairing code, and runs `/telegram:access pair <code>` in the orchestrator's tab. After that, `/telegram:access policy allowlist` stops strangers getting pairing codes.
+4. Run `foreman up`. The user DMs the bot, which replies with a pairing code, and runs `/telegram:access pair <code>` in the orchestrator's tab. Pings start straight away, with no restart, because the orchestrator reads the paired chat from the plugin's `access.json`. After that, `/telegram:access policy allowlist` stops strangers getting pairing codes.
 5. `foreman doctor` checks the plugin is installed, has a token and is paired.
 
 How it works:
