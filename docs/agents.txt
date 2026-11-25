@@ -85,6 +85,24 @@ A decision is a rule that affects more than one task, like the shape of an API. 
 - `foreman pause <task>` stops a worker by closing its tab. Its commits stay on its branch and uncommitted work stays in its worktree. `foreman resume <task>` reopens its session where it left off.
 - If the user closes a worker's tab, the orchestrator notices and asks whether to resume the task or tear it down. It never discards unmerged work without the user's yes.
 
+## The CLI and the MCP server
+
+The `foreman` CLI is for people. The orchestrator and workers call tools on Foreman's MCP server instead.
+
+- Foreman starts the server only in the sessions it starts. It never runs in the user's own sessions or the reviewer.
+- A worker gets `report`, `propose`, `note` and `tidy`. It can't run `foreman` commands.
+- The orchestrator gets the rest, like `plan`, `spawn`, `deliver` and `status`.
+- `foreman status` and the `status` tool share one implementation, so they agree. The same goes for `timeline`, `summary`, `cost` and `budget`.
+
+### MCP tasks
+
+`watch`, `baseline` and `together` run as MCP tasks. Each returns at once, and the orchestrator waits without spending tokens. When the task completes, its line wakes the orchestrator.
+
+- While it waits, the orchestrator's tab shows "MCP task still running".
+- When it completes, the tab shows "MCP task ... completed", then the orchestrator's reply. The user no longer sees a message from another session.
+- The orchestrator calls `watch` again after each line. A Stop hook stops it ending a turn with tasks in flight and no watch running.
+- Tasks don't survive a restart. The orchestrator calls `watch` again after one. A baseline or together check that was running is lost.
+
 ## Updating Foreman
 
 ```sh
@@ -196,17 +214,16 @@ How it works:
 
 ## The user's own skills
 
-The user can add skills that shape how workers build, the review and the PRs Foreman opens.
+Skills go in `.foreman/skills/<name>/SKILL.md`, in Claude Code's skill format. Every session gets them, and they stay out of git.
 
-- Each skill lives at `.foreman/skills/<name>/SKILL.md` in the user's repo, in Claude Code's skill format: frontmatter with `name` and `description`, then the instructions. `.foreman/` is out of git, so skills stay private to the user.
-- The orchestrator and every worker load the skills as `user-skills:<name>`, like any other skill. `foreman up`, `foreman spawn` and every restart pass a second `--plugin-dir`, `.foreman/skills-plugin`, whose `skills` folder links back to `.foreman/skills`. Nothing is copied into a worktree, so a worker can't commit the user's skills.
-- The reviewer gets every skill and checks the change against the ones whose description fits reviewing code, like a code-review skill. A change that breaks one comes back to its worker as an issue that names the skill.
-- A skill named `pull-request` shapes the PR. When the reviewer approves, it writes the PR's title and description by that skill. `foreman deliver` puts that description first and adds Foreman's own sections after it: the intent, assumptions, decisions, AI Usage with the verdict, screenshots and risk. `--title` still wins over the drafted title. A drafted title that isn't a conventional commit is dropped for the task's title, and `foreman deliver` says so.
-- A skill named `adr` shapes the decisions Foreman records. The orchestrator writes each accepted decision's title and body in its format. When the repo has no ADR folder yet, `foreman adr init` and `foreman adr write` take the title line and status style from the record template in the skill, and the new folder's README describes that format instead of Foreman's default rules. An existing ADR folder's convention still wins. Without an `adr` skill, records follow the folder's convention or Foreman's defaults.
-- A skill is named by its folder, not its frontmatter, so a copied skill like `documentation-and-adrs` becomes the `adr` skill when it sits in `.foreman/skills/adr/`.
-- Skills are read at the start of each review round, so a new skill applies from the next review. The orchestrator and workers load them when their session starts, so a new skill reaches the workers started or restarted after it. A PR that's already open picks up the new description and title the next time `foreman deliver` runs after an approved review.
-- Without `.foreman/skills/`, sessions start with no skills plugin, and the reviewer and the PR work as before.
-- Foreman's own repo has a pull-request skill at `.claude/skills/pull-request/SKILL.md` that makes a good starting point. To use it, download it into `.foreman/skills/pull-request/` and edit it:
+- Workers and the orchestrator load them as `user-skills:<name>`, from a plugin folder that links to `.foreman/skills`. Nothing is copied into a worktree. It's a plugin folder because Team and Enterprise logins turn off skills from MCP servers.
+- The reviewer checks each change against the skills whose description fits reviewing code.
+- A `pull-request` skill shapes the PRs Foreman opens. Foreman adds its own sections after the description.
+- An `adr` skill shapes the decisions it records, unless the repo's ADR folder already has its own convention.
+- A skill is named by its folder, not its frontmatter.
+- A skill added mid-run reaches workers started after it, and the reviewer from its next review.
+
+Start from Foreman's own pull-request skill:
 
 ```sh
 mkdir -p .foreman/skills/pull-request && curl -fsSL https://raw.githubusercontent.com/olimorris/foreman/main/.claude/skills/pull-request/SKILL.md -o .foreman/skills/pull-request/SKILL.md
@@ -227,6 +244,8 @@ mkdir -p .foreman/skills/pull-request && curl -fsSL https://raw.githubuserconten
 - `foreman up` says the session already exists: the orchestrator is already running in that terminal session. Switch to it in your terminal.
 - The status pane is gone: run `foreman pane` from the orchestrator's tab.
 - A task stopped over budget: `foreman budget <task> <usd>`, then `foreman resume <task>`.
+- The orchestrator sits idle with tasks in flight: tell it to call `watch`.
+- The orchestrator's turn hangs on `watch`: unset `CLAUDE_CODE_DISABLE_MCP_TASK_BACKGROUND`, `CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS`, `MCP_SDK_GENERATION` and `MCP_PROTOCOL_NEGOTIATION`. Each one stops MCP tasks running in the background.
 - A worker seems stuck: `foreman timeline <task>` shows when it went quiet. Foreman restarts hung workers itself, and `foreman restart <task>` does it by hand.
 - Tests hang or fail on the base branch: `foreman note "<what happens and how to avoid it>"` tells every worker. `foreman baseline` checks the base branch again.
 - The `together` check says tests ran too long: raise `testMinutes`.
