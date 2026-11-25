@@ -174,6 +174,7 @@ Settings live in `.foreman/config.json` in your repo, and every one is optional.
 {
   "maxWorkers": 3,
   "budget": { "perTask": 5, "plan": 40, "tasks": { "T3": 15 } },
+  "orchestratorModel": "opus",
   "workerModel": "sonnet",
   "reviewerModel": "opus",
   "stackTasks": true,
@@ -190,6 +191,7 @@ Settings live in `.foreman/config.json` in your repo, and every one is optional.
 | --- | --- |
 | `maxWorkers` | How many workers run at once |
 | `budget` | Spend limits in dollars: `perTask` for every task, `plan` for the whole plan and `tasks` for one task. `foreman budget` sets these for you |
+| `orchestratorModel` | The model `foreman up` starts the orchestrator on, as an alias or a full model id. `foreman up --model <name>` overrides it for one run. Without it, the orchestrator uses Claude Code's default |
 | `workerModel` | The model for tasks the plan doesn't give one, as an alias like `"sonnet"` or a full model id. Without it, workers use Claude Code's default |
 | `reviewerModel` | The model the reviewer runs on. Without it, the reviewer uses Claude Code's default |
 | `stackTasks` | `false` makes a task wait for its dependency to merge, instead of starting on top of its approved PR |
