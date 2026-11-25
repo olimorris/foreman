@@ -144,3 +144,8 @@ Checked against Claude Code 2.1.332 on a Claude Enterprise login, with an intera
 - A stdio server inherits the environment of the `claude` that started it, `TERM_PROGRAM`, `REX_SERVER`, `CLAUDE_PROJECT_DIR` and `CLAUDE_CODE_SESSION_ID` included. So the server finds the terminal integration and the repo the same way the CLI does.
 - A stdio server stops when Claude Code exits, so a task can't outlive the session. According to the MCP docs, a resumed session asks the new server about the old task ID, gets an unknown-task error for five minutes and then tells Claude the outcome is unknown. So after a restart the orchestrator has to call `watch` again.
 - A one-shot `claude -p` gets no tasks. A client that doesn't offer the extension gets the tool's plain result when the handler finishes, which for `watch` means a call that blocks until something happens.
+
+## Denying foreman to the orchestrator
+
+- The orchestrator runs with `--disallowedTools "Bash(foreman *)"` and no `Bash` rule allowed, so it can't run the `foreman` command and has to use the Foreman tools.
+- A `--disallowedTools` rule wins over a matching `--allowedTools` rule. In a scratch `claude -p` session in default permission mode, `--allowedTools "Bash(echo *)"` ran `echo hello-spike`, and adding `--disallowedTools "Bash(echo *)"` to the same call blocked it.

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { loadConfig } from "./config.ts";
-import { budgetOf, orchestratorCost, taskCost, usd } from "./cost.ts";
+import { budgetOf, orchestratorCost, planSpend, taskCost, usd } from "./cost.ts";
 import { activeLimit, latestTranscript, resetPhrase, tailLines, type UsageLimit } from "./limits.ts";
 import { readEvents } from "./events.ts";
 import { loadDecisions } from "./ledger.ts";
@@ -204,7 +204,7 @@ function verdictOf(repo: Repo, task: Task): Verdict | undefined {
 
 const EVENT_WORDS: Record<string, string> = { done: "finished", blocked: "blocked", "needs-decision": "needs a decision", rebased: "rebased", exited: "worker closed", reviewed: "reviewed" };
 
-// costs holds each task's spend and the orchestrator's under "foreman", as spendByTask returns them.
+// costs holds each task's spend, the orchestrator's under "foreman" and what foreman budget counts for the plan under "plan", as spendByTask returns them.
 export function gatherPane(repo: Repo, now = Date.now(), costs: Map<string, number> = new Map(), closed: Set<string> = new Set()): PaneInput {
   const tasks = loadTasks(repo);
   const plan = loadPlan(repo);
@@ -236,7 +236,7 @@ export function gatherPane(repo: Repo, now = Date.now(), costs: Map<string, numb
     armed: watcherArmed(repo),
     now,
     stallMs: (loadConfig(repo).stallMinutes ?? STALL_MINUTES) * 60_000,
-    spent: [...costs.values()].reduce((s, n) => s + n, 0),
+    spent: costs.get("plan") ?? 0,
     limit: budget.plan,
     maxWorkers: max,
     tasks: paneTasks,
@@ -250,8 +250,10 @@ export function gatherPane(repo: Repo, now = Date.now(), costs: Map<string, numb
 
 // Spend comes from reading whole transcripts, so it's refreshed less often than what the workers are doing.
 export function spendByTask(repo: Repo): Map<string, number> {
-  const costs = new Map(loadTasks(repo).map((t) => [t.id, taskCost(repo, t).total]));
+  const tasks = loadTasks(repo);
+  const costs = new Map(tasks.map((t) => [t.id, taskCost(repo, t).total]));
   costs.set("foreman", orchestratorCost(repo).usd);
+  costs.set("plan", planSpend(repo, tasks));
   return costs;
 }
 
