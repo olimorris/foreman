@@ -5,6 +5,7 @@ import { writeAdrs } from "./adrwrite.ts";
 import { loadConfig, saveConfig } from "./config.ts";
 import { accept, findContext, reject, writeIndex } from "./decisions.ts";
 import { doctor } from "./doctor.ts";
+import { printBanner } from "./banner.ts";
 import { loadDecisions, propose } from "./ledger.ts";
 import { baseRef, snapshot } from "./snapshot.ts";
 import { runReview, sendFeedback, startReview } from "./review.ts";
@@ -73,7 +74,15 @@ async function main(argv: string[]): Promise<number> {
   const { positional, opts } = flags(rest);
 
   switch (cmd) {
+    case undefined:
+    case "help":
+    case "--help":
+    case "-h":
+      printBanner();
+      console.log(USAGE);
+      return 0;
     case "doctor": {
+      printBanner();
       const checks = doctor();
       const failed = checks.filter((c) => !c.ok);
       if (!failed.length) return console.log(`All ${checks.length} checks passed. Foreman is ready.`), 0;
@@ -83,6 +92,7 @@ async function main(argv: string[]): Promise<number> {
       return 1;
     }
     case "up": {
+      printBanner();
       const repo = findRepo();
       ensureForeman(repo);
       const name = `foreman-${basename(repo.root)}`;
