@@ -9,7 +9,7 @@ import { loadDecisions } from "./ledger.ts";
 import { statusLabel } from "./overview.ts";
 import { plainTitle } from "./brief.ts";
 import type { Repo } from "./paths.ts";
-import { loadPlan, maxWorkers, readyTasks, type Waiting } from "./plan.ts";
+import { loadPlan, maxWorkers, readyTasks, stackable, type Waiting } from "./plan.ts";
 import { latest, type Verdict } from "./rounds.ts";
 import { loadTasks, type Task } from "./state.ts";
 import { isFinished, isMerged, needsUser } from "./lifecycle.ts";
@@ -46,7 +46,7 @@ const clock = (at: number) => new Date(at).toTimeString().slice(0, 5);
 
 
 // Columns are fitted to the pane's width: a line is cut before it's coloured, so colour codes never count towards the width.
-export function renderPane(p: PaneInput, width: number, colour = false): string[] {
+export function renderPane(p: PaneInput, width: number, colour = false, height = Infinity): string[] {
   const c = paint(colour);
   const fit = (s: string, room = width) => clip(s, Math.max(4, room));
   const out: string[] = [];
@@ -72,8 +72,9 @@ export function renderPane(p: PaneInput, width: number, colour = false): string[
 
   // Runs started before workers were numbered have none to show, so the column only appears when it says something.
   const workers = p.tasks.some((t) => t.task.worker);
-  const head = (t: PaneTask, right: string, rightTone: Tone = "dim") => {
-    const label = `${t.task.id.padEnd(4)}${workers ? (t.task.worker ?? "").padEnd(4) : ""}${t.title}`;
+  const head = (t: PaneTask, right: string, rightTone: Tone = "dim") => line(t.task.id, t.task.worker ?? "", t.title, right, rightTone);
+  const line = (id: string, worker: string, title: string, right: string, rightTone: Tone) => {
+    const label = `${id.padEnd(4)}${workers ? worker.padEnd(4) : ""}${title}`;
     const l = fit(label, width - right.length - 3);
     return ` ${c("bold", l.slice(0, 4))}${l.slice(4)}${" ".repeat(Math.max(2, width - 1 - l.length - right.length))}${c(rightTone, right)}`;
   };
@@ -118,12 +119,20 @@ export function renderPane(p: PaneInput, width: number, colour = false): string[
   section("Ready to merge", active.filter((t) => t.task.status === "pr-open").map((t) =>
     head(t, `#${t.task.pr ?? "?"}${t.risk ? ` risk ${t.risk}` : ""}`, t.risk === "high" ? "red" : t.risk === "medium" ? "yellow" : "green")));
 
-  section("Waiting", p.waiting.map((w) => ` ${c("bold", w.id.padEnd(4))}${c("dim", fit(w.reason, width - 5))}`));
-
   const done = p.tasks.filter((t) => isMerged(t.task));
-  if (done.length) out.push("", c("dim", fit(`Merged: ${done.map((t) => t.task.id + (t.task.pr ? ` #${t.task.pr}` : "")).join(", ")}`)));
+  const tail: string[] = [];
+  if (done.length) tail.push("", c("dim", fit(`Merged: ${done.map((t) => t.task.id + (t.task.pr ? ` #${t.task.pr}` : "")).join(", ")}`)));
+  if (p.recent.length) tail.push("", c("heading", "RECENT"), ...p.recent.map((r) => ` ${c("dim", clock(r.at))}  ${fit(r.text, width - 8)}`));
 
-  if (p.recent.length) section("Recent", p.recent.map((r) => ` ${c("dim", clock(r.at))}  ${fit(r.text, width - 8)}`));
+  // Up next is the one section that can run long, so it gives up rows to keep Merged and Recent on screen.
+  const room = Math.max(1, height - out.length - tail.length - 2);
+  const shown = p.waiting.length > room ? p.waiting.slice(0, Math.max(1, room - 1)) : p.waiting;
+  section("Up next", [
+    ...shown.map((w) => line(w.id, "", w.title, clip(w.reason, Math.max(4, width - 16)), "dim")),
+    ...(shown.length < p.waiting.length ? [c("dim", fit(` +${p.waiting.length - shown.length} more`))] : []),
+  ]);
+
+  out.push(...tail);
   if (!p.tasks.length && !p.waiting.length) out.push("", c("dim", "No tasks yet. Give the orchestrator a backlog."));
   return out;
 }
@@ -154,7 +163,7 @@ export function gatherPane(repo: Repo, now = Date.now(), costs: Map<string, numb
       closed: task.status === "running" && closed.has(task.id),
     };
   });
-  const waiting = plan?.approvedAt ? readyTasks(plan, tasks, max).waiting.map((w) => ({ ...w, title: plan.tasks.find((t) => t.id === w.id)?.title ?? "" })) : [];
+  const waiting = plan?.approvedAt ? readyTasks(plan, tasks, max, stackable(repo)).waiting.map((w) => ({ ...w, title: plainTitle(plan.tasks.find((t) => t.id === w.id)?.title ?? "") })) : [];
   const budget = budgetOf(repo);
   return {
     name: basename(repo.root),
@@ -206,7 +215,7 @@ export async function livePane(repo: Repo, term: Terminal): Promise<never> {
   const draw = () => {
     try {
       if (Date.now() - checkedAt >= SPEND_MS) (costs = spendByTask(repo)), (closed = closedTabs(repo, term)), (checkedAt = Date.now());
-      const lines = renderPane(gatherPane(repo, Date.now(), costs, closed), Math.max(30, (out.columns ?? 60) - 1), !process.env.NO_COLOR);
+      const lines = renderPane(gatherPane(repo, Date.now(), costs, closed), Math.max(30, (out.columns ?? 60) - 1), !process.env.NO_COLOR, out.rows ?? Infinity);
       // Rewriting in place instead of clearing first stops the pane flickering on every redraw.
       out.write("\x1b[H" + lines.map((l) => l + "\x1b[K").join("\n") + "\x1b[J");
     } catch (err) {
