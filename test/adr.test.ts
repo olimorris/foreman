@@ -76,6 +76,14 @@ test("an adr-tools folder found through .adr-dir, with a Status section", () => 
   expect(old.content).toBe("# 1. R\n\n## Status\n\nSuperseded by ADR 3.\n");
 });
 
+test("a Status heading with its value on the next line is detected and superseded", () => {
+  const root = fixture({ "docs/adr/0001-use-postgres.md": "# 1. Use Postgres\n\n## Status\nAccepted\n\n## Context\n\nX\n" });
+  const conv = detectAdr(root)!;
+  expect(conv.status).toEqual({ kind: "section", heading: "## Status", accepted: "Accepted" });
+  const old = supersede(conv, "docs/adr/0001-use-postgres.md", "# 1. Use Postgres\n\n## Status\nAccepted\n\n## Context\n\nX\n", [2]);
+  expect(old.content).toBe("# 1. Use Postgres\n\n## Status\nSuperseded by ADR 2.\n\n## Context\n\nX\n");
+});
+
 test("an ADR-prefixed title, a status line and an unpadded underscore name", () => {
   const root = fixture({
     "adr/1_use-bun.md": "# ADR 1: Use Bun\n\nStatus: Accepted\n\nWe use Bun.\n",

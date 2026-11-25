@@ -95,7 +95,7 @@ export function supersede(conv: AdrConvention, file: string, text: string, by: n
     return { file, content: text.replace(new RegExp(`^(${escape(s.key)}:).*$`, "m"), `$1 ${note.replace(/\.$/, "")}`) };
   }
   if (s.kind === "section") {
-    return { file, content: text.replace(new RegExp(`(${escape(s.heading)}\\s*\\n\\s*\\n)[^\\n]*`), `$1${note}`) };
+    return { file, content: text.replace(new RegExp(`(${escape(s.heading)}[ \\t]*\\n(?:\\s*\\n)?)[^\\n]*`), `$1${note}`) };
   }
   const lines = text.split("\n");
   const at = lines.findIndex((l) => l.startsWith("#"));
