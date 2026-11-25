@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { mcpArgs, POLL_MS, respond, serve, TASKS, type Server, type TaskTool } from "../src/mcp.ts";
 import type { Tool } from "../src/tools/tool.ts";
-import { tempRepo } from "./helpers.ts";
+import { fakeTerminal, tempRepo } from "./helpers.ts";
 
 const echo: Tool = {
   name: "echo",
@@ -13,7 +13,7 @@ const echo: Tool = {
 const whoami: Tool = { name: "whoami", description: "The worker's task", inputSchema: { type: "object", properties: {} }, roles: ["worker"], handler: (_a, s) => s.task ?? "none" };
 const broken: Tool = { name: "broken", description: "Fails", inputSchema: { type: "object", properties: {} }, roles: ["orchestrator"], handler: () => { throw new Error("no tasks yet"); } };
 
-const server = (role?: "orchestrator" | "worker", task?: string): Server => ({ name: "foreman", version: "9.9.9", tools: [echo, whoami, broken], session: { role, task, repo: tempRepo() } });
+const server = (role?: "orchestrator" | "worker", task?: string): Server => ({ name: "foreman", version: "9.9.9", tools: [echo, whoami, broken], session: { role, task, term: () => fakeTerminal(), repo: tempRepo() } });
 const ask = (s: Server, method: string, params: Record<string, unknown> = {}) => respond({ jsonrpc: "2.0", id: 1, method, params }, s) as Promise<{ result?: any; error?: { code: number; message: string } }>;
 const names = async (s: Server) => (await ask(s, "tools/list")).result.tools.map((t: { name: string }) => t.name);
 
@@ -113,7 +113,7 @@ describe("task tools", () => {
       return new Promise((resolve, reject) => ((finish = resolve), (fail = reject)));
     },
   };
-  const taskServer = (): Server => ({ name: "foreman", version: "0", tools: [slow], session: { role: "orchestrator", repo: tempRepo() } });
+  const taskServer = (): Server => ({ name: "foreman", version: "0", tools: [slow], session: { role: "orchestrator", repo: tempRepo(), term: () => fakeTerminal() } });
 
   test("a client that offers tasks gets a task, sees its progress, then its result", async () => {
     const s = taskServer();

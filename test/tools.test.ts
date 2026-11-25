@@ -6,7 +6,7 @@ import { ask } from "../src/questions.ts";
 import { ensureForeman } from "../src/paths.ts";
 import { TOOLS } from "../src/tools/index.ts";
 import type { Role } from "../src/tools/tool.ts";
-import { tempRepo } from "./helpers.ts";
+import { fakeTerminal, tempRepo } from "./helpers.ts";
 
 const cli = join(import.meta.dir, "..", "src", "cli.ts");
 const task = (id: string, status: string) => ({ id, status, title: `feat: build ${id}`, worker: "W1", branch: `foreman/${id}`, base: "main", worktree: `/w/${id}`, owns: [], socket: "", createdAt: "" });
@@ -20,7 +20,7 @@ function busyRepo() {
 }
 
 const list = async (role: Role) => {
-  const r = (await respond({ jsonrpc: "2.0", id: 1, method: "tools/list" }, { name: "foreman", version: "0", tools: TOOLS, session: { role, repo: tempRepo() } })) as { result: { tools: { name: string }[] } };
+  const r = (await respond({ jsonrpc: "2.0", id: 1, method: "tools/list" }, { name: "foreman", version: "0", tools: TOOLS, session: { role, repo: tempRepo(), term: () => fakeTerminal() } })) as { result: { tools: { name: string }[] } };
   return r.result.tools.map((t) => t.name);
 };
 
@@ -52,7 +52,7 @@ test("status reads the same through the CLI and through foreman mcp", async () =
 
 test("each shared tool answers through the server", async () => {
   const repo = busyRepo();
-  const server: Server = { name: "foreman", version: "0", tools: TOOLS, session: { role: "orchestrator", repo } };
+  const server: Server = { name: "foreman", version: "0", tools: TOOLS, session: { role: "orchestrator", repo, term: () => fakeTerminal() } };
   const call = async (name: string, args: object = {}) => {
     const r = (await respond({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }, server)) as { result: { content: { text: string }[]; isError?: boolean } };
     expect(r.result.isError).toBeUndefined();

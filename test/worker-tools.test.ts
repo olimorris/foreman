@@ -9,7 +9,7 @@ import { ensureForeman } from "../src/paths.ts";
 import { workerCommand } from "../src/spawn.ts";
 import { findTask, type Task } from "../src/state.ts";
 import { TOOLS } from "../src/tools/index.ts";
-import { workerTools } from "../src/tools/worker.ts";
+import { WORKER_TOOLS } from "../src/tools/worker.ts";
 import { fakeTerminal, tempRepo } from "./helpers.ts";
 
 const task = (id: string, worktree: string): Task => ({ id, status: "running", title: `feat: build ${id}`, worker: "W1", branch: `foreman/${id}`, base: "main", worktree, owns: ["src/"], socket: "", tab: { session: "session:1", window: `window:${id}`, pane: "block:1" }, createdAt: "" });
@@ -19,7 +19,7 @@ function setup(as = "T1") {
   ensureForeman(repo);
   writeFileSync(join(repo.foreman, "tasks.json"), JSON.stringify({ tasks: [task("T1", repo.root), task("T2", join(repo.root, "nowhere"))] }));
   const term = fakeTerminal();
-  const server: Server = { name: "foreman", version: "0", tools: workerTools(() => term), session: { role: "worker", task: as, repo } };
+  const server: Server = { name: "foreman", version: "0", tools: WORKER_TOOLS, session: { role: "worker", task: as, repo, term: () => term } };
   const call = async (name: string, args: object = {}) => {
     const r = (await respond({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }, server)) as { result: { content: { text: string }[]; isError?: boolean } };
     return { text: r.result.content[0]!.text, isError: r.result.isError ?? false };
@@ -84,7 +84,7 @@ test("tidy stops leftovers in the worker's own worktree and says when there are 
 
 test("a worker's tools refuse to run without a task", async () => {
   const repo = tempRepo();
-  const server: Server = { name: "foreman", version: "0", tools: workerTools(fakeTerminal), session: { role: "worker", repo } };
+  const server: Server = { name: "foreman", version: "0", tools: WORKER_TOOLS, session: { role: "worker", repo, term: fakeTerminal } };
   const r = (await respond({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "tidy", arguments: {} } }, server)) as { result: object };
   expect(r.result).toEqual({ content: [{ type: "text", text: "FOREMAN_TASK isn't set: only workers report" }], isError: true });
 });

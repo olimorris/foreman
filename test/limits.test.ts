@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { limitHit, limitLine, loadLimit, RETRY_MS, reviewerLimit, saveLimit, waitForReset, type UsageLimit } from "../src/limits.ts";
 import { respond, type Server } from "../src/mcp.ts";
 import { resume } from "../src/stop.ts";
-import { orchestratorTools } from "../src/tools/orchestrator.ts";
+import { ORCHESTRATOR_TOOLS } from "../src/tools/orchestrator.ts";
 import { withTasks } from "../src/state.ts";
 import { fakeTerminal, tempRepo } from "./helpers.ts";
 
@@ -82,7 +82,7 @@ test("spawn and next start nothing while the account waits", async () => {
   const repo = tempRepo();
   saveLimit(repo, waitingNow());
   writeFileSync(join(repo.foreman, "plan.json"), JSON.stringify({ title: "p", approvedAt: "2026-11-25T00:00:00Z", tasks: [] }));
-  const server: Server = { name: "foreman", version: "0", tools: orchestratorTools(() => fakeTerminal()), session: { role: "orchestrator", repo } };
+  const server: Server = { name: "foreman", version: "0", tools: ORCHESTRATOR_TOOLS, session: { role: "orchestrator", repo, term: () => fakeTerminal() } };
   for (const [name, args] of [["spawn", { task: "T9", title: "feat: x", brief: "## Intent\n\nx\n", owns: "src/" }], ["next", {}]] as const) {
     const r = (await respond({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }, server)) as { result: { content: { text: string }[]; isError?: boolean } };
     expect(r.result.content[0]!.text).toContain("no new tasks start: the account is waiting for its usage limit to reset at");

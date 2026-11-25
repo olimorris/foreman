@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { areaLock, hookWho, recordHookBlock, sessionStartContext, stopHook, type HookInput, type LockContext } from "./hooks.ts";
 import { ensureForeman, findRepo, pluginRoot, socketPath, type Repo } from "./paths.ts";
 import { terminal } from "./integrations/index.ts";
-import { requireSession } from "./terminal.ts";
+import { requireSession, type Terminal } from "./terminal.ts";
 import { budgetOverview } from "./overview.ts";
 import { findTask, loadTasks } from "./state.ts";
 import { lastOrchestratorSession, orchestratorCommand, orchestratorModel, orchestratorPlugins } from "./up.ts";
@@ -34,7 +34,8 @@ function version(): string {
 }
 
 function serveMcp(): Promise<void> {
-  return serve({ name: SERVER_NAME, version: version(), tools: TOOLS, session: { role: asRole(process.env.FOREMAN_ROLE), task: process.env.FOREMAN_TASK, repo: findRepo() } });
+  let term: Terminal | undefined;
+  return serve({ name: SERVER_NAME, version: version(), tools: TOOLS, session: { role: asRole(process.env.FOREMAN_ROLE), task: process.env.FOREMAN_TASK, repo: findRepo(), term: () => (term ??= terminal()) } });
 }
 
 function flags(args: string[]): { positional: string[]; opts: Record<string, string[]> } {

@@ -1,5 +1,4 @@
 import { BASELINE_RUNS, runBaseline } from "../baseline.ts";
-import { terminal } from "../integrations/index.ts";
 import type { TaskTool } from "../mcp.ts";
 import { defaultBase } from "../paths.ts";
 import { openPrs } from "../summary.ts";
@@ -15,7 +14,7 @@ export const taskTools = (wait?: WaitForChange): TaskTool[] => [
     inputSchema: noInput,
     roles: ["orchestrator"],
     task: true,
-    handler: (_args, s, context) => watchFor(s.repo, defaultBase(s.repo), terminal(), { signal: context?.signal, notice: context?.status, wait }),
+    handler: (_args, s, context) => watchFor(s.repo, defaultBase(s.repo), s.term(), { signal: context?.signal, notice: context?.status, wait }),
   },
   {
     name: "baseline",
@@ -30,7 +29,7 @@ export const taskTools = (wait?: WaitForChange): TaskTool[] => [
     roles: ["orchestrator"],
     task: true,
     handler: (args, s, context) =>
-      runBaseline(s.repo, { base: defaultBase(s.repo), term: terminal(), test: args.test as string | undefined, runs: args.runs as number | undefined, signal: context?.signal }),
+      runBaseline(s.repo, { base: defaultBase(s.repo), term: s.term(), test: args.test as string | undefined, runs: args.runs as number | undefined, signal: context?.signal }),
   },
   {
     name: "together",

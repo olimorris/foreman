@@ -7,7 +7,6 @@ import { loadConfig, saveConfig } from "../config.ts";
 import { budgetLeft, budgetLine, setBudget } from "../cost.ts";
 import { accept, findContext, reject, writeIndex } from "../decisions.ts";
 import { deliver } from "../deliver.ts";
-import { terminal } from "../integrations/index.ts";
 import { findDecision, loadDecisions, propose } from "../ledger.ts";
 import { activeLimit, limitLine } from "../limits.ts";
 import { changeNotes, listNotes, loadNotes, toldLine } from "../notes.ts";
@@ -229,204 +228,199 @@ function adr(repo: Repo, args: Args): string {
   }
 }
 
-// term is a thunk so a test can hand in a fake terminal, and the server picks the real one only when a tool needs it.
-export function orchestratorTools(term: () => Terminal = terminal): Tool[] {
-  const tool = (name: string, description: string, inputSchema: Schema, handler: (args: Args, repo: Repo) => string | Promise<string>): Tool => ({
-    name,
-    description,
-    inputSchema,
-    roles: ["orchestrator"],
-    handler: (args, s) => handler(args, s.repo),
-  });
+const tool = (name: string, description: string, inputSchema: Schema, handler: (args: Args, repo: Repo, term: () => Terminal) => string | Promise<string>): Tool => ({
+  name,
+  description,
+  inputSchema,
+  roles: ["orchestrator"],
+  handler: (args, s) => handler(args, s.repo, s.term),
+});
 
-  return [
-    tool("plan", "Check and store a plan, change some of its tasks, show the stored plan, or approve it. Give text to save a whole plan to .foreman/plan.md, check it and store it as a draft. Give tasks to add or replace only those tasks in it, which also needs approving again. Give approve once the user agrees to the stored plan. Give none of them to show it. Load the intake skill when the user hands you a backlog.",
-      schema({
-        text: str("The whole plan in Markdown, as the intake skill lays it out"),
-        tasks: str("Only the task sections that are new or changed, each starting with its ## line. A section whose id is already in the plan replaces that task, and the rest are added at the end"),
-        approve: bool("Approve the stored plan"),
-      }),
-      (args, repo) => planTool(repo, args)),
-    tool("next", "Start every planned task that's ready, contracts first, within the worker limit. A task whose only unmerged dependency has an approved, open PR starts on top of that dependency's branch. Otherwise tasks wait for their dependencies to merge, and for tasks that share their paths.",
-      schema({ max: int("Start at most this many workers at once, this time only") }),
-      (args, repo) => next(repo, args, term())),
-    tool("spawn", "Start one task outside the plan: the worktree and branch foreman/<task>, then a worker tab started with the brief. Load the dispatch skill before writing a brief.",
-      schema({
-        task: TASK,
-        title: str('The PR title, as a conventional commit, such as "feat: add an export button to settings"'),
-        brief: str("The brief's full text, in Markdown, with its ## Intent and ## Spec sections"),
-        owns: str(`The paths or globs the task owns, such as "src/settings/** docs/settings.md". ${LIST}`),
-        base: str("The branch to start from, when it isn't the base branch"),
-        model: str("The worker's model, such as sonnet, when it shouldn't run on the default"),
-      }, ["task", "title", "brief", "owns"]),
-      (args, repo) => spawnTool(repo, args, term())),
-    tool("send", "Message a running worker. It arrives in that worker's session even when the worker is idle.",
-      schema({ task: TASK, message: str("The message, as you'd say it to the worker") }, ["task", "message"]),
-      (args, repo) => {
-        const id = args.task as string;
-        const task = findTask(repo, id);
-        const via = sendToTask(repo, task, (args.message as string).trim(), term());
-        transition(repo, id, { type: "messaged" });
-        return `sent to ${id} via ${via}`;
-      }),
-    tool("review", "Review a task whose worker reported done. It opens a review tab, and the verdict arrives through the watcher. Load the review skill first.",
-      schema({ task: TASK }, ["task"]),
-      (args, repo) => {
-        startReview(repo, args.task as string, term());
-        return `review of ${args.task} started in its own tab. The verdict arrives through the watcher.`;
-      }),
-    tool("feedback", "Send the reviewer's issues to the task's running worker after a changes verdict.",
-      schema({ task: TASK }, ["task"]),
-      (args, repo) => sendFeedback(repo, args.task as string, term())),
-    tool("deliver", "After an approve verdict, push the task's branch and open its PR with the review packet. Call it again after the worker rebases to update the PR.",
-      schema({ task: TASK, title: str("Use this PR title instead of the task's"), dry_run: bool("Show the PR it would open without pushing") }, ["task"]),
-      (args, repo) => deliver(repo, args.task as string, { dryRun: !!args.dry_run, title: text(args, "title") }).note),
-    tool("sync", "Fetch the base branch, mark merged tasks and ask in-flight workers to rebase. A task built on another task's branch is asked to rebase when that branch gets new commits, and to move onto the base branch once it merges.",
-      noInput,
-      (_args, repo) => {
-        const base = defaultBase(repo);
-        const r = sync(repo, base, term());
-        return lines([
-          `${base} is at ${r.head.slice(0, 8)}`,
-          ...(r.merged.length ? [`merged: ${r.merged.join(", ")}. Tear them down, then call next`] : []),
-          ...r.mergedEarly.map((id) => `${id}'s PR merged into ${findTask(repo, id).mergedInto}, not ${base}. Keep ${id} until that branch merges`),
-          ...(r.asked.length ? [`asked to rebase: ${r.asked.join(", ")}`] : []),
-          ...r.retargeted.map((id) => `moved ${id}'s PR to ${base}`),
-          ...(r.failed.length ? [`couldn't reach: ${r.failed.join(", ")}`] : []),
-        ]);
-      }),
-    tool("teardown", "Close a task's tab and remove its worktree and branch once the work is merged. It refuses while the branch has unmerged work, unless discard is set, which needs the user's yes first.",
-      schema({ task: TASK, discard: bool("Remove it even though its work isn't merged. Only after the user agrees") }, ["task"]),
-      (args, repo) => {
-        const r = teardown(repo, args.task as string, !!args.discard, term());
-        if (!r.removed) throw new Error(r.message);
-        return r.message;
-      }),
-    tool("pause", "Stop a task's worker by closing its tab. Its work so far stays in its worktree.",
-      schema({ task: TASK }, ["task"]),
-      (args, repo) => {
-        const id = args.task as string;
-        const stopped = stopWorker(repo, findTask(repo, id), term());
-        return stopped ? `stopped ${id}'s worker. Its work so far is in its worktree` : `${id} had no worker running`;
-      }),
-    tool("resume", "Reopen a stopped worker's session in a new tab.",
-      schema({ task: TASK, model: MODEL }, ["task"]),
-      (args, repo) => {
-        const id = args.task as string;
-        const t = term();
-        return resumedLine(resume(repo, id, t, sessionOf(t, "resume"), { model: text(args, "model") }));
-      }),
-    tool("restart", "Close a task's worker and reopen its session in a new tab, carrying on where it was.",
-      schema({ task: TASK, model: MODEL }, ["task"]),
-      (args, repo) => {
-        const id = args.task as string;
-        const t = term();
-        return restartedLine(restartWorker(repo, findTask(repo, id), t, sessionOf(t, "restart"), { model: text(args, "model") }));
-      }),
-    tool("tidy", "Stop processes a task's old runs left behind, such as a test run that outlived its time limit. The watcher already does this on every pass, so call it only when a worker says a leftover process is in its way.",
-      schema({ task: TASK }, ["task"]),
-      (args, repo) => {
-        const id = args.task as string;
-        const r = tidy(findTask(repo, id));
-        const out = lines([
-          ...(r.stopped.length ? [`stopped what ${id}'s old runs left behind: ${names(r.stopped)}`] : []),
-          ...(r.failed.length ? [unstoppableLine(r.failed)] : []),
-        ]);
-        if (r.failed.length) throw new Error(out);
-        return out || `${id} has no processes left over from old runs`;
-      }),
-    tool("unblock", "Close a task's permission blocks once the user has allowed the call or told you to skip it, so the task leaves Needs you.",
-      schema({ task: TASK }, ["task"]),
-      (args, repo) => {
-        const id = args.task as string;
-        findTask(repo, id);
-        const closed = unblock(repo, id);
-        return closed.length ? lines(closed.map((b) => `closed: ${blockSummary(b)}`)) : `${id} has no open permission blocks`;
-      }),
-    tool("workers", "How many workers run at once and where that comes from, or change it for this plan. Raising it starts nothing, so call next after it. Lowering it stops no worker.",
-      schema({ count: int("Run this many workers at once until the plan finishes") }),
-      (args, repo) => {
-        if (args.count !== undefined && (args.count as number) < 1) throw new Error("count must be 1 or more");
-        return lines(workers(repo, args.count === undefined ? [] : [String(args.count)]));
-      }),
-    tool("automerge", "Whether Foreman merges approved PRs itself, or switch it for this plan. Turn it on only when the user says Foreman can merge PRs.",
-      schema({ on: bool("true to turn it on, false to turn it off. Leave it out to see whether it's on") }),
-      (args, repo) => lines(automerge(repo, args.on === undefined ? [] : [args.on ? "on" : "off"]))),
-    tool("set_budget", "Set a spending limit in dollars: for every task, for one task, or for the whole plan. Raise a limit only when the user says so.",
-      schema({ usd: { type: "number", description: "The limit in US dollars" }, task: str("Set the limit for this task only"), plan: bool("Set the limit for the whole plan") }, ["usd"]),
-      (args, repo) => budgetTool(repo, args)),
-    tool("decisions", "List proposed decisions and accepted ones that aren't in the repo yet.",
-      schema({ all: bool("List every decision, including rejected ones and ones already recorded as ADRs") }),
-      (args, repo) => {
-        const ds = loadDecisions(repo).filter((d) => args.all || d.status === "proposed" || (d.status === "accepted" && !d.adr));
-        return ds.length ? lines(ds.map((d) => `${d.id.padEnd(6)} ${d.status.padEnd(9)} ${d.by.padEnd(12)} ${d.title}${d.decidedBy ? " (decided by Foreman)" : ""}`)) : "no open decisions";
-      }),
-    tool("accept", "Accept a proposed decision, rewritten to the repo's ADR rules. It messages the proposer and every in-flight worker whose owned paths overlap its paths. Load the decide skill first.",
-      schema({
-        decision: str("The decision's id, such as D-4"),
-        title: str("The decision as a fact, and what it protects"),
-        body: str("The record's body in Markdown, in the repo's ADR format, without the title line or status"),
-        paths: str(`The paths or globs the decision covers, such as "src/export/**". ${LIST}`),
-        supersedes: str(`The numbers of the ADRs it reverses. ${LIST}`),
-        slug: str("The record's file name, when the default slug won't match the repo's style"),
-      }, ["decision"]),
-      (args, repo) => {
-        const id = args.decision as string;
-        const paths = text(args, "paths") === undefined ? undefined : list(args, "paths");
-        const supersedes = text(args, "supersedes") === undefined ? undefined : numbers(args, "supersedes");
-        const r = accept(repo, id, { title: text(args, "title"), body: text(args, "body"), paths, slug: text(args, "slug"), supersedes }, term());
-        return `accepted ${id}. ${toldLine(r)}`;
-      }),
-    tool("reject", "Reject a proposed decision, or overrule one Foreman accepted. It messages the proposer, and for an accepted one every worker the acceptance reached.",
-      schema({ decision: str("The decision's id, such as D-4"), reason: str("Why, pointing at the record that settles it when there is one") }, ["decision", "reason"]),
-      (args, repo) => {
-        const r = reject(repo, args.decision as string, args.reason as string, term());
-        return `rejected ${args.decision}. ${toldLine(r)}`;
-      }),
-    tool("propose", "Propose a decision for the user to settle, such as a draft decision from planning or a rule a PR comment states.",
-      schema({
-        title: str("The decision, stated as fact"),
-        body: str("Why, and what was rejected, in Markdown"),
-        paths: str(`The paths or globs it covers. ${LIST}`),
-        supersedes: str(`The numbers of the ADRs it would reverse. ${LIST}`),
-        slug: str("The record's file name, when the default slug won't match the repo's style"),
-      }, ["title", "body"]),
-      (args, repo) => {
-        const d = propose(repo, { title: args.title as string, body: args.body as string, paths: list(args, "paths"), supersedes: numbers(args, "supersedes"), slug: text(args, "slug"), by: "orchestrator" });
-        return `proposed ${d.id}`;
-      }),
-    tool("adr", "Look after the repo's ADR folder. detect reads the base branch's convention and saves it. init starts a new folder. write records accepted decisions on a docs-only branch and opens the decisions PR. index rewrites the decisions index. Load the decide skill first.",
-      schema({
-        action: str("detect, init, write or index"),
-        dir: str("For init: the folder to start, when it isn't docs/decisions"),
-        dry_run: bool("For write: list the files it would write, with their text, and change nothing"),
-        push: bool("For write: false to commit without pushing or opening the PR"),
-      }, ["action"]),
-      (args, repo) => adr(repo, args)),
-    tool("ask", "Record a question you're about to put to the user, with the call you'd make. Returns its id, such as Q-3. If the user doesn't answer within answerMinutes, the watcher wakes you to go ahead. Never record a question about money or lost work.",
-      schema({
-        question: str("The question, as you'll ask it"),
-        call: str("What you'll do if the user doesn't answer"),
-        task: str("The task the question holds up"),
-        decision: str("The proposal the question is about, such as D-4"),
-      }, ["question", "call"]),
-      (args, repo) => askTool(repo, args)),
-    tool("answer", "Record the user's answer to a question, even if you already went ahead, or record that you went ahead with your call.",
-      schema({ question: str("The question's id, such as Q-3"), answer: str("The user's answer"), by_foreman: bool("You went ahead with your call without the user") }, ["question"]),
-      (args, repo) => answerTool(repo, args)),
-    tool("note", "Record a fact about the setup every worker should know, such as a test command that hangs or a test that already fails on the base branch, and send it to every running worker. Or remove a note that turned out wrong. Notes are facts, not decisions.",
-      schema({ text: str("The fact"), remove: int("The number of a note to remove instead, as notes lists it") }),
-      (args, repo) => noteTool(repo, args, term())),
-    tool("notes", "List the notes about the setup.",
-      noInput,
-      (_args, repo) => {
-        const notes = loadNotes(repo);
-        return notes.length ? lines(listNotes(notes)) : "no notes yet. Add one with the note tool";
-      }),
-    tool("shots", "Screenshot a running task's screens, to check the screenshots entry in .foreman/config.json works.",
-      schema({ task: TASK }, ["task"]),
-      (args, repo) => shots(repo, args.task as string)),
-  ];
-}
-
-export const ORCHESTRATOR_TOOLS = orchestratorTools();
+export const ORCHESTRATOR_TOOLS: Tool[] = [
+  tool("plan", "Check and store a plan, change some of its tasks, show the stored plan, or approve it. Give text to save a whole plan to .foreman/plan.md, check it and store it as a draft. Give tasks to add or replace only those tasks in it, which also needs approving again. Give approve once the user agrees to the stored plan. Give none of them to show it. Load the intake skill when the user hands you a backlog.",
+    schema({
+      text: str("The whole plan in Markdown, as the intake skill lays it out"),
+      tasks: str("Only the task sections that are new or changed, each starting with its ## line. A section whose id is already in the plan replaces that task, and the rest are added at the end"),
+      approve: bool("Approve the stored plan"),
+    }),
+    (args, repo) => planTool(repo, args)),
+  tool("next", "Start every planned task that's ready, contracts first, within the worker limit. A task whose only unmerged dependency has an approved, open PR starts on top of that dependency's branch. Otherwise tasks wait for their dependencies to merge, and for tasks that share their paths.",
+    schema({ max: int("Start at most this many workers at once, this time only") }),
+    (args, repo, term) => next(repo, args, term())),
+  tool("spawn", "Start one task outside the plan: the worktree and branch foreman/<task>, then a worker tab started with the brief. Load the dispatch skill before writing a brief.",
+    schema({
+      task: TASK,
+      title: str('The PR title, as a conventional commit, such as "feat: add an export button to settings"'),
+      brief: str("The brief's full text, in Markdown, with its ## Intent and ## Spec sections"),
+      owns: str(`The paths or globs the task owns, such as "src/settings/** docs/settings.md". ${LIST}`),
+      base: str("The branch to start from, when it isn't the base branch"),
+      model: str("The worker's model, such as sonnet, when it shouldn't run on the default"),
+    }, ["task", "title", "brief", "owns"]),
+    (args, repo, term) => spawnTool(repo, args, term())),
+  tool("send", "Message a running worker. It arrives in that worker's session even when the worker is idle.",
+    schema({ task: TASK, message: str("The message, as you'd say it to the worker") }, ["task", "message"]),
+    (args, repo, term) => {
+      const id = args.task as string;
+      const task = findTask(repo, id);
+      const via = sendToTask(repo, task, (args.message as string).trim(), term());
+      transition(repo, id, { type: "messaged" });
+      return `sent to ${id} via ${via}`;
+    }),
+  tool("review", "Review a task whose worker reported done. It opens a review tab, and the verdict arrives through the watcher. Load the review skill first.",
+    schema({ task: TASK }, ["task"]),
+    (args, repo, term) => {
+      startReview(repo, args.task as string, term());
+      return `review of ${args.task} started in its own tab. The verdict arrives through the watcher.`;
+    }),
+  tool("feedback", "Send the reviewer's issues to the task's running worker after a changes verdict.",
+    schema({ task: TASK }, ["task"]),
+    (args, repo, term) => sendFeedback(repo, args.task as string, term())),
+  tool("deliver", "After an approve verdict, push the task's branch and open its PR with the review packet. Call it again after the worker rebases to update the PR.",
+    schema({ task: TASK, title: str("Use this PR title instead of the task's"), dry_run: bool("Show the PR it would open without pushing") }, ["task"]),
+    (args, repo) => deliver(repo, args.task as string, { dryRun: !!args.dry_run, title: text(args, "title") }).note),
+  tool("sync", "Fetch the base branch, mark merged tasks and ask in-flight workers to rebase. A task built on another task's branch is asked to rebase when that branch gets new commits, and to move onto the base branch once it merges.",
+    noInput,
+    (_args, repo, term) => {
+      const base = defaultBase(repo);
+      const r = sync(repo, base, term());
+      return lines([
+        `${base} is at ${r.head.slice(0, 8)}`,
+        ...(r.merged.length ? [`merged: ${r.merged.join(", ")}. Tear them down, then call next`] : []),
+        ...r.mergedEarly.map((id) => `${id}'s PR merged into ${findTask(repo, id).mergedInto}, not ${base}. Keep ${id} until that branch merges`),
+        ...(r.asked.length ? [`asked to rebase: ${r.asked.join(", ")}`] : []),
+        ...r.retargeted.map((id) => `moved ${id}'s PR to ${base}`),
+        ...(r.failed.length ? [`couldn't reach: ${r.failed.join(", ")}`] : []),
+      ]);
+    }),
+  tool("teardown", "Close a task's tab and remove its worktree and branch once the work is merged. It refuses while the branch has unmerged work, unless discard is set, which needs the user's yes first.",
+    schema({ task: TASK, discard: bool("Remove it even though its work isn't merged. Only after the user agrees") }, ["task"]),
+    (args, repo, term) => {
+      const r = teardown(repo, args.task as string, !!args.discard, term());
+      if (!r.removed) throw new Error(r.message);
+      return r.message;
+    }),
+  tool("pause", "Stop a task's worker by closing its tab. Its work so far stays in its worktree.",
+    schema({ task: TASK }, ["task"]),
+    (args, repo, term) => {
+      const id = args.task as string;
+      const stopped = stopWorker(repo, findTask(repo, id), term());
+      return stopped ? `stopped ${id}'s worker. Its work so far is in its worktree` : `${id} had no worker running`;
+    }),
+  tool("resume", "Reopen a stopped worker's session in a new tab.",
+    schema({ task: TASK, model: MODEL }, ["task"]),
+    (args, repo, term) => {
+      const id = args.task as string;
+      const t = term();
+      return resumedLine(resume(repo, id, t, sessionOf(t, "resume"), { model: text(args, "model") }));
+    }),
+  tool("restart", "Close a task's worker and reopen its session in a new tab, carrying on where it was.",
+    schema({ task: TASK, model: MODEL }, ["task"]),
+    (args, repo, term) => {
+      const id = args.task as string;
+      const t = term();
+      return restartedLine(restartWorker(repo, findTask(repo, id), t, sessionOf(t, "restart"), { model: text(args, "model") }));
+    }),
+  tool("tidy", "Stop processes a task's old runs left behind, such as a test run that outlived its time limit. The watcher already does this on every pass, so call it only when a worker says a leftover process is in its way.",
+    schema({ task: TASK }, ["task"]),
+    (args, repo) => {
+      const id = args.task as string;
+      const r = tidy(findTask(repo, id));
+      const out = lines([
+        ...(r.stopped.length ? [`stopped what ${id}'s old runs left behind: ${names(r.stopped)}`] : []),
+        ...(r.failed.length ? [unstoppableLine(r.failed)] : []),
+      ]);
+      if (r.failed.length) throw new Error(out);
+      return out || `${id} has no processes left over from old runs`;
+    }),
+  tool("unblock", "Close a task's permission blocks once the user has allowed the call or told you to skip it, so the task leaves Needs you.",
+    schema({ task: TASK }, ["task"]),
+    (args, repo) => {
+      const id = args.task as string;
+      findTask(repo, id);
+      const closed = unblock(repo, id);
+      return closed.length ? lines(closed.map((b) => `closed: ${blockSummary(b)}`)) : `${id} has no open permission blocks`;
+    }),
+  tool("workers", "How many workers run at once and where that comes from, or change it for this plan. Raising it starts nothing, so call next after it. Lowering it stops no worker.",
+    schema({ count: int("Run this many workers at once until the plan finishes") }),
+    (args, repo) => {
+      if (args.count !== undefined && (args.count as number) < 1) throw new Error("count must be 1 or more");
+      return lines(workers(repo, args.count === undefined ? [] : [String(args.count)]));
+    }),
+  tool("automerge", "Whether Foreman merges approved PRs itself, or switch it for this plan. Turn it on only when the user says Foreman can merge PRs.",
+    schema({ on: bool("true to turn it on, false to turn it off. Leave it out to see whether it's on") }),
+    (args, repo) => lines(automerge(repo, args.on === undefined ? [] : [args.on ? "on" : "off"]))),
+  tool("set_budget", "Set a spending limit in dollars: for every task, for one task, or for the whole plan. Raise a limit only when the user says so.",
+    schema({ usd: { type: "number", description: "The limit in US dollars" }, task: str("Set the limit for this task only"), plan: bool("Set the limit for the whole plan") }, ["usd"]),
+    (args, repo) => budgetTool(repo, args)),
+  tool("decisions", "List proposed decisions and accepted ones that aren't in the repo yet.",
+    schema({ all: bool("List every decision, including rejected ones and ones already recorded as ADRs") }),
+    (args, repo) => {
+      const ds = loadDecisions(repo).filter((d) => args.all || d.status === "proposed" || (d.status === "accepted" && !d.adr));
+      return ds.length ? lines(ds.map((d) => `${d.id.padEnd(6)} ${d.status.padEnd(9)} ${d.by.padEnd(12)} ${d.title}${d.decidedBy ? " (decided by Foreman)" : ""}`)) : "no open decisions";
+    }),
+  tool("accept", "Accept a proposed decision, rewritten to the repo's ADR rules. It messages the proposer and every in-flight worker whose owned paths overlap its paths. Load the decide skill first.",
+    schema({
+      decision: str("The decision's id, such as D-4"),
+      title: str("The decision as a fact, and what it protects"),
+      body: str("The record's body in Markdown, in the repo's ADR format, without the title line or status"),
+      paths: str(`The paths or globs the decision covers, such as "src/export/**". ${LIST}`),
+      supersedes: str(`The numbers of the ADRs it reverses. ${LIST}`),
+      slug: str("The record's file name, when the default slug won't match the repo's style"),
+    }, ["decision"]),
+    (args, repo, term) => {
+      const id = args.decision as string;
+      const paths = text(args, "paths") === undefined ? undefined : list(args, "paths");
+      const supersedes = text(args, "supersedes") === undefined ? undefined : numbers(args, "supersedes");
+      const r = accept(repo, id, { title: text(args, "title"), body: text(args, "body"), paths, slug: text(args, "slug"), supersedes }, term());
+      return `accepted ${id}. ${toldLine(r)}`;
+    }),
+  tool("reject", "Reject a proposed decision, or overrule one Foreman accepted. It messages the proposer, and for an accepted one every worker the acceptance reached.",
+    schema({ decision: str("The decision's id, such as D-4"), reason: str("Why, pointing at the record that settles it when there is one") }, ["decision", "reason"]),
+    (args, repo, term) => {
+      const r = reject(repo, args.decision as string, args.reason as string, term());
+      return `rejected ${args.decision}. ${toldLine(r)}`;
+    }),
+  tool("propose", "Propose a decision for the user to settle, such as a draft decision from planning or a rule a PR comment states.",
+    schema({
+      title: str("The decision, stated as fact"),
+      body: str("Why, and what was rejected, in Markdown"),
+      paths: str(`The paths or globs it covers. ${LIST}`),
+      supersedes: str(`The numbers of the ADRs it would reverse. ${LIST}`),
+      slug: str("The record's file name, when the default slug won't match the repo's style"),
+    }, ["title", "body"]),
+    (args, repo) => {
+      const d = propose(repo, { title: args.title as string, body: args.body as string, paths: list(args, "paths"), supersedes: numbers(args, "supersedes"), slug: text(args, "slug"), by: "orchestrator" });
+      return `proposed ${d.id}`;
+    }),
+  tool("adr", "Look after the repo's ADR folder. detect reads the base branch's convention and saves it. init starts a new folder. write records accepted decisions on a docs-only branch and opens the decisions PR. index rewrites the decisions index. Load the decide skill first.",
+    schema({
+      action: str("detect, init, write or index"),
+      dir: str("For init: the folder to start, when it isn't docs/decisions"),
+      dry_run: bool("For write: list the files it would write, with their text, and change nothing"),
+      push: bool("For write: false to commit without pushing or opening the PR"),
+    }, ["action"]),
+    (args, repo) => adr(repo, args)),
+  tool("ask", "Record a question you're about to put to the user, with the call you'd make. Returns its id, such as Q-3. If the user doesn't answer within answerMinutes, the watcher wakes you to go ahead. Never record a question about money or lost work.",
+    schema({
+      question: str("The question, as you'll ask it"),
+      call: str("What you'll do if the user doesn't answer"),
+      task: str("The task the question holds up"),
+      decision: str("The proposal the question is about, such as D-4"),
+    }, ["question", "call"]),
+    (args, repo) => askTool(repo, args)),
+  tool("answer", "Record the user's answer to a question, even if you already went ahead, or record that you went ahead with your call.",
+    schema({ question: str("The question's id, such as Q-3"), answer: str("The user's answer"), by_foreman: bool("You went ahead with your call without the user") }, ["question"]),
+    (args, repo) => answerTool(repo, args)),
+  tool("note", "Record a fact about the setup every worker should know, such as a test command that hangs or a test that already fails on the base branch, and send it to every running worker. Or remove a note that turned out wrong. Notes are facts, not decisions.",
+    schema({ text: str("The fact"), remove: int("The number of a note to remove instead, as notes lists it") }),
+    (args, repo, term) => noteTool(repo, args, term())),
+  tool("notes", "List the notes about the setup.",
+    noInput,
+    (_args, repo) => {
+      const notes = loadNotes(repo);
+      return notes.length ? lines(listNotes(notes)) : "no notes yet. Add one with the note tool";
+    }),
+  tool("shots", "Screenshot a running task's screens, to check the screenshots entry in .foreman/config.json works.",
+    schema({ task: TASK }, ["task"]),
+    (args, repo) => shots(repo, args.task as string)),
+];

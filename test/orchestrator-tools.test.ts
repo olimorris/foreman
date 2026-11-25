@@ -9,7 +9,7 @@ import { loadPlan, planPath } from "../src/plan.ts";
 import { loadQuestions } from "../src/questions.ts";
 import { ensureForeman } from "../src/paths.ts";
 import { findTask } from "../src/state.ts";
-import { orchestratorTools } from "../src/tools/orchestrator.ts";
+import { ORCHESTRATOR_TOOLS } from "../src/tools/orchestrator.ts";
 import type { Role } from "../src/tools/tool.ts";
 import { orchestratorAllowedTools } from "../src/up.ts";
 import { fakeTerminal, tempRepo } from "./helpers.ts";
@@ -36,7 +36,7 @@ function crew(statuses: Record<string, string> = { T1: "running" }) {
 
 function server(repo: Repo, role: Role = "orchestrator") {
   const term = fakeTerminal();
-  const s: Server = { name: "foreman", version: "0", tools: orchestratorTools(() => term), session: { role, repo } };
+  const s: Server = { name: "foreman", version: "0", tools: ORCHESTRATOR_TOOLS, session: { role, repo, term: () => term } };
   const call = async (name: string, args: object = {}) => {
     const r = (await respond({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }, s)) as { result?: { content: { text: string }[]; isError?: boolean }; error?: { message: string } };
     if (r.error) throw new Error(r.error.message);

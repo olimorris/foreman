@@ -8,9 +8,10 @@ import { loadNotes } from "../src/notes.ts";
 import { respond, TASKS, type Server } from "../src/mcp.ts";
 import type { Repo } from "../src/paths.ts";
 import { ensureForeman } from "../src/paths.ts";
+import { withTasks } from "../src/state.ts";
 import { taskTools } from "../src/tools/tasks.ts";
 import type { WaitForChange } from "../src/watch.ts";
-import { tempRepo } from "./helpers.ts";
+import { fakeTerminal, tempRepo } from "./helpers.ts";
 
 const offer = { "io.modelcontextprotocol/clientCapabilities": { extensions: { [TASKS]: {} } } };
 
@@ -23,7 +24,7 @@ function runningRepo(): Repo {
 }
 
 const rescan: WaitForChange = () => Bun.sleep(50);
-const orchestrator = (repo: Repo): Server => ({ name: "foreman", version: "0", tools: taskTools(rescan), session: { role: "orchestrator", repo } });
+const orchestrator = (repo: Repo): Server => ({ name: "foreman", version: "0", tools: taskTools(rescan), session: { role: "orchestrator", repo, term: () => fakeTerminal() } });
 const ask = async (s: Server, method: string, params: Record<string, unknown>) => ((await respond({ jsonrpc: "2.0", id: 1, method, params }, s)) as { result: any }).result;
 
 async function settled(s: Server, taskId: string) {
@@ -52,6 +53,14 @@ test("watch returns a task that keeps working until a worker reports, then compl
   expect(existsSync(join(repo.foreman, "watch.pid"))).toBe(false);
 });
 
+test("watch asks the session's terminal whether each worker's tab is still open", async () => {
+  const repo = runningRepo();
+  withTasks(repo, (tasks) => (tasks[0]!.tab = { session: "s", window: "w", pane: "p" }));
+  const s: Server = { ...orchestrator(repo), session: { role: "orchestrator", repo, term: () => fakeTerminal(false) } };
+  const started = await ask(s, "tools/call", { name: "watch", arguments: {}, _meta: offer });
+  expect(text(await settled(s, started.taskId))).toBe("exited T1");
+});
+
 test("a second watch while one runs says the watcher is already running", async () => {
   const s = orchestrator(runningRepo());
   const first = await ask(s, "tools/call", { name: "watch", arguments: {}, _meta: offer });
@@ -72,7 +81,7 @@ test("cancelling the watch task stops the watcher and disarms it", async () => {
 });
 
 test("a worker can't call watch", async () => {
-  const s: Server = { ...orchestrator(runningRepo()), session: { role: "worker", task: "T1", repo: tempRepo() } };
+  const s: Server = { ...orchestrator(runningRepo()), session: { role: "worker", task: "T1", repo: tempRepo(), term: () => fakeTerminal() } };
   expect((await respond({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "watch", arguments: {}, _meta: offer } }, s) as { error: { message: string } }).error.message).toBe("unknown tool: watch");
 });
 
