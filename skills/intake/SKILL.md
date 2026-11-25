@@ -82,10 +82,10 @@ Add `- Model: <name>` to a task's fields only when you chose a smaller model for
 
    > 6 tasks, one per item. Tags land first because the tag filter builds on them. Calls: search runs on Enter, and the footer counts all notes. Full plan in `.foreman/plan.md`. Start?
 3. Decide whether the plan needs the user's approval:
-   - **Start straight away** when every task maps to one backlog item, nothing is cut and there are no open decisions. Call `plan` with `approve`, then `next`, start the baseline, and arm the watcher. Then send the summary, ending with "Started. Tell me to stop or change anything." instead of "Start?".
+   - **Start straight away** when every task maps to one backlog item, nothing is cut and there are no open decisions. Call `plan` with `approve`, then `next`, then `baseline` and `watch`. Then send the summary, ending with "Started. Tell me to stop or change anything." instead of "Start?".
    - **Wait for approval** when there's anything else: a split, merge or contract task, a cut, or an open decision. When they approve, run the same steps.
 
-Start the baseline as a background command, like the watcher: `foreman baseline`, or `foreman baseline --test "<command>"` the first time, which saves the command you worked out. It runs the tests on the base branch while the workers start, and doesn't hold them up. Anything it finds reaches them as a note.
+Call `baseline` the first time with `test` set to the command you worked out, which saves it. After that, call it with no arguments. It returns at once as a task and runs the tests on the base branch while the workers start, so it doesn't hold them up. Anything it finds reaches them as a note, and its line wakes you when it's done.
 
 If they ask for changes, edit `plan.md` and call `plan` with its file again. That clears the approval, so ask again.
 

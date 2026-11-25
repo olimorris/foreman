@@ -289,24 +289,20 @@ export function stopDecision(s: { inflight: number; armed: boolean; blocks: numb
     return {
       block: true,
       blocks: s.blocks + 1,
-      reason: `${s.inflight} task(s) in flight and the watcher isn't armed. Start \`foreman watch\` as a background command, then end your turn.`,
+      reason: `${s.inflight} task(s) in flight and no watch task is running, so nothing will wake you. Call the watch tool, then end your turn.`,
     };
   }
   return {
     block: false,
     blocks: 0,
-    warn: `Foreman: stopping with ${s.inflight} task(s) in flight and no watcher. Nothing will wake the orchestrator until you message it.`,
+    warn: `Foreman: stopping with ${s.inflight} task(s) in flight and no watch task. Nothing will wake the orchestrator until you message it.`,
   };
 }
 
 export function stopHook(repo: Repo): object {
   const inflight = inFlight(loadTasks(repo)).length;
-  // The watcher started just before the stop may not have written its pid yet.
-  let armed = watcherArmed(repo);
-  if (!armed && inflight > 0) {
-    Bun.sleepSync(1_500);
-    armed = watcherArmed(repo);
-  }
+  // The watch tool writes its pid before it replies, so a watch called this turn is already counted.
+  const armed = watcherArmed(repo);
   const counter = join(repo.foreman, "stop-blocks");
   const blocks = existsSync(counter) ? Number(readFileSync(counter, "utf8")) || 0 : 0;
   const d = stopDecision({ inflight, armed, blocks });
@@ -335,8 +331,8 @@ export function sessionStartContext(input: HookInput, ctx: LockContext, term: Te
   return [
     `Foreman state for ${ctx.repo.root}:`,
     ...(lines.length ? lines : ["- no tasks in flight"]),
-    `Watcher: ${armed ? "armed" : "not armed"}.`,
-    ...(tasks.length && !armed ? ["Run the recover skill, then start `foreman watch` in the background."] : []),
+    `Watch task: ${armed ? "running" : "not running"}.`,
+    ...(tasks.length && !armed ? ["Run the recover skill, then call the watch tool."] : []),
     ...neverSection(neverRules(config)),
     ...telegramSection(telegramWhen(config), telegram),
   ].join("\n");

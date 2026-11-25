@@ -13,7 +13,7 @@ export type Tested = { id: string; pr: number; branch: string; sha: string };
 export type Conflict = { id: string; with: string[]; files: string[] };
 export type TestRun = { status: "pass" | "fail" | "timeout" | "not-run"; reason?: "no-command" | "too-few"; failure?: string; minutes?: number; onBase?: boolean };
 export type Together = { at: string; base: string; baseSha: string; tested: Tested[]; merged: string[]; conflicts: Conflict[]; tests: TestRun };
-export type Runner = (cmd: string, cwd: string, minutes: number) => Promise<{ status: "pass" | "fail" | "timeout"; output: string }>;
+export type Runner = (cmd: string, cwd: string, minutes: number, signal?: AbortSignal) => Promise<{ status: "pass" | "fail" | "timeout"; output: string }>;
 
 export const TEST_MINUTES = 15;
 const TAIL_LINES = 40;
@@ -67,7 +67,7 @@ export function failureHint(output: string): string | undefined {
 }
 
 // A hung test leaves its children running, so the whole process group is killed, not just the shell.
-export const runTests: Runner = (cmd, cwd, minutes) => new Promise((resolve) => {
+export const runTests: Runner = (cmd, cwd, minutes, signal) => new Promise((resolve) => {
   const child = spawn("sh", ["-c", cmd], { cwd, detached: true, stdio: ["ignore", "pipe", "pipe"] });
   let output = "";
   let timedOut = false;
@@ -84,13 +84,16 @@ export const runTests: Runner = (cmd, cwd, minutes) => new Promise((resolve) => 
     kill("SIGTERM");
     setTimeout(() => kill("SIGKILL"), 5_000).unref();
   }, minutes * 60_000);
+  const stop = () => kill("SIGKILL");
+  signal?.addEventListener("abort", stop, { once: true });
+  const done = () => (clearTimeout(timer), signal?.removeEventListener("abort", stop));
   // A test that starts a server keeps the pipes open after the shell exits, so its group goes too.
   child.on("exit", () => kill("SIGKILL"));
-  child.on("close", (code) => (clearTimeout(timer), resolve({ status: timedOut ? "timeout" : code === 0 ? "pass" : "fail", output })));
-  child.on("error", (err) => (clearTimeout(timer), resolve({ status: "fail", output: String(err) })));
+  child.on("close", (code) => (done(), resolve({ status: timedOut ? "timeout" : code === 0 ? "pass" : "fail", output })));
+  child.on("error", (err) => (done(), resolve({ status: "fail", output: String(err) })));
 });
 
-export type TogetherOptions = { runner?: Runner; fetch?: boolean };
+export type TogetherOptions = { runner?: Runner; fetch?: boolean; signal?: AbortSignal };
 
 const lockFile = (repo: Repo) => join(togetherDir(repo), "pid");
 const rerunFile = (repo: Repo) => join(togetherDir(repo), "rerun");
@@ -124,7 +127,7 @@ export async function together(repo: Repo, base: string, prs: () => Task[], opts
     do {
       rmSync(rerunFile(repo), { force: true });
       outcome = await check(repo, base, prs(), opts);
-    } while (existsSync(rerunFile(repo)));
+    } while (existsSync(rerunFile(repo)) && !opts.signal?.aborted);
     return outcome;
   } finally {
     rmSync(lockFile(repo), { force: true });
@@ -176,7 +179,13 @@ async function check(repo: Repo, base: string, prs: Task[], opts: TogetherOption
     if (!test) tests = { status: "not-run", reason: "no-command" };
     else if (merged.length < 2) tests = { status: "not-run", reason: "too-few" };
     else {
-      const r = await runner(test, worktree, testMinutes);
+      const stopped = () => {
+        if (opts.signal?.aborted) throw new Error("together: stopped before the tests finished");
+      };
+      stopped();
+      const r = await runner(test, worktree, testMinutes, opts.signal);
+      // Tests killed because the task was cancelled say nothing about the PRs.
+      stopped();
       const tail = r.output.trimEnd().split("\n").slice(-TAIL_LINES).join("\n");
       writeFileSync(outputPath(repo), tail + "\n");
       tests = { status: r.status, minutes: testMinutes, ...(r.status === "fail" ? { failure: failureHint(tail) } : {}) };
@@ -184,7 +193,8 @@ async function check(repo: Repo, base: string, prs: Task[], opts: TogetherOption
         // A test that already fails on the base branch would otherwise be blamed on the PRs.
         inTree("reset", "-q", "--hard", baseSha);
         inTree("clean", "-qffdx");
-        if ((await runner(test, worktree, testMinutes)).status === "fail") tests.onBase = true;
+        if ((await runner(test, worktree, testMinutes, opts.signal)).status === "fail") tests.onBase = true;
+        stopped();
       }
     }
 

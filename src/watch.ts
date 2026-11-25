@@ -6,7 +6,7 @@ import { answerMs, loadQuestions, type Question } from "./questions.ts";
 import { run } from "./exec.ts";
 import type { Repo } from "./paths.ts";
 import type { Terminal } from "./terminal.ts";
-import { notifyOrchestrator, sendToTask } from "./send.ts";
+import { sendToTask } from "./send.ts";
 import { baseRef } from "./snapshot.ts";
 import { budgetOf, lastActivity, overBudget, planSpend, taskCost, taskLimit, usd } from "./cost.ts";
 import { loadConfig } from "./config.ts";
@@ -246,25 +246,17 @@ export function prPatches(tasks: Task[], prs: TrackedPr[], seen: Record<string, 
 export async function watch(repo: Repo, base: string, term: Terminal): Promise<number> {
   process.on("SIGTERM", () => (release(repo), process.exit(143)));
   process.on("SIGINT", () => (release(repo), process.exit(130)));
-  const end = await watchFor(repo, base, term, {
-    notice: (notice) => {
-      console.log(notice);
-      notifyOrchestrator(repo, `[foreman watcher] ${notice}. The watcher stays armed through the wait and wakes you when work resumes.`);
-    },
-  });
-  console.log(end.line);
-  if (end.woke) notifyOrchestrator(repo, `[foreman watcher] ${end.line}. Handle it, then re-arm with \`foreman watch\` in the background.`);
+  console.log(await watchFor(repo, base, term, { notice: (notice) => console.log(notice) }));
   return 0;
 }
 
 export type Watching = { signal?: AbortSignal; notice?: (notice: string) => void };
-export type WatchEnd = { line: string; woke: boolean };
 
 // Runs the watcher's passes until one finds something for the orchestrator, and returns that line.
-export async function watchFor(repo: Repo, base: string, term: Terminal, { signal, notice }: Watching = {}): Promise<WatchEnd> {
+export async function watchFor(repo: Repo, base: string, term: Terminal, { signal, notice }: Watching = {}): Promise<string> {
   const pidFile = join(repo.foreman, "watch.pid");
   const other = readPid(pidFile);
-  if (other && pidAlive(other)) return { line: `watcher: already armed (pid ${other})`, woke: false };
+  if (other && pidAlive(other)) return `watcher: already running (pid ${other})`;
   mkdirSync(join(repo.foreman, "tasks"), { recursive: true });
   writeFileSync(pidFile, String(process.pid));
 
@@ -293,7 +285,7 @@ export async function watchFor(repo: Repo, base: string, term: Terminal, { signa
 
   try {
     for (;;) {
-      if (signal?.aborted) return { line: "watcher: stopped", woke: false };
+      if (signal?.aborted) return "watcher: stopped";
       // A reviewer that hits the limit records it itself, and the watcher pauses the workers on its next pass.
       const saved = cursor.limit ? undefined : loadLimit(repo);
       if (saved && saved.since > (cursor.limitEnded ?? 0)) cursor.limit = saved;
@@ -373,7 +365,7 @@ export async function watchFor(repo: Repo, base: string, term: Terminal, { signa
       if (cursor.limit) cursor.held = [...(cursor.held ?? []), ...result.reasons.splice(0)];
       writeFileSync(cursorFile, JSON.stringify(cursor));
       if (result.notice) notice?.(result.notice);
-      if (result.reasons.length) return { line: result.reasons.join("; "), woke: true };
+      if (result.reasons.length) return result.reasons.join("; ");
       if (lastGh) await waitForChange(watched, POLL_MS, signal);
     }
   } finally {
