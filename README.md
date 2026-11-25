@@ -13,23 +13,19 @@ Foreman gives you the team and the manager, right inside Claude Code.
 
 ## :sparkles: Features
 
-- :busts_in_silhouette: Runs a crew of Claude workers in parallel, each in its own worktree and tab
-- :calendar: Turns a backlog and a deadline into one plan, and says what it would cut
+- :wrestling: Runs a crew of Claude workers in parallel, each in its own worktree and tab
+- :calendar: Turns a backlog of any format into a plan to build
 - :mag: Reviews every task against your intent before it becomes a PR
 - :camera: Takes before and after screenshots of web and macOS apps
-- :scroll: Keeps every worker on the same decisions, including your repo's ADRs
-- :link: Starts a task on top of the approved PR it depends on, so the run keeps going while you're away
-- :crossed_swords: Checks that the open PRs merge and pass their tests together
 - :moneybag: Caps spend per task and per plan
-- :robot: Runs each task on the model you choose, so simple tasks can run cheaper
-- :ambulance: Spots hung workers and restarts them
-- :memo: Shares known problems, like a flaky test, with every worker
-- :hourglass_flowing_sand: Makes its own call when a question goes unanswered, and tells you what it chose
-- :clock3: Shows a timeline of the run, and which tasks waited on a quiet worker
+- :robot: Runs simple tasks on cheaper models
+- :rotating_light: Spots hung workers and restarts them
+- :memo: Warns every worker about known problems, like flaky tests
+- :zzz: Keeps working while you're away, and logs every call it makes
 - :clipboard: Writes a summary of the PRs to review, in order
 
 > [!IMPORTANT]
-> Foreman runs inside [Rex](https://www.superlogical.com), a terminal app. Each worker gets its own Rex tab, so you can watch any of them or step in.
+> Foreman currently runs inside [Rex](https://www.superlogical.com), a terminal app. Each worker gets its own Rex tab, so you can watch any of them or step in.
 
 ## :construction_worker: What is Foreman?
 
@@ -88,36 +84,22 @@ foreman up
 Then tell it what you want done:
 
 ```text
-Here's my backlog: BACKLOG.md. The deadline is Friday. Do it as cheaply as you can.
+Here's my backlog: BACKLOG.md. The deadline is tomorrow. Do it as cheaply as you can.
 ```
 
 Foreman asks about anything unclear, then shows you a plan to approve. Workers open in their own tabs, and approved work arrives as PRs for you to merge. When the run ends, Foreman writes a summary of what to review.
 
-<!-- screenshot -->
-
-### Status pane
-
-Rex shows a status pane beside the orchestrator, so you can see the run at a glance:
-
-- **Needs you**: questions waiting on you, and tasks that are blocked or stopped
-- **Working**: what each worker is doing right now, and for how long
-- **Ready to merge**: PRs waiting for you, with the reviewer's risk
-- **Waiting**: planned tasks and what they wait on
-- **Recent**: the last few things that happened
-
-A worker that goes quiet turns yellow, then red. If you close the pane, `foreman pane` opens it again.
-
-<!-- screenshot -->
-
 ### What each task is doing
+
+<img alt="foreman status" src="assets/README/foreman-status.png">
 
 ```sh
 foreman status
 ```
 
-<!-- screenshot -->
-
 ### What it's cost so far
+
+<img alt="foreman budget" src="assets/README/foreman-budget.png">
 
 ```sh
 foreman budget
@@ -125,9 +107,9 @@ foreman budget
 
 Each task has a $5 limit and the plan has $40. When a task goes over, Foreman stops its worker and asks whether to raise the limit.
 
-<!-- screenshot -->
-
 ### The PRs to review
+
+<img alt="foreman summary" src="assets/README/foreman-summary.png">
 
 ```sh
 foreman summary
@@ -135,9 +117,9 @@ foreman summary
 
 The PRs in the order to review them, how to test each one, and the assumptions to check.
 
-<!-- screenshot -->
-
 ### How the run went
+
+<img alt="foreman timeline" src="assets/README/foreman-timeline.png">
 
 ```sh
 foreman timeline
@@ -145,9 +127,25 @@ foreman timeline
 
 When each task started, when its worker went quiet, and which tasks waited on it.
 
-<!-- screenshot -->
-
 Run `foreman help` to see every command. Foreman keeps its state in `.foreman/` in your repo, out of git, and picks up from there if the orchestrator restarts.
+
+### Status pane
+
+<img alt="foreman pane" src="assets/README/foreman-pane.png">
+
+```sh
+foreman pane
+```
+
+`foreman up` opens a status pane beside the orchestrator, so you can see the run at a glance:
+
+- **Needs you**: questions waiting on you, and tasks that are blocked or stopped
+- **Working**: what each worker is doing right now, and for how long
+- **Ready to merge**: PRs waiting for you, with the reviewer's risk
+- **Waiting**: planned tasks and what they wait on
+- **Recent**: the last few things that happened
+
+A worker that goes quiet turns yellow, then red. Run `foreman pane` if you close it.
 
 ## :gear: Settings
 
