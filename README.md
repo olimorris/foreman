@@ -21,6 +21,8 @@ Foreman is a CLI and a Claude Code plugin. `foreman up` starts Claude Code with 
 - **The manager** is the orchestrator. It never writes code. It plans, hands out work, keeps everyone aligned and checks the work before it reaches you.
 - **The leader** is you. You set the direction and approve every PR.
 
+You drive Foreman with the `foreman` CLI. The orchestrator and workers drive it through Foreman's MCP server instead. See [The CLI and the MCP server](#electric_plug-the-cli-and-the-mcp-server).
+
 ### How it works
 
 <p align="center">
@@ -44,6 +46,7 @@ It's macOS and Claude Code only, and works on one repo at a time. Fewer moving p
 
 - Workers run in Claude Code's auto mode, each in a worktree under `.foreman/worktrees/`, and commit to their own `foreman/<task>` branch
 - The reviewer can only read files
+- Foreman's MCP server runs only in the orchestrator and worker sessions Foreman starts, never in your own Claude Code sessions
 - Foreman pushes each approved task's branch and opens its PR, plus a PR that adds accepted decisions to your ADR folder
 - Foreman never merges unless you turn on [automerge](#let-foreman-merge), and then only its own task PRs
 - It keeps its state in `.foreman/`, out of git, and picks up from there after a restart
@@ -235,6 +238,39 @@ A status pane beside the orchestrator shows the run at a glance:
 
 A worker that goes quiet turns yellow, then red.
 
+## :electric_plug: The CLI and the MCP server
+
+The `foreman` CLI is for you. Foreman's MCP server, which `foreman mcp` starts, is for the orchestrator and workers.
+
+Agents used to run the same `foreman` commands you do, through their Bash tool. A message with quotes, backticks or a `$` could get mangled by the shell, and nothing stopped a worker running an orchestrator command like `foreman accept` on its own proposal. Now each session calls Foreman's tools directly, and only gets the tools its job needs.
+
+Foreman passes the server to every session it starts: the orchestrator from `foreman up`, and each worker when it starts, resumes or restarts. The plugin doesn't declare the server itself, so it never starts in your own Claude Code sessions or in the reviewer.
+
+### The tools each session gets
+
+| Session | Tools |
+| --- | --- |
+| Worker | `report`, `propose`, `note` and `tidy` |
+| Orchestrator | Everything it needs to run the plan, like `plan`, `next`, `spawn`, `send`, `review`, `deliver`, `accept` and `ask`. Also `status`, `timeline`, `summary`, `cost` and `budget` to check on the run, and `watch`, `baseline` and `together`, which run as MCP tasks |
+| Reviewer | None. It can only read files |
+
+Workers can't run `foreman` commands any more. Each worker starts with the `foreman` command denied in its Bash tool, so a worker that tries is refused.
+
+The commands you and the orchestrator both use, like `status`, `timeline`, `summary`, `cost` and `budget`, share one implementation. `foreman status` in your terminal and the orchestrator's `status` tool give the same answer.
+
+### What you see while the orchestrator waits
+
+Three of the orchestrator's tools can take a long time. `watch` waits until something in the run needs the orchestrator, `baseline` runs your tests on the base branch and `together` tests the open PRs merged together. Each one returns straight away as an MCP task, so the orchestrator ends its turn and spends nothing while it waits.
+
+In the orchestrator's tab:
+
+- While a task runs, "1 MCP task still running" shows next to the turn's time. `/tasks` lists the running tasks.
+- When a task completes, a line like `⏺ MCP task watch-… (foreman/watch) completed.` appears, and the orchestrator wakes up and acts on what the task found. That's Foreman waking it, not you or another session.
+
+After handling each line from the watcher, the orchestrator calls `watch` again. If it tries to end a turn while tasks are in flight and no watch task is running, a Stop hook sends it back to call `watch`.
+
+The server stops when the orchestrator's session exits, so its tasks don't survive a restart. After a restart, the orchestrator picks up the run from `.foreman/` and calls `watch` again. A baseline or together check that was running when it stopped is lost, so ask for it again if you need it.
+
 ## :gear: Settings
 
 Settings live in `.foreman/config.json` in your repo, and every one is optional. Here they are with their defaults, or an example where there's no default:
@@ -285,7 +321,7 @@ For a macOS app, `screenshots` builds the app instead of starting a server:
 
 Foreman follows your own skills when it builds, reviews and opens PRs. Put each one in `.foreman/skills/<name>/SKILL.md`, in [Claude Code's skill format](https://code.claude.com/docs/en/skills): frontmatter with a `name` and a `description`, then the instructions. They stay on your machine, since Foreman keeps `.foreman/` out of git.
 
-- The orchestrator and every worker load them as `user-skills:<name>`, like any other skill, so workers build by them. Foreman starts each session with a second plugin folder, `.foreman/skills-plugin`, that links back to `.foreman/skills`, so your skills never land in a worktree a worker commits from.
+- The orchestrator and every worker load them as `user-skills:<name>`, like any other skill, so workers build by them. Foreman starts each session with a second plugin folder, `.foreman/skills-plugin`, that links back to `.foreman/skills`, so your skills never land in a worktree a worker commits from. The MCP server doesn't serve them, because Team and Enterprise logins ignore an MCP server's skills unless an admin turns them on, while a plugin folder works on every plan.
 - The reviewer reads every skill and checks each change against the ones whose description fits reviewing code, like a code-review skill. Breaking one sends the change back to its worker, with the skill named.
 - A skill named `pull-request` shapes the PRs Foreman opens. The reviewer writes the title and description by it, and Foreman adds the intent, assumptions, decisions, screenshots, verdict and risk below. A title that isn't a conventional commit is dropped for the task's own title.
 - A skill named `adr` shapes the decisions Foreman records. The orchestrator writes each one in its format, and in a repo with no ADR folder yet, the new folder takes the skill's title line, status and a README that describes them. An existing ADR folder keeps its own convention.
