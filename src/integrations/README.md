@@ -15,4 +15,5 @@ The integration must:
 - say whether a tab's process is still running
 - type text into a tab and press Enter, for workers whose message socket is gone
 - close a tab, which must end the process running in it
+- optionally, open a pane beside another one for the status pane. Without it, `foreman pane` opens the status pane in its own tab
 - name the environment variables it sets in a tab, so workers don't inherit the orchestrator's session

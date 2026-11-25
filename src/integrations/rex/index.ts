@@ -14,6 +14,11 @@ export const rex: Terminal = {
     const out = JSON.parse(must(["sh", script, "open", session, label, cwd, keepOpen ? "yes" : "no", "--", ...cmd]));
     return { session, window: out.window_id, pane: out.block_ids[0] };
   },
+  currentPane: () => process.env.REX_BLOCK || undefined,
+  openBeside(session, anchor, label, cwd, cmd) {
+    const out = JSON.parse(must(["sh", script, "split", session, anchor ?? "", label, cwd, "--", ...cmd]));
+    return { session, window: out.window_id, pane: out.block_id ?? out.block_ids?.[0] };
+  },
   newSession(name, cwd, cmd) {
     return JSON.parse(must(["sh", script, "new-session", name, cwd, "--", ...cmd])).session_id;
   },

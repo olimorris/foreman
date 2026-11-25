@@ -6,6 +6,10 @@ case "$cmd" in
     session="$1" label="$2" cwd="$3" keep="$4"; shift 5
     if [ "$keep" = yes ]; then set -- --keep-open -- "$@"; else set -- -- "$@"; fi
     exec rex window new -s "$session" "$label" -c "$cwd" --focus=false --json "$@" ;;
+  split) # SESSION ANCHOR_BLOCK(empty for the session's first) LABEL CWD -- COMMAND...
+    session="$1" anchor="$2" label="$3" cwd="$4"; shift 5
+    [ -n "$anchor" ] || anchor="$(rex block ls -s "$session" --json | jq -r '.blocks[0].block_id')"
+    exec rex split -s "$session" -b "$anchor" --split=right --ratio 35 --focus=false --keep-open --label "$label" -c "$cwd" --json -- "$@" ;;
   new-session) # NAME CWD -- COMMAND...
     name="$1" cwd="$2"; shift 3
     exec rex new "$name" -c "$cwd" --keep-open --json -- "$@" ;;

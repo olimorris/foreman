@@ -32,6 +32,7 @@ import { writeSummary } from "./summary.ts";
 import { budgetLeft, budgetOf, orchestratorCost, recordSession, sessionsFile, taskCost, usd } from "./cost.ts";
 import { restartWorker, resume, stopWorker } from "./stop.ts";
 import { watch, watcherArmed } from "./watch.ts";
+import { gatherPane, livePane, openPane, renderPane, spendByTask } from "./pane.ts";
 
 
 function flags(args: string[]): { positional: string[]; opts: Record<string, string[]> } {
@@ -40,7 +41,7 @@ function flags(args: string[]): { positional: string[]; opts: Record<string, str
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!;
     if (!a.startsWith("--")) positional.push(a);
-    else if (["--json", "--discard", "--all", "--dry-run", "--no-push"].includes(a)) opts[a.slice(2)] = ["true"];
+    else if (["--json", "--discard", "--all", "--dry-run", "--no-push", "--once", "--live"].includes(a)) opts[a.slice(2)] = ["true"];
     else (opts[a.slice(2)] ??= []).push(args[++i] ?? "");
   }
   return { positional, opts };
@@ -86,6 +87,11 @@ async function main(argv: string[]): Promise<number> {
         "-n", "foreman",
       ]);
       console.log(`Started the orchestrator in ${term.name} session ${name} (${session})`);
+      try {
+        openPane(repo, term, session);
+      } catch (err) {
+        console.log(`Couldn't open the status pane: ${err instanceof Error ? err.message : err}. Run foreman pane to try again`);
+      }
       return 0;
     }
     case "spawn": {
@@ -104,7 +110,10 @@ async function main(argv: string[]): Promise<number> {
       const [id, ...words] = positional;
       if (!id) throw usageError("send");
       const text = words.length ? words.join(" ") : await Bun.stdin.text();
-      console.log(`sent to ${id} via ${sendToTask(repo, findTask(repo, id), text.trim(), term)}`);
+      const task = findTask(repo, id);
+      console.log(`sent to ${id} via ${sendToTask(repo, task, text.trim(), term)}`);
+      // The orchestrator answers a blocked worker or its question with a message, after which the worker is working again.
+      if (task.status === "blocked" || task.status === "needs-decision") updateTask(repo, id, { status: "running" });
       return 0;
     }
     case "report": {
@@ -290,6 +299,14 @@ async function main(argv: string[]): Promise<number> {
       const tasks = loadTasks(repo);
       if (opts.json) return console.log(JSON.stringify(tasks, null, 2)), 0;
       console.log(statusView(repo, styleFor(), watcherArmed(repo)));
+      return 0;
+    }
+    case "pane": {
+      const repo = findRepo();
+      if (opts.live) return livePane(repo, term);
+      if (opts.once) return console.log(renderPane(gatherPane(repo, Date.now(), spendByTask(repo)), Math.max(30, (process.stdout.columns ?? 72) - 1), !!process.stdout.isTTY && !process.env.NO_COLOR).join("\n")), 0;
+      const opened = openPane(repo, term, requireSession(term, "pane"), term.currentPane?.());
+      console.log(opened ? "opened the status pane" : "the status pane is already open");
       return 0;
     }
     case "watch":
