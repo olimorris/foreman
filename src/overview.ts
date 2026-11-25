@@ -3,15 +3,17 @@ import type { Repo } from "./paths.ts";
 import { loadPlan } from "./plan.ts";
 import { plainTitle } from "./spawn.ts";
 import { loadTasks, type Task } from "./state.ts";
+import { sectionLines, type Row, type Section } from "./status.ts";
+import { PLAIN, type Style } from "./style.ts";
 
 const TITLE_WIDTH = 44;
 
-export function taskTitle(repo: Repo, task: Task): string {
+export function taskTitle(repo: Repo, task: Task, width = TITLE_WIDTH): string {
   const title = task.title ?? loadPlan(repo)?.tasks.find((t) => t.id === task.id)?.title;
-  if (!title) return "";
-  const plain = plainTitle(title);
-  return plain.length > TITLE_WIDTH ? plain.slice(0, TITLE_WIDTH - 3).trimEnd() + "..." : plain;
+  return title ? clip(plainTitle(title), width) : "";
 }
+
+export const clip = (s: string, width: number) => (s.length > width ? s.slice(0, width - 3).trimEnd() + "..." : s);
 
 // The stored statuses are Foreman's own lifecycle words, so the tables say what each one means for the user.
 export function statusLabel(task: Task): string {
@@ -38,28 +40,45 @@ export function byActivity(tasks: Task[]): Task[] {
   return [...tasks.filter((t) => !finished(t)), ...tasks.filter(finished)];
 }
 
-export function budgetOverview(repo: Repo): string {
+const BAR = 12;
+
+// The bar shows spend against a limit at a glance, turning yellow near the limit and red past it.
+export function bar(spent: number, limit: number | undefined, style: Style): string {
+  if (limit === undefined || limit <= 0) return "";
+  const share = spent / limit;
+  const filled = Math.min(BAR, Math.round(share * BAR));
+  const tone = share > 1 ? style.red : share >= 0.75 ? style.yellow : style.green;
+  return tone("█".repeat(filled)) + style.dim("░".repeat(BAR - filled));
+}
+
+export function budgetOverview(repo: Repo, style: Style = PLAIN): string {
   const budget = budgetOf(repo);
   const tasks = byActivity(loadTasks(repo));
   const costs = new Map(tasks.map((t) => [t.id, taskCost(repo, t)]));
   const orch = orchestratorCost(repo);
   const spent = [...costs.values()].reduce((s, c) => s + c.total, 0) + orch.usd;
-  const plan = budget.plan !== undefined ? `${usd(spent)} of ${usd(budget.plan)} spent, ${usd(Math.max(0, budget.plan - spent))} left` : `${usd(spent)} spent, no plan limit`;
-  const rows = [
-    ["Task", "Worker", "What it builds", "Status", "Spent", "Limit"],
-    ...tasks.map((t) => {
-      const limit = taskLimit(budget, t.id);
-      return [t.id, t.worker ?? "", taskTitle(repo, t), statusLabel(t), usd(costs.get(t.id)!.total), limit !== undefined ? usd(limit) : "none"];
-    }),
-    ["", "", "Foreman itself", "", usd(orch.usd), ""],
-  ];
+  const done = (t: Task) => t.status === "torn-down" || t.status === "merged";
+  const numbered = tasks.some((t) => t.worker);
+  const row = (t: Task): Row => {
+    const limit = taskLimit(budget, t.id);
+    const cells = [t.id, ...(numbered ? [t.worker ?? ""] : []), taskTitle(repo, t, 56), usd(costs.get(t.id)!.total), limit !== undefined ? `of ${usd(limit)}` : "no limit"];
+    return { cells: done(t) ? cells : [...cells.slice(0, -1), `${cells.at(-1)!}  ${bar(costs.get(t.id)!.total, limit, style)}`], tone: () => (s: string) => s, dim: done(t) };
+  };
+  const sections: Section[] = [
+    { title: "In progress", rows: tasks.filter((t) => !done(t)).map(row) },
+    { title: "Finished", rows: tasks.filter(done).map(row) },
+    { title: "Foreman itself", rows: [{ cells: ["", ...(numbered ? [""] : []), "The orchestrator", usd(orch.usd), ""], tone: () => (s: string) => s }] },
+  ].filter((s) => s.rows.length);
+  const spentAt = numbered ? 3 : 2;
+  const plan = budget.plan !== undefined
+    ? [`${style.bold(usd(spent))} of ${usd(budget.plan)} spent  ${bar(spent, budget.plan, style)}`, style.dim(`${usd(Math.max(0, budget.plan - spent))} left for the plan, at list prices`)]
+    : [`${style.bold(usd(spent))} spent, with no plan limit`, style.dim("At list prices")];
   const unpriced = [...new Set([...[...costs.values()].flatMap((c) => c.unpriced), ...orch.unpriced])];
   return [
-    `Plan: ${plan}, at list prices`,
+    ...plan,
+    ...sectionLines(sections, style, () => [spentAt]),
     "",
-    ...table(rows, [4, 5]),
-    "",
-    ...(unpriced.length ? [`Not counted: ${unpriced.join(", ")} has no price. Add it under "prices" in .foreman/config.json`, ""] : []),
-    "Change a limit with foreman budget <usd> for every task, foreman budget <task> <usd> for one, or foreman budget --plan <usd>.",
+    ...(unpriced.length ? [style.yellow(`Not counted: ${unpriced.join(", ")} has no price. Add it under "prices" in .foreman/config.json`), ""] : []),
+    style.dim("Change a limit with foreman budget <usd> for every task, foreman budget <task> <usd> for one, or foreman budget --plan <usd>."),
   ].join("\n");
 }

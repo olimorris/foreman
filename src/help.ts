@@ -1,4 +1,7 @@
 import { banner } from "./banner.ts";
+import { styleFor, type Style } from "./style.ts";
+
+export { styleFor };
 
 type Command = { usage: string; about: string; full?: string };
 type Group = { title: string; commands: Command[] };
@@ -72,13 +75,6 @@ export const GROUPS: Group[] = [
 // The descriptions start in one column, so a usage longer than this puts its description on the next line.
 const USAGE_WIDTH = 24;
 
-type Style = { heading: (s: string) => string; dim: (s: string) => string };
-const PLAIN: Style = { heading: (s) => s, dim: (s) => s };
-const COLOUR: Style = { heading: (s) => `\x1b[1;33m${s}\x1b[0m`, dim: (s) => `\x1b[2m${s}\x1b[0m` };
-
-export function styleFor(out: { isTTY?: boolean } = process.stdout, env: Record<string, string | undefined> = process.env): Style {
-  return out.isTTY && !env.NO_COLOR ? COLOUR : PLAIN;
-}
 
 export function helpText(style: Style = styleFor(), art = banner()): string {
   const lines = [...(art ? [art] : []), "Run a crew of Claude workers on one repo.", "", `Usage: foreman <command>`];
