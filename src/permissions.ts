@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { latestTranscript, tailLines } from "./limits.ts";
 import type { Repo } from "./paths.ts";
-import { roundDir } from "./review.ts";
+import { latest } from "./rounds.ts";
 import { withLock } from "./store.ts";
 import { writeJson, type Task } from "./state.ts";
 
@@ -252,10 +252,7 @@ export type BlockSources = { transcript(task: Task): string | undefined; lines(f
 export const fileSources = (repo: Repo): BlockSources => ({
   transcript: (task) => latestTranscript(repo, task),
   lines: (file) => (existsSync(file) ? tailLines(file) : []),
-  reviewerOutput: (task) => {
-    const file = join(roundDir(repo, task.id, task.reviews ?? 0), "reviewer.json");
-    return task.reviews && existsSync(file) ? readFileSync(file, "utf8") : undefined;
-  },
+  reviewerOutput: (task) => latest(repo, task)?.output,
 });
 
 // Brings blocks.json up to date with what the sessions' transcripts and the latest review show, and returns the blocks still open.

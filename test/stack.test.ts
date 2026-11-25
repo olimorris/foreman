@@ -1,18 +1,18 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { saveConfig } from "../src/config.ts";
 import { deliver } from "../src/deliver.ts";
 import { must, run } from "../src/exec.ts";
 import { parsePlan, readyTasks, stackable } from "../src/plan.ts";
-import { roundDir, type Verdict } from "../src/review.ts";
+import type { Verdict } from "../src/rounds.ts";
 import { spawn } from "../src/spawn.ts";
 import { diffBase, findTask, updateTask, type Task } from "../src/state.ts";
 import { renderSummary, reviewOrder, type Ready } from "../src/summary.ts";
 import { sync, type SyncProbes } from "../src/sync.ts";
 import { prPatches, scan } from "../src/watch.ts";
-import { fakeTerminal, tempRepo } from "./helpers.ts";
+import { fakeTerminal, tempRepo, writeRound } from "./helpers.ts";
 
 process.env.CLAUDE_CONFIG_DIR = mkdtempSync(join(tmpdir(), "foreman-claude-"));
 writeFileSync(join(process.env.CLAUDE_CONFIG_DIR, ".claude.json"), "{}");
@@ -93,8 +93,7 @@ function setup() {
     return git(wt, "rev-parse", "HEAD");
   };
   const approveTask = (id: string, pr: number) => {
-    mkdirSync(roundDir(repo, id, 1), { recursive: true });
-    writeFileSync(join(roundDir(repo, id, 1), "verdict.json"), JSON.stringify(approve));
+    writeRound(repo, id, 1, { verdict: approve });
     updateTask(repo, id, { reviews: 1, status: "pr-open", pr });
   };
   spawn(repo, { id: "T1", brief: brief("T1"), owns: ["T1.txt"], base: "main", session: "s" }, term);

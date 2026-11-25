@@ -3,7 +3,7 @@ import { run } from "./exec.ts";
 import { usageError } from "./help.ts";
 import type { Repo } from "./paths.ts";
 import { loadPlan, planPath } from "./plan.ts";
-import { latestVerdict } from "./review.ts";
+import { latest } from "./rounds.ts";
 import { writeJson, type Task } from "./state.ts";
 
 export type Check = { name: string; state: "pass" | "fail" | "pending" };
@@ -13,7 +13,7 @@ export type Merge = { id: string; number: number; sha: string };
 
 export const automergeOn = (repo: Repo): boolean => loadPlan(repo)?.automerge === true;
 
-export const approved = (repo: Repo, task: Task): boolean => latestVerdict(repo, task)?.verdict === "approve";
+export const approved = (repo: Repo, task: Task): boolean => latest(repo, task)?.verdict?.verdict === "approve";
 
 export function mergeCall(task: Task, pr: PrView, isApproved: boolean): MergeCall {
   if (!isApproved || task.status !== "pr-open" || pr.state !== "OPEN" || pr.draft || !pr.sha) return "wait";

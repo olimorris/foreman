@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { loadConfig } from "./config.ts";
 import { overlaps } from "./decisions.ts";
 import type { Repo } from "./paths.ts";
-import { latestVerdict } from "./review.ts";
+import { latest } from "./rounds.ts";
 import { checkBrief, checkModel } from "./spawn.ts";
 import { loadTasks, writeJson, type Task } from "./state.ts";
 import { usageError } from "./help.ts";
@@ -115,7 +115,7 @@ export type CanStackOn = (dep: Task) => boolean;
 // Nothing merges while the user sleeps, so a task whose last unmerged dependency is approved starts on that dependency's branch.
 export function stackable(repo: Repo): CanStackOn | undefined {
   if (loadConfig(repo).stackTasks === false) return undefined;
-  return (dep) => dep.status === "pr-open" && !dep.prClosed && !dep.mergedInto && latestVerdict(repo, dep)?.verdict === "approve";
+  return (dep) => dep.status === "pr-open" && !dep.prClosed && !dep.mergedInto && latest(repo, dep)?.verdict?.verdict === "approve";
 }
 
 export function readyTasks(plan: Plan, tasks: Task[], max: number, canStackOn?: CanStackOn): { start: Starting[]; waiting: Waiting[] } {

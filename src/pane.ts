@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { loadConfig } from "./config.ts";
 import { budgetOf, orchestratorCost, planSpend, taskCost, usd } from "./cost.ts";
@@ -9,7 +9,7 @@ import { statusLabel } from "./overview.ts";
 import { plainTitle } from "./spawn.ts";
 import type { Repo } from "./paths.ts";
 import { loadPlan, maxWorkers, readyTasks, type Waiting } from "./plan.ts";
-import { roundDir, type Verdict } from "./review.ts";
+import { latest, type Verdict } from "./rounds.ts";
 import { loadTasks, type Task } from "./state.ts";
 import type { Tab, Terminal } from "./terminal.ts";
 import { pluginRoot } from "./paths.ts";
@@ -193,15 +193,6 @@ export function renderPane(p: PaneInput, width: number, colour = false): string[
 
 const RECENT = 6;
 
-function verdictOf(repo: Repo, task: Task): Verdict | undefined {
-  const file = join(roundDir(repo, task.id, task.reviews ?? 0), "verdict.json");
-  try {
-    return task.reviews && existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 const EVENT_WORDS: Record<string, string> = { done: "finished", blocked: "blocked", "needs-decision": "needs a decision", rebased: "rebased", exited: "worker closed", reviewed: "reviewed" };
 
 // costs holds each task's spend, the orchestrator's under "foreman" and what foreman budget counts for the plan under "plan", as spendByTask returns them.
@@ -220,7 +211,7 @@ export function gatherPane(repo: Repo, now = Date.now(), costs: Map<string, numb
       task,
       title: plainTitle(task.title ?? plan?.tasks.find((t) => t.id === task.id)?.title ?? ""),
       spent: costs.get(task.id) ?? 0,
-      risk: verdictOf(repo, task)?.risk,
+      risk: latest(repo, task)?.verdict?.risk,
       note: lastNote,
       activity: task.status === "running" ? workerActivity(repo, task) : undefined,
       closed: task.status === "running" && closed.has(task.id),

@@ -6,7 +6,7 @@ import { loadDecisions, type Decision } from "./ledger.ts";
 import type { Repo } from "./paths.ts";
 import { loadPlan, type Plan } from "./plan.ts";
 import { loadQuestions, type Question } from "./questions.ts";
-import { latestVerdict, type Verdict } from "./review.ts";
+import { latest, type Verdict } from "./rounds.ts";
 import { loadTasks, type Task } from "./state.ts";
 import { run } from "./exec.ts";
 import { loadTogether, renderTogether, staleness, type Together } from "./together.ts";
@@ -100,7 +100,7 @@ export function gather(repo: Repo, plan: Plan | undefined): SummaryInput {
   const ready: Ready[] = [];
   const unfinished: Unfinished[] = [];
   for (const task of tasks.filter((t) => !t.mergedAt && t.status !== "torn-down")) {
-    const verdict = latestVerdict(repo, task);
+    const verdict = latest(repo, task)?.verdict;
     if (task.pr || (task.status === "done" && verdict?.verdict === "approve")) {
       const blocks = plan?.tasks.filter((p) => p.deps.includes(task.id) && !merged.includes(p.id)).map((p) => p.id) ?? [];
       ready.push({ task, title: titleOf(task.id), verdict, done: lastDone(repo, task.id), blocks });

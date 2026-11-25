@@ -5,7 +5,7 @@ import { StringDecoder } from "node:string_decoder";
 import { loadConfig } from "./config.ts";
 import type { Repo } from "./paths.ts";
 import { loadPlan, planPath, type Plan } from "./plan.ts";
-import { roundDir } from "./review.ts";
+import { rounds } from "./rounds.ts";
 import { loadTasks, writeJson, type Task } from "./state.ts";
 
 // Dollars per million tokens at list price; other models go in config.json's "prices". Cache writes cost 1.25x input for 5 minutes and 2x for an hour.
@@ -82,17 +82,8 @@ export function transcriptSpend(dir: string, sessions: string[], overrides: Reco
   return spend;
 }
 
-// The reviewer writes reviewer.json once it finishes, so its time is when the round's spend landed.
 export function reviewSpend(repo: Repo, task: Task, since?: number): number {
-  let usd = 0;
-  for (let r = 1; r <= (task.reviews ?? 0); r++) {
-    try {
-      const file = join(roundDir(repo, task.id, r), "reviewer.json");
-      if (since !== undefined && statSync(file).mtimeMs < since) continue;
-      usd += JSON.parse(readFileSync(file, "utf8")).total_cost_usd ?? 0;
-    } catch {}
-  }
-  return usd;
+  return rounds(repo, task).filter((r) => since === undefined || (r.finishedAt ?? -Infinity) >= since).reduce((sum, r) => sum + r.costUsd, 0);
 }
 
 export type TaskCost = { id: string; worker: number; review: number; total: number; unpriced: string[] };

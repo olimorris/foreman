@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { saveConfig } from "../src/config.ts";
@@ -7,9 +7,8 @@ import { budgetLeft, lastReplyAt, overBudget, planSpend, priceFor, recordSession
 import { budgetOverview } from "../src/overview.ts";
 import { loadPlan, planPath, type Plan } from "../src/plan.ts";
 import type { Repo } from "../src/paths.ts";
-import { roundDir } from "../src/review.ts";
 import { loadTasks, writeJson, type Task } from "../src/state.ts";
-import { tempRepo } from "./helpers.ts";
+import { tempRepo, writeRound } from "./helpers.ts";
 
 process.env.CLAUDE_CONFIG_DIR = mkdtempSync(join(tmpdir(), "foreman-claude-"));
 
@@ -107,10 +106,7 @@ test("foreman budget reset puts the plan's count to $0, and the budget, the over
   expect(before.reasons).toEqual(["over-budget plan: $12.00 of $10.00"]);
   const t2 = loadTasks(repo)[1]!;
   writeJson(join(repo.foreman, "tasks.json"), { tasks: loadTasks(repo).map((t) => (t.id === "T2" ? { ...t, status: "over-budget", pausedFrom: "running", reviews: 1 } : t)) });
-  mkdirSync(roundDir(repo, "T2", 1), { recursive: true });
-  const review = join(roundDir(repo, "T2", 1), "reviewer.json");
-  writeFileSync(review, JSON.stringify({ total_cost_usd: 0.5 }));
-  utimesSync(review, new Date("2026-11-20T11:30:00Z"), new Date("2026-11-20T11:30:00Z"));
+  writeRound(repo, "T2", 1, { reviewer: { total_cost_usd: 0.5 }, at: new Date("2026-11-20T11:30:00Z") });
   const planBefore = loadPlan(repo)!;
 
   expect(resetBudget(repo, new Date("2026-11-20T12:00:00Z"))).toEqual([
