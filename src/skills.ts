@@ -20,7 +20,7 @@ export function globalSkillsDir(env = process.env): string {
   return join(config, "foreman", "skills");
 }
 
-// The folders that hold a skill, for a session that needs to read them.
+// A reviewer can read a skill only inside a folder passed to it with --add-dir.
 export function skillFolders(repo: Repo): string[] {
   return [globalSkillsDir(), skillsDir(repo)].filter((dir) => readFolder(dir).length);
 }
