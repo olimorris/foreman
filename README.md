@@ -262,7 +262,7 @@ For a macOS app, `screenshots` builds the app instead of starting a server:
 
 ### Your own skills
 
-Put your skills in `.foreman/skills/<name>/SKILL.md`. Every session gets them, and they stay out of git.
+Put skills you use in every repo in `~/.config/foreman/skills/<name>/SKILL.md`, or `$XDG_CONFIG_HOME/foreman/skills` when you set it. Put skills for one repo in that repo's `.foreman/skills/<name>/SKILL.md`. When both have a skill of the same name, the repo's wins. Every session gets them, and they stay out of git.
 
 - Workers and the orchestrator load them as `user-skills:<name>`
 - The reviewer checks each change against your review skills
@@ -274,5 +274,7 @@ As an example, you can start from Foreman's own [pull-request skill](.claude/ski
 ```sh
 mkdir -p .foreman/skills/pull-request && curl -fsSL https://raw.githubusercontent.com/olimorris/foreman/main/.claude/skills/pull-request/SKILL.md -o .foreman/skills/pull-request/SKILL.md
 ```
+
+Put it in `~/.config/foreman/skills/pull-request` instead to use it in every repo.
 
 A skill you add mid-run reaches workers started after it.

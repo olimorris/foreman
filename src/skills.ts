@@ -1,5 +1,6 @@
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, isAbsolute, join } from "node:path";
 import { skillLayout, type AdrLayout } from "./adr.ts";
 import type { Repo } from "./paths.ts";
 
@@ -13,15 +14,43 @@ export const SKILLS_PLUGIN = "user-skills";
 export const skillsDir = (repo: Repo) => join(repo.foreman, "skills");
 export const skillsPluginDir = (repo: Repo) => join(repo.foreman, "skills-plugin");
 
-// Claude Code loads a --plugin-dir's skills folder in any working directory, and the link back to .foreman/skills keeps the user's files out of every worktree a worker commits from.
+// The XDG spec says to ignore a relative XDG_CONFIG_HOME.
+export function globalSkillsDir(env = process.env): string {
+  const config = env.XDG_CONFIG_HOME && isAbsolute(env.XDG_CONFIG_HOME) ? env.XDG_CONFIG_HOME : join(homedir(), ".config");
+  return join(config, "foreman", "skills");
+}
+
+// A reviewer can read a skill only inside a folder passed to it with --add-dir.
+export function skillFolders(repo: Repo): string[] {
+  return [globalSkillsDir(), skillsDir(repo)].filter((dir) => readFolder(dir).length);
+}
+
+// Claude Code loads a --plugin-dir's skills folder in any working directory, and linking each skill back to where it lives keeps the user's files out of every worktree a worker commits from.
 export function skillsPluginArgs(repo: Repo): string[] {
-  if (!loadSkills(repo).length) return [];
+  const skills = loadSkills(repo);
+  if (!skills.length) return [];
   const dir = skillsPluginDir(repo);
   mkdirSync(join(dir, ".claude-plugin"), { recursive: true });
-  writeFileSync(join(dir, ".claude-plugin", "plugin.json"), JSON.stringify({ name: SKILLS_PLUGIN, description: "The user's own skills from .foreman/skills" }, null, 2) + "\n");
-  const link = join(dir, "skills");
-  if (!existsSync(link) && !isLink(link)) symlinkSync(join("..", "skills"), link);
+  writeFileSync(join(dir, ".claude-plugin", "plugin.json"), JSON.stringify({ name: SKILLS_PLUGIN, description: "The user's own skills from .foreman/skills and ~/.config/foreman/skills" }, null, 2) + "\n");
+  linkSkills(join(dir, "skills"), new Map(skills.map((s) => [s.name, dirname(s.path)])));
   return ["--plugin-dir", dir];
+}
+
+// Before global skills, the whole folder was one link to .foreman/skills, and replacing it would write into the user's skills.
+function linkSkills(dir: string, targets: Map<string, string>) {
+  if (isLink(dir)) unlinkSync(dir);
+  mkdirSync(dir, { recursive: true });
+  for (const name of readdirSync(dir)) {
+    const path = join(dir, name);
+    if (isLink(path) && readlinkSync(path) !== targets.get(name)) unlinkSync(path);
+  }
+  for (const [name, target] of targets) {
+    try {
+      symlinkSync(target, join(dir, name));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+    }
+  }
 }
 
 function isLink(path: string): boolean {
@@ -32,13 +61,18 @@ function isLink(path: string): boolean {
   }
 }
 
+// A repo skill replaces a global one of the same name.
 export function loadSkills(repo: Repo): Skill[] {
-  const dir = skillsDir(repo);
+  const byName = new Map<string, Skill>();
+  for (const skill of [...readFolder(globalSkillsDir()), ...readFolder(skillsDir(repo))]) byName.set(skill.name, skill);
+  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function readFolder(dir: string): Skill[] {
   if (!existsSync(dir)) return [];
   return readdirSync(dir, { withFileTypes: true })
-    .filter((d) => d.isDirectory() && existsSync(join(dir, d.name, "SKILL.md")))
-    .map((d) => parseSkill(join(dir, d.name, "SKILL.md"), d.name))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .filter((d) => (d.isDirectory() || d.isSymbolicLink()) && existsSync(join(dir, d.name, "SKILL.md")))
+    .map((d) => parseSkill(join(dir, d.name, "SKILL.md"), d.name));
 }
 
 export const prSkill = (skills: Skill[]) => skills.find((s) => s.name === PR_SKILL);

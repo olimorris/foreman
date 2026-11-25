@@ -205,9 +205,11 @@ How it works:
 
 ## The user's own skills
 
-Skills go in `.foreman/skills/<name>/SKILL.md`, in Claude Code's skill format. Every session gets them, and they stay out of git.
+Skills go in Claude Code's skill format, in one of two folders. Every session gets them, and they stay out of git.
 
-- Workers and the orchestrator load them as `user-skills:<name>`, from a plugin folder that links to `.foreman/skills`. Nothing is copied into a worktree. It's a plugin folder because Team and Enterprise logins turn off skills from MCP servers.
+- `~/.config/foreman/skills/<name>/SKILL.md` holds skills for every repo. Foreman reads `$XDG_CONFIG_HOME/foreman/skills` instead when `XDG_CONFIG_HOME` is set.
+- `.foreman/skills/<name>/SKILL.md` holds skills for one repo. A repo skill replaces a global skill of the same name, including the `pull-request` and `adr` skills below.
+- Workers and the orchestrator load them as `user-skills:<name>`, from a plugin folder that links to each skill where it lives. Foreman rebuilds the links when each session starts. Nothing is copied into a worktree. It's a plugin folder because Team and Enterprise logins turn off skills from MCP servers.
 - The reviewer checks each change against the skills whose description fits reviewing code.
 - A `pull-request` skill shapes the PRs Foreman opens. Foreman adds its own sections after the description.
 - An `adr` skill shapes the decisions it records, unless the repo's ADR folder already has its own convention.
@@ -220,10 +222,12 @@ Start from Foreman's own pull-request skill:
 mkdir -p .foreman/skills/pull-request && curl -fsSL https://raw.githubusercontent.com/olimorris/foreman/main/.claude/skills/pull-request/SKILL.md -o .foreman/skills/pull-request/SKILL.md
 ```
 
+Put it in `~/.config/foreman/skills/pull-request` instead to use it in every repo.
+
 ## Where things live
 
 - `.foreman/` in the user's repo holds every bit of Foreman's state. Foreman keeps it out of git. If the orchestrator restarts, it picks up from there.
-- `.foreman/config.json` and `.foreman/skills/` are the only things in there for people to edit. Change the rest through `foreman` commands.
+- `.foreman/config.json` and `.foreman/skills/` are the only things in there for people to edit, along with `~/.config/foreman/skills/` outside the repo. Change the rest through `foreman` commands.
 - `.foreman/summary.md` is the run summary.
 - `.foreman/worktrees/<task>` is each task's worktree.
 - The repo's ADR folder, such as `docs/decisions` or `docs/adr`, holds the decisions that have merged.
