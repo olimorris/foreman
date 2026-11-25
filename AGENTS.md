@@ -20,3 +20,4 @@ Foreman is a Claude Code plugin: one orchestrator session runs worker sessions i
 - A change to what the orchestrator, a worker or the reviewer should do updates `agents/`, `skills/` or `prompts/` in the same PR, and the README covers anything a user sees.
 - Docs, CLI output and prompts use Foreman's words: orchestrator, worker, reviewer, task, brief, decision. Write plain sentences, one idea each, with a plain dash where you'd reach for an em dash.
 - Commits and PRs follow `.claude/skills/pull-request`.
+- Releases come from the PR that release-please opens on `main`. Never edit the version in `.claude-plugin/plugin.json` or `.release-please-manifest.json` by hand.
