@@ -70,3 +70,15 @@ Checked against Claude Code 2.1.332 without spending usage: its docs, its change
 - The only machine-readable reset time is the status line's input: `rate_limits.five_hour.resets_at` and `rate_limits.seven_day.resets_at`, in epoch seconds, for Pro, Max and Ultra accounts only. Using it would mean replacing the user's status line in every worker, so Foreman doesn't.
 - The StopFailure hook gets `error: "rate_limit"` with no reset time.
 - When the text has no time Foreman can read, it tries again an hour later. A worker resumed too early hits the limit again at no cost and is paused with the new time.
+
+## Telegram
+
+Checked against the Telegram plugin 0.0.7 and Claude Code 2.1.332.
+
+- The plugin is an MCP server that also polls Telegram as a bot. It's published as `telegram@claude-plugins-official`, and Claude Code's plugin directory installs the same plugin as `telegram@anthropic-plugin-directory`. `~/.claude/plugins/installed_plugins.json` lists the ids installed.
+- Any session with the plugin enabled starts the server, `claude -p` included, not just sessions started with `--channels`. Telegram allows one poller per bot token, so on start the server sends SIGTERM to the pid in `~/.claude/channels/telegram/bot.pid` and takes over. The newest session always owns the bot, and the one before loses it with no warning.
+- `--settings '{"enabledPlugins":{"telegram@<marketplace>":false}}'` keeps the plugin out of one session even when the user enabled it for every session. A `claude -p` run with it had no Telegram tools and left `bot.pid` alone. The same run without it listed the tools and replaced the poller.
+- `--channels plugin:<name>@<marketplace>` is a hidden flag. It takes several values, so a prompt after it is read as another channel and fails with "--channels entries must be tagged". Put it before another flag, or end it with `--`.
+- Without `--channels`, the `reply`, `react` and `edit_message` tools still work, so pings go out. Messages from Telegram only reach a session started with `--channels`, as `<channel source="telegram" chat_id="..." message_id="..." user="..." ts="...">`.
+- Plugin channels must be on Claude Code's approved allowlist, and a Team or Enterprise organisation can turn channels off. A `claude -p` run with `--channels` logged nothing about channels, so check messages from Telegram in an interactive session.
+- `reply` needs a `chat_id`. For a direct message it's the user's numeric id, which pairing adds to `allowFrom` in `~/.claude/channels/telegram/access.json`. The token lives in `~/.claude/channels/telegram/.env` as `TELEGRAM_BOT_TOKEN`, and `TELEGRAM_STATE_DIR` moves that whole folder.
