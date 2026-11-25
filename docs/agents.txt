@@ -4,7 +4,7 @@ You're helping someone use Foreman. This file tells you how it works, how to set
 
 ## What it is
 
-Foreman is a Claude Code plugin. One Claude session, the orchestrator, runs a small crew of worker Claude sessions on one git repo. The orchestrator never writes code. It plans, writes a brief for each task and hands it to a worker. Each worker builds one task in its own git worktree, on a branch named `foreman/<task>`, in its own tab. A reviewer checks each finished task against the user's intent. Approved work becomes a PR, and the user merges every PR themselves.
+Foreman is a Claude Code plugin. One Claude session, the orchestrator, runs a small crew of worker Claude sessions on one git repo. The orchestrator never writes code. It plans, writes a brief for each task and hands it to a worker. Each worker builds one task in its own git worktree, on a branch named `foreman/<task>`, in its own tab. A reviewer checks each finished task against the user's intent. Approved work becomes a PR, and the user merges every PR themselves, unless they switch on automerge.
 
 Tasks are named T1, T2 and so on. Workers are numbered W1, W2 and so on. Decisions are named D-1, D-2 and so on, and questions Q-1, Q-2 and so on.
 
@@ -36,7 +36,7 @@ foreman doctor
 4. Workers start, up to `maxWorkers` at once. A task waits for the tasks it depends on, and for any running task that owns the same files.
 5. When a worker finishes, the reviewer checks it and sends feedback until it's right. Then Foreman pushes the branch and opens the PR.
 6. A task that depends on one other task starts on top of that task's branch once its PR is approved and open, unless `stackTasks` is `false`. Its PR says which PR to merge first.
-7. When the user merges a PR, Foreman removes that task's worktree and tab, asks the other workers to rebase and starts the tasks that were waiting on it.
+7. When a PR merges, Foreman removes that task's worktree and tab, asks the other workers to rebase and starts the tasks that were waiting on it.
 8. At the end, Foreman writes `.foreman/summary.md`: the PRs in review order, how to test each, the assumptions to check and the calls Foreman made on its own.
 
 The user talks to the orchestrator in its tab for anything about the plan or a task. Changing settings, checking on the run and fixing setup are things you can help with from outside.
@@ -97,6 +97,7 @@ Run `foreman help` for the full list. The ones people use:
 - `foreman restart <task>`: close a worker and reopen its session. Takes `--model <name>`.
 - `foreman summary`: write and show the run summary.
 - `foreman timeline [<task>]`: what happened to each task and when, and which tasks waited on a quiet worker.
+- `foreman automerge on`: let Foreman merge each task's PR once the reviewer approves it and every check passes, until the current plan finishes. The user can also tell the orchestrator "feel free to merge". It only merges task PRs from `foreman/<task>` branches, so release PRs, the decisions PR and the user's own PRs are never touched. A failing check never merges, and Foreman sends the worker to fix it. A PR built on another task's branch waits until that task merges. Merges use squash when the repo allows it, then a merge commit, then rebase. `foreman automerge off` hands merging back, and `foreman automerge` prints whether it's on. `foreman status` shows "Automerge on" while it is.
 - `foreman together`: merge the open PRs into a throwaway copy of the base branch and run the tests on the result.
 - `foreman notes`, `foreman note "<fact>"`, `foreman note --remove <n>`: list, add or remove known problems every worker should know about, such as a test that deadlocks.
 - `foreman baseline`: run the tests on the base branch and note what hangs or fails there.

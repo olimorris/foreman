@@ -33,6 +33,7 @@ import { sync } from "./sync.ts";
 import { forTerminal, openPrs, page, writeSummary } from "./summary.ts";
 import { together } from "./together.ts";
 import { timelineText } from "./timeline.ts";
+import { automerge } from "./automerge.ts";
 import { budgetLeft, budgetOf, orchestratorCost, recordSession, sessionsFile, taskCost, usd } from "./cost.ts";
 import { restartWorker, resume, stopWorker } from "./stop.ts";
 import { activeLimit, limitLine } from "./limits.ts";
@@ -313,6 +314,9 @@ async function main(argv: string[]): Promise<number> {
     }
     case "workers":
       for (const line of workers(findRepo(), positional)) console.log(line);
+      return 0;
+    case "automerge":
+      console.log(automerge(findRepo(), positional));
       return 0;
     case "pause": {
       const repo = findRepo();

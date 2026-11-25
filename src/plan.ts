@@ -9,7 +9,7 @@ import { loadTasks, writeJson, type Task } from "./state.ts";
 import { usageError } from "./help.ts";
 
 export type PlanTask = { id: string; title: string; owns: string[]; deps: string[]; contract: boolean; model?: string; brief: string };
-export type Plan = { title: string; deadline?: string; approvedAt?: string; calls?: string[]; cut?: string[]; maxWorkers?: number; tasks: PlanTask[] };
+export type Plan = { title: string; deadline?: string; approvedAt?: string; calls?: string[]; cut?: string[]; maxWorkers?: number; automerge?: boolean; tasks: PlanTask[] };
 
 const list = (v: string) => v.split(",").map((s) => s.trim().replace(/^`|`$/g, "")).filter((s) => s && !/^(none|-)$/i.test(s));
 
@@ -177,7 +177,7 @@ export function workers(repo: Repo, args: string[]): string[] {
   ];
 }
 
-const planPath = (repo: Repo) => join(repo.foreman, "plan.json");
+export const planPath = (repo: Repo) => join(repo.foreman, "plan.json");
 
 export function loadPlan(repo: Repo): Plan | undefined {
   return existsSync(planPath(repo)) ? JSON.parse(readFileSync(planPath(repo), "utf8")) : undefined;
