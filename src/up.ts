@@ -34,8 +34,8 @@ export function orchestratorPlugins(repo: Repo): string[] {
   return [...pluginArgs(), ...skillsPluginArgs(repo)];
 }
 
-// watch, baseline and together stay CLI commands until they become MCP tasks, and pane is the user's to ask for.
-const STILL_ON_THE_CLI = ["watch", "baseline", "together", "pane"];
+// pane is a command for people, which the orchestrator runs only when the user asks for the status pane back.
+const STILL_ON_THE_CLI = ["pane"];
 
 export function orchestratorAllowedTools(tools: Tool[] = TOOLS): string[] {
   return [

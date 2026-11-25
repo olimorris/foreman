@@ -39,7 +39,7 @@ During intake, record the user's draft decisions with `propose` (they show as pr
 
 ## PR comments that state a rule
 
-When `pr-comments` wakes you, read the new comments. A comment that states a rule beyond this one PR ("we never block the main thread on disk I/O", "exports always keep the original audio") becomes a proposal. Propose it with a `body` quoting the comment and linking the PR, then ask the user to confirm it like any other. Comments about this PR only are for the worker, so pass them on with `send`.
+When `pr-comments` wakes you, read the new comments. A comment that states a rule beyond this one PR ("we never block the main thread on disk I/O", "exports always keep the original audio") becomes a proposal. Propose it with a `title` stating the rule and a `body` quoting the comment and linking the PR, then ask the user to confirm it like any other. Comments about this PR only are for the worker, so pass them on with `send`.
 
 ## Record accepted decisions in the repo
 
