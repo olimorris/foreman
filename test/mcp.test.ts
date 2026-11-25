@@ -1,5 +1,5 @@
-import { expect, test } from "bun:test";
-import { mcpArgs, respond, serve, type Server } from "../src/mcp.ts";
+import { describe, expect, test } from "bun:test";
+import { mcpArgs, POLL_MS, respond, serve, TASKS, type Server, type TaskTool } from "../src/mcp.ts";
 import type { Tool } from "../src/tools/tool.ts";
 import { tempRepo } from "./helpers.ts";
 
@@ -96,4 +96,54 @@ test("mcpArgs starts foreman mcp with the session's role and task", () => {
   expect(flag).toBe("--mcp-config");
   expect(JSON.parse(json!)).toEqual({ mcpServers: { foreman: { type: "stdio", command: "/plugin/bin/foreman", args: ["mcp"], env: { FOREMAN_ROLE: "worker", FOREMAN_TASK: "T3" } } } });
   expect(JSON.parse(mcpArgs("orchestrator", undefined, "/plugin")[1]!).mcpServers.foreman.env).toEqual({ FOREMAN_ROLE: "orchestrator" });
+});
+
+describe("task tools", () => {
+  const offer = { "io.modelcontextprotocol/clientCapabilities": { extensions: { [TASKS]: {} } } };
+  let finish: (text: string) => void = () => {};
+  let fail: (err: Error) => void = () => {};
+  const slow: TaskTool = {
+    name: "slow",
+    description: "Takes its time",
+    inputSchema: { type: "object", properties: {} },
+    roles: ["orchestrator"],
+    task: true,
+    handler: (_a, _s, context) => {
+      context?.status("halfway");
+      return new Promise((resolve, reject) => ((finish = resolve), (fail = reject)));
+    },
+  };
+  const taskServer = (): Server => ({ name: "foreman", version: "0", tools: [slow], session: { role: "orchestrator", repo: tempRepo() } });
+
+  test("a client that offers tasks gets a task, sees its progress, then its result", async () => {
+    const s = taskServer();
+    const started = (await ask(s, "tools/call", { name: "slow", _meta: offer })).result;
+    expect(started).toMatchObject({ resultType: "task", status: "working", ttlMs: null, pollIntervalMs: POLL_MS });
+    expect(started.taskId).toMatch(/^slow-[\w-]+$/);
+    expect((await ask(s, "tasks/get", { taskId: started.taskId })).result).toMatchObject({ resultType: "complete", taskId: started.taskId, status: "working", statusMessage: "halfway" });
+    finish("all done");
+    await Bun.sleep(0);
+    const done = (await ask(s, "tasks/get", { taskId: started.taskId })).result;
+    expect(done).toMatchObject({ status: "completed", result: { content: [{ type: "text", text: "all done" }] } });
+    expect(done.statusMessage).toBeUndefined();
+  });
+
+  test("a task whose tool throws completes with the error in its result", async () => {
+    const s = taskServer();
+    const { taskId } = (await ask(s, "tools/call", { name: "slow", _meta: offer })).result;
+    fail(new Error("no repo"));
+    await Bun.sleep(0);
+    expect((await ask(s, "tasks/get", { taskId })).result).toMatchObject({ status: "completed", result: { content: [{ type: "text", text: "no repo" }], isError: true } });
+  });
+
+  test("a client that doesn't offer tasks waits for the plain result", async () => {
+    const reply = ask(taskServer(), "tools/call", { name: "slow" });
+    await Bun.sleep(0);
+    finish("plain");
+    expect((await reply).result).toEqual({ content: [{ type: "text", text: "plain" }] });
+  });
+
+  test("an unknown task is an invalid-params error", async () => {
+    expect((await ask(taskServer(), "tasks/get", { taskId: "nope" })).error).toEqual({ code: -32602, message: "unknown task: nope" });
+  });
 });
