@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, realpathSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { run } from "./exec.ts";
@@ -42,7 +42,15 @@ export function defaultBase(repo: Repo): string {
   return local ?? (git("symbolic-ref", "--short", "HEAD").stdout.trim() || "main");
 }
 
-export const pluginRoot = resolve(import.meta.dir, "..");
+// brew cleanup deletes the versioned Cellar folder after an upgrade, which would break the hooks of every running session.
+export function stableRoot(root: string, exists: (path: string) => boolean = existsSync): string {
+  const cellar = root.match(/^(.+)\/Cellar\/([^/]+)\/[^/]+\/libexec$/);
+  if (!cellar) return root;
+  const opt = join(cellar[1]!, "opt", cellar[2]!, "libexec");
+  return exists(opt) ? opt : root;
+}
+
+export const pluginRoot = stableRoot(resolve(import.meta.dir, ".."));
 
 export function pluginArgs(): string[] {
   return pluginRoot.includes("/.claude/plugins/") ? [] : ["--plugin-dir", pluginRoot];
