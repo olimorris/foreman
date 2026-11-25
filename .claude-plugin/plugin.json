@@ -2,6 +2,7 @@
   "name": "foreman",
   "version": "0.1.0",
   "description": "One orchestrator session running a small crew of Claude Code workers in parallel git worktrees, one repo at a time.",
+  "license": "MIT",
   "userConfig": {
     "maxWorkers": {
       "type": "number",
