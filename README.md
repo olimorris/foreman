@@ -115,6 +115,8 @@ foreman budget
 
 By default, each task can spend $5 and the plan $40, which you can change in [Settings](#gear-settings). When a task goes over, Foreman stops its worker and asks whether to raise the limit.
 
+On Pro, Max or another Claude subscription, these dollar amounts measure how much work was done at list prices, not what you pay. Your subscription's usage limit is what actually stops work. When a worker hits it, Foreman pauses every worker, starts nothing new and holds reviews until the limit resets, then picks each worker up where it left off. `foreman status` shows the wait and when the limit resets.
+
 ### The PRs to review
 
 ```sh

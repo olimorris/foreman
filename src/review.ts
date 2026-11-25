@@ -3,7 +3,8 @@ import { join } from "node:path";
 import { loadConfig } from "./config.ts";
 import { indexPath, writeIndex } from "./decisions.ts";
 import { appendEvent, lastDone } from "./events.ts";
-import { must, run } from "./exec.ts";
+import { must, run, type Result, type RunOptions } from "./exec.ts";
+import { limitLine, loadLimit, reviewerLimit, saveLimit, waitForReset, type Sleep } from "./limits.ts";
 import { pluginRoot, taskDir, worktreeDir, type Repo } from "./paths.ts";
 import type { Terminal } from "./terminal.ts";
 import { sendToTask } from "./send.ts";
@@ -53,17 +54,22 @@ export function startReview(repo: Repo, id: string, term: Terminal, session = te
   term.open(target, `review ${taskLabel(task)}`, task.worktree, [join(pluginRoot, "bin", "foreman"), "review-run", id], false);
 }
 
-export async function runReview(repo: Repo, id: string): Promise<string> {
-  const task = findTask(repo, id);
-  const round = (task.reviews ?? 0) + 1;
+export type ReviewDeps = { reviewer?: (cmd: string[], opts: RunOptions) => Result; sleep?: Sleep; now?: () => number; say?: (line: string) => void };
+
+export async function runReview(repo: Repo, id: string, deps: ReviewDeps = {}): Promise<string> {
+  const { reviewer = run, now = () => Date.now(), say = console.log } = deps;
+  const hold = { sleep: deps.sleep, now, onWait: (l: Parameters<typeof limitLine>[0]) => say(`${limitLine(l, now())}, so the review of ${id} starts then`) };
   let model: string | undefined;
   try {
     model = reviewerModel(repo);
   } catch (err) {
-    const line = `failed before round ${round}: ${(err as Error).message}`;
+    const line = `failed before round ${(findTask(repo, id).reviews ?? 0) + 1}: ${(err as Error).message}`;
     appendEvent(repo, id, "reviewed", line);
     return line;
   }
+  await waitForReset(repo, hold);
+  const task = findTask(repo, id);
+  const round = (task.reviews ?? 0) + 1;
   updateTask(repo, id, { reviews: round });
   const dir = roundDir(repo, id, round);
   mkdirSync(dir, { recursive: true });
@@ -80,7 +86,15 @@ export async function runReview(repo: Repo, id: string): Promise<string> {
     const prompt = reviewPrompt({ task, against: against(task), round, diff, stat, dirty, shots, index: writeIndex(repo, task.base), previous: lastVerdict(repo, id, round), done: lastDone(repo, id), brief: join(taskDir(repo, id), "brief.md") });
     writeFileSync(join(dir, "prompt.md"), prompt);
 
-    const r = run(reviewerCommand(repo, id, left.usd, model), { cwd: task.worktree, stdin: prompt, env: { FOREMAN_ROLE: "reviewer" } });
+    let r = reviewer(reviewerCommand(repo, id, left.usd, model), { cwd: task.worktree, stdin: prompt, env: { FOREMAN_ROLE: "reviewer" } });
+    // claude -p gives up at the usage limit instead of waiting, so the round waits for the reset and runs again.
+    for (let hit = reviewerLimit(r.stdout, r.stderr, now()); hit; hit = reviewerLimit(r.stdout, r.stderr, now())) {
+      if (!loadLimit(repo)) saveLimit(repo, { since: hit.at, resetsAt: hit.resetsAt, ...(hit.guessed ? { guessed: true } : {}), by: `${id}'s reviewer`, paused: [] });
+      await waitForReset(repo, { ...hold, until: hit });
+      const room = budgetLeft(repo, loadTasks(repo), id);
+      if (room.reason) throw new Error(room.reason);
+      r = reviewer(reviewerCommand(repo, id, room.usd, model), { cwd: task.worktree, stdin: prompt, env: { FOREMAN_ROLE: "reviewer" } });
+    }
     writeFileSync(join(dir, "reviewer.json"), r.stdout || r.stderr);
     const verdict = parseVerdict(r.stdout);
     if (r.code !== 0 || !verdict) throw new Error(`the reviewer returned no verdict (exit ${r.code}); see ${join(dir, "reviewer.json")}`);

@@ -69,3 +69,15 @@ test("a running task whose worker tab has closed moves to Needs you", () => {
   expect(t2).toBeLessThan(lines.indexOf("WORKING"));
   expect(lines[t2]).toContain("worker closed");
 });
+
+test("while the account waits for its usage limit, the pane says when work resumes and which workers are paused", () => {
+  const waiting: PaneInput = {
+    ...sample,
+    usageLimit: { since: ago(10), resetsAt: Date.parse("2026-11-25T10:15:00Z"), by: "T2", paused: ["T2"], announced: true },
+    tasks: [row(task("T2", "limited", { worker: "W1" }), { title: "filter notes by tag" }), row(task("T6", "done", { worker: "W2" }), { title: "tag colours" })],
+  };
+  const lines = renderPane(waiting, 60);
+  expect(lines.some((l) => /^Usage limit reached · work resumes at \d\d:\d\d$/.test(l))).toBe(true);
+  expect(lines[lines.findIndex((l) => l.includes("filter notes by tag")) + 1]).toContain("paused until the usage limit resets");
+  expect(lines[lines.findIndex((l) => l.includes("tag colours")) + 1]).toContain("review waits for the usage limit");
+});

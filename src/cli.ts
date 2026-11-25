@@ -34,6 +34,7 @@ import { together } from "./together.ts";
 import { timelineText } from "./timeline.ts";
 import { budgetLeft, budgetOf, orchestratorCost, recordSession, sessionsFile, taskCost, usd } from "./cost.ts";
 import { restartWorker, resume, stopWorker } from "./stop.ts";
+import { activeLimit, limitLine } from "./limits.ts";
 import { watch, watcherArmed } from "./watch.ts";
 import { gatherPane, livePane, openPane, renderPane, spendByTask } from "./pane.ts";
 import { addNote, listNotes, loadNotes, newNoteMessage, removedNoteMessage, removeNote, shareNote } from "./notes.ts";
@@ -106,6 +107,8 @@ async function main(argv: string[]): Promise<number> {
       const repo = findRepo();
       const [id] = positional;
       if (!id || !opts.brief?.[0]) throw usageError("spawn");
+      const wait = activeLimit(repo);
+      if (wait) throw new Error(`no new tasks start: ${limitLine(wait)}`);
       const session = requireSession(term, "spawn");
       const left = budgetLeft(repo, loadTasks(repo));
       if (left.reason) throw new Error(`no new tasks start: ${left.reason}`);
@@ -235,6 +238,8 @@ async function main(argv: string[]): Promise<number> {
       const repo = findRepo();
       const p = loadPlan(repo);
       if (!p?.approvedAt) throw new Error("no approved plan. Write one with the intake skill, then run foreman plan approve once the user agrees");
+      const wait = activeLimit(repo);
+      if (wait) throw new Error(`no new tasks start: ${limitLine(wait)}`);
       
       const session = requireSession(term, "next");
       const room = budgetLeft(repo, loadTasks(repo));

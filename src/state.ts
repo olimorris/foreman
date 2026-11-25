@@ -5,7 +5,7 @@ import type { Tab } from "./terminal.ts";
 import { withLock } from "./store.ts";
 import { baseRef } from "./snapshot.ts";
 
-export type TaskStatus = "running" | "over-budget" | "done" | "blocked" | "needs-decision" | "exited" | "pr-open" | "merged" | "torn-down";
+export type TaskStatus = "running" | "over-budget" | "limited" | "done" | "blocked" | "needs-decision" | "exited" | "pr-open" | "merged" | "torn-down";
 
 export type Task = {
   id: string;
