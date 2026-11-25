@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { must, run } from "../src/exec.ts";
@@ -17,7 +17,8 @@ import {
 const awkward = ["it's", "a b", "$HOME", "back\\slash", "", "--", "line\nbreak", "*"];
 
 // Ghostty hands a tab's command to `bash -c "exec -l <command>"`, so the test runs it the same way.
-const asGhosttyRuns = (command: string) => must(["/bin/bash", "--noprofile", "--norc", "-c", `exec -l ${command}`]);
+const asGhosttyRuns = (command: string, env?: Record<string, string>) =>
+  must(["/bin/bash", "--noprofile", "--norc", "-c", `exec -l ${command}`], { env });
 
 test("FOREMAN_TERMINAL=ghostty selects this folder", () => {
   const term = terminal("ghostty");
@@ -35,10 +36,14 @@ test("plain words stay unquoted and everything else survives the shell", () => {
 
 test("a tab that shouldn't stay open closes itself through its own tty once the command exits", () => {
   const dir = mkdtempSync(join(tmpdir(), "foreman-ghostty-"));
-  const fakeScript = join(dir, "fake.applescript");
-  writeFileSync(fakeScript, `on run argv\n  return (item 1 of argv) & " " & (item 2 of argv)\nend run\n`);
-  const out = asGhosttyRuns(surfaceCommand(["/usr/bin/printf", "%s\\n", "ran it's"], false, fakeScript));
-  expect(out).toBe("ran it's\nclose-tty not a tty\n");
+  // A stand-in osascript, so the test also holds on Linux, where CI runs.
+  const fakeOsascript = join(dir, "osascript");
+  writeFileSync(fakeOsascript, `#!/bin/sh\necho "$*"\n`);
+  chmodSync(fakeOsascript, 0o755);
+  const out = asGhosttyRuns(surfaceCommand(["/usr/bin/printf", "%s\\n", "ran it's"], false, "/foreman/ghostty.applescript"), {
+    PATH: `${dir}:${process.env.PATH}`,
+  });
+  expect(out).toBe("ran it's\n/foreman/ghostty.applescript close-tty not a tty\n");
 });
 
 test("the tty is found by walking up past processes Claude Code detached from it", () => {
