@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { budgetOf, orchestratorCost, taskCost, usd } from "./cost.ts";
+import { budgetOf, planSpending, usd } from "./cost.ts";
 import { lastDone, type TaskEvent } from "./events.ts";
 import { loadDecisions, type Decision } from "./ledger.ts";
 import type { Repo } from "./paths.ts";
@@ -112,7 +112,7 @@ export function gather(repo: Repo, plan: Plan | undefined): SummaryInput {
     .map((t) => ({ id: t.id, pr: t.pr!, branch: t.branch, sha: run(["git", "-C", repo.root, "rev-parse", "--verify", "-q", t.branch]).stdout.trim() }));
   const decisions = loadDecisions(repo);
   const questions = loadQuestions(repo);
-  const spent = tasks.reduce((sum, t) => sum + taskCost(repo, t).total, 0) + orchestratorCost(repo).usd;
+  const spent = planSpending(repo, tasks).usd;
   return {
     title: plan?.title ?? "Foreman tasks", ready, merged, unfinished, calls: plan?.calls ?? [], cut: plan?.cut ?? [],
     // A question about a decision already shows as that open decision.

@@ -1,4 +1,4 @@
-import { budgetOf, orchestratorCost, taskCost, usd } from "./cost.ts";
+import { budgetOf, planSpending, taskCost, usd } from "./cost.ts";
 import { byActivity, clip, statusLabel, taskTitle } from "./overview.ts";
 import type { Repo } from "./paths.ts";
 import { loadPlan, maxWorkers, readyTasks, stackable } from "./plan.ts";
@@ -62,7 +62,7 @@ export function statusView(repo: Repo, style: Style, armed: boolean, now = Date.
   if (!tasks.some((t) => t.worker)) for (const s of sections) for (const r of s.rows) r.cells.splice(1, 1);
 
   const budget = budgetOf(repo);
-  const spent = tasks.reduce((sum, t) => sum + taskCost(repo, t).total, 0) + orchestratorCost(repo).usd;
+  const spent = planSpending(repo, tasks).usd;
   const limit = activeLimit(repo, now);
   const head = [
     ...(plan ? [style.bold(plan.title) + (plan.approvedAt ? "" : style.yellow("  (not approved yet)"))] : []),
