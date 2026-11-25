@@ -1,0 +1,3 @@
+#!/bin/sh
+# A pull that merges or fast-forwards, including one with pull.rebase=true that has nothing local to rebase.
+exec "$(dirname "$0")/update-foreman"

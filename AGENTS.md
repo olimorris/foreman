@@ -5,7 +5,8 @@ Foreman is a Claude Code plugin: one orchestrator session runs worker sessions i
 ## Where to work
 
 - Make changes in a git worktree outside this folder. Live Foreman runs load the plugin from this checkout with `--plugin-dir`, so an edit here changes running orchestrators and workers at once, and Claude Code refuses auto-mode edits inside a loaded plugin folder.
-- Try Foreman against scratch repos outside this folder too, with `bun src/cli.ts` from your worktree. `foreman` on PATH runs this checkout.
+- Try Foreman against scratch repos outside this folder too, with `bun src/cli.ts` from your worktree. `foreman` on PATH runs the clone at `~/.local/share/foreman`, not this checkout.
+- Run `git config core.hooksPath scripts/git-hooks` once in this checkout, and every `git pull` here fast-forwards `~/.local/share/foreman` to `origin/main` too. It prints one line when it can't.
 - Git worktrees share one stash list, so stash in one worktree at a time.
 
 ## Checks

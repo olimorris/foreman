@@ -1,0 +1,29 @@
+#!/bin/sh
+# Fast-forwards the clone at ~/.local/share/foreman to origin/main after a git pull here.
+
+case "$GIT_REFLOG_ACTION" in
+  pull*) ;;
+  *) exit 0 ;;
+esac
+
+clone="$HOME/.local/share/foreman"
+[ -d "$clone/.git" ] || exit 0
+
+# So git -C acts on the clone, not this repo, and the clone's own hooks don't take its merge for a pull.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_REFLOG_ACTION
+
+branch="$(git -C "$clone" symbolic-ref --quiet --short HEAD)"
+if [ "$branch" != main ]; then
+  echo "foreman: $clone is on ${branch:-a detached HEAD}, not main, so it wasn't updated"
+  exit 0
+fi
+
+if ! git -C "$clone" fetch --quiet origin main 2>/dev/null; then
+  echo "foreman: couldn't fetch origin into $clone, so it wasn't updated"
+  exit 0
+fi
+
+if ! git -C "$clone" merge --ff-only --quiet FETCH_HEAD >/dev/null 2>&1; then
+  echo "foreman: couldn't fast-forward $clone to origin/main, so update it by hand"
+fi
+exit 0
