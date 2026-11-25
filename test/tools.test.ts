@@ -24,8 +24,12 @@ const list = async (role: Role) => {
   return r.result.tools.map((t) => t.name);
 };
 
-test("the orchestrator gets the commands it shares with the CLI, and a worker gets its own four", async () => {
-  expect(await list("orchestrator")).toEqual(["status", "timeline", "summary", "cost", "budget"]);
+test("the orchestrator gets the commands it shares with the CLI and its own, and a worker gets its own four", async () => {
+  expect(await list("orchestrator")).toEqual([
+    "status", "timeline", "summary", "cost", "budget",
+    "plan", "next", "spawn", "send", "review", "feedback", "deliver", "sync", "teardown", "pause", "resume", "restart", "tidy", "unblock",
+    "workers", "automerge", "set_budget", "decisions", "accept", "reject", "propose", "adr", "ask", "answer", "note", "notes", "shots",
+  ]);
   expect(await list("worker")).toEqual(["report", "propose", "note", "tidy"]);
 });
 

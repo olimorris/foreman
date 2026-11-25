@@ -1,15 +1,15 @@
 ---
 name: dispatch
-description: Write a Foreman brief and spawn a worker for it. Use before running foreman spawn.
+description: Write a Foreman brief and spawn a worker for it. Use before calling Foreman's spawn tool.
 ---
 
 # Dispatch a task
 
-Work from an approved plan starts with `foreman next`, which writes each brief from the plan. Use this skill for a single task outside the plan, and for the rules every brief follows.
+Work from an approved plan starts with the `next` tool, which writes each brief from the plan. Use this skill for a single task outside the plan, and for the rules every brief follows.
 
 ## 1. Write the brief
 
-Write it to `.foreman/tasks/<id>/brief.in.md`. `foreman spawn` refuses a brief without both sections below.
+You pass the brief's text to `spawn`, which saves it as `.foreman/tasks/<id>/brief.in.md` and refuses a brief without both sections below.
 
 ```markdown
 ## Intent
@@ -42,11 +42,14 @@ Add `## Screens` only for UI changes. The reviewer compares before and after scr
 
 ## 3. Spawn
 
-```sh
-foreman spawn <id> --title "feat: add an export button to settings" --brief .foreman/tasks/<id>/brief.in.md --owns 'src/settings/**' --owns docs/settings.md
-```
+Call `spawn` with:
 
-Add `--model sonnet` for a small task whose spec leaves little to decide, such as a docs-only or mechanical change. Leave it out for anything that needs judgment or touches UI, so the worker runs on the default model. When `workerModel` in `.foreman/config.json` is a smaller model, such as sonnet or haiku, pass `--model opus` for that work instead. `foreman spawn` prints the model the worker started on.
+- `task`: the id, such as `T1`.
+- `title`: a conventional commit, such as `feat: add an export button to settings`.
+- `brief`: the brief's full text, as written in step 1.
+- `owns`: the owned paths, separated by spaces, such as `src/settings/** docs/settings.md`.
+
+Add `model` set to `sonnet` for a small task whose spec leaves little to decide, such as a docs-only or mechanical change. Leave it out for anything that needs judgment or touches UI, so the worker runs on the default model. When `workerModel` in `.foreman/config.json` is a smaller model, such as sonnet or haiku, pass `opus` for that work instead. `spawn` says the model the worker started on.
 
 Use short ids such as `T1` or `settings-pane`. The title is a conventional commit that becomes the PR title, and its first few words label the tab, such as `T1: add an export button`. Tell the user the id and that they can open the tab to watch.
 
