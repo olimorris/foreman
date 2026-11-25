@@ -1,2 +1,9 @@
 node_modules/
 .foreman/
+
+# Only the images the README shows are kept. Design sources and drafts stay local.
+assets/*
+!assets/foreman-banner-dark.png
+!assets/foreman-banner-light.png
+!assets/how-it-works-dark.svg
+!assets/how-it-works-light.svg
