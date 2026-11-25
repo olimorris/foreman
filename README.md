@@ -81,7 +81,15 @@ From there:
 3. When a worker proposes a decision that affects others, Foreman asks you before accepting it.
 4. Each finished task gets a review. Approved work arrives as a PR with its review packet. You merge it.
 5. When a PR merges, Foreman tears down that task, asks the remaining workers to rebase and starts the tasks that were waiting on it.
-6. When the run is done, Foreman writes `.foreman/summary.md`: the PRs in the order to review them, how to test each one, and the assumptions the workers made that you should check. Run `foreman summary` to get one mid-run.
+6. When the run is done, Foreman writes `.foreman/summary.md`: the PRs in the order to review them, how to test each one, and the assumptions the workers made that you should check.
+
+While it runs, check in from any terminal in the repo:
+
+```sh
+foreman status    # what each task is doing and what's waiting to start
+foreman budget    # what each task has spent against its limit
+foreman summary   # the PRs to review so far, in order. Press q to leave a long one
+```
 
 All state lives in `.foreman/` in your repo, which Foreman keeps out of git. If the orchestrator restarts, it picks up from there.
 

@@ -90,6 +90,38 @@ export function gather(repo: Repo, plan: Plan | undefined): SummaryInput {
   };
 }
 
+const ESC = (code: string) => (s: string) => `\x1b[${code}m${s}\x1b[0m`;
+const BOLD = ESC("1");
+const HEADING = ESC("1;33");
+const CODE = ESC("36");
+
+// The summary is written for GitHub-style Markdown, so the terminal copy turns its marks into colour instead of showing asterisks and hashes.
+export function forTerminal(md: string): string {
+  return md.split("\n").map((line) => {
+    const heading = line.match(/^#{1,3} (.+)$/);
+    if (heading) return HEADING(heading[1]!);
+    return line.replace(/\*\*(.+?)\*\*/g, (_m, s) => BOLD(s)).replace(/`([^`]+)`/g, (_m, s) => CODE(s));
+  }).join("\n");
+}
+
+// -F prints a short summary without opening the pager, -X leaves it on screen after q so its PR numbers can be copied, and -R lets the colour through.
+export async function page(text: string): Promise<void> {
+  // Ctrl-C reaches the pager too, and if Foreman exits first, less keeps the terminal with nothing behind it.
+  const ignore = () => {};
+  process.on("SIGINT", ignore);
+  try {
+    const proc = Bun.spawn(["sh", "-c", process.env.PAGER || "less"], {
+      stdin: "pipe", stdout: "inherit", stderr: "inherit",
+      env: { ...process.env, LESS: `${process.env.LESS ?? ""} -FRX`.trim() },
+    });
+    proc.stdin.write(text + "\n");
+    await proc.stdin.end();
+    if ((await proc.exited) !== 0) console.log(text);
+  } finally {
+    process.off("SIGINT", ignore);
+  }
+}
+
 export function writeSummary(repo: Repo): string {
   const path = join(repo.foreman, "summary.md");
   writeFileSync(path, renderSummary(gather(repo, loadPlan(repo))));

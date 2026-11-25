@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { renderSummary, reviewOrder, type Ready } from "../src/summary.ts";
+import { forTerminal, renderSummary, reviewOrder, type Ready } from "../src/summary.ts";
 import { parsePlan } from "../src/plan.ts";
 import type { Task } from "../src/state.ts";
 import type { Verdict } from "../src/review.ts";
@@ -37,4 +37,10 @@ test("the plan's head carries the calls and cuts", () => {
   expect(p.calls).toEqual(["Search runs on Enter.", "Footer counts all notes."]);
   expect(p.cut).toEqual(["JSON download"]);
   expect(p.deadline).toBe("Friday");
+});
+
+test("the terminal copy shows headings, bold and code as colour instead of Markdown marks", () => {
+  expect(forTerminal("# Run summary: Notes\n1. **#2 add tags** (T1)\n- Run `foreman budget`")).toBe(
+    "\x1b[1;33mRun summary: Notes\x1b[0m\n1. \x1b[1m#2 add tags\x1b[0m (T1)\n- Run \x1b[36mforeman budget\x1b[0m",
+  );
 });
