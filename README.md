@@ -127,6 +127,14 @@ By default, each task can spend $5 and the plan $40, which you can change in [Se
 
 On Pro, Max or another Claude subscription, these dollar amounts measure how much work was done at list prices, not what you pay. Your subscription's usage limit is what actually stops work. When a worker hits it, Foreman pauses every worker, starts nothing new and holds reviews until the limit resets, then picks each worker up where it left off. `foreman status` shows the wait and when the limit resets.
 
+### When a permission blocks a session
+
+Workers run in auto mode, so Claude Code sometimes refuses a call, such as `gh pr merge`, or waits at a permission prompt in a worker's tab. The same can happen to the reviewer and the orchestrator. The orchestrator tells you in one line, like:
+
+> W2 on T5 was blocked from running `gh pr merge 41` by auto mode. To allow it, add `Bash(gh pr merge *)` in /permissions in that worker's tab, or tell me to skip it.
+
+Meanwhile the worker carries on with anything that doesn't need that step, and `foreman status` and the status pane show the task under "Needs you". Once you allow it or say skip it, the orchestrator tells the worker and the task moves back. A worker waiting at a prompt is never treated as hung, and answering the prompt in its tab clears it.
+
 ### More or fewer workers
 
 ```sh
@@ -192,7 +200,7 @@ foreman pane
 
 Open a status pane beside the orchestrator, so you can see the run at a glance:
 
-- **Needs you**: questions waiting on you, and tasks that are blocked or stopped
+- **Needs you**: questions waiting on you, tasks that are blocked or stopped, and sessions a permission has blocked
 - **Working**: what each worker is doing right now, and for how long
 - **Ready to merge**: PRs waiting for you, with the reviewer's risk
 - **Waiting**: planned tasks and what they wait on

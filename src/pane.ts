@@ -15,6 +15,8 @@ import type { Tab, Terminal } from "./terminal.ts";
 import { pluginRoot } from "./paths.ts";
 import { writeJson } from "./state.ts";
 import { STALL_MINUTES, watcherArmed } from "./watch.ts";
+import { blockParts, openBlocks, type PermissionBlock } from "./permissions.ts";
+import { permissionLabel } from "./status.ts";
 
 export type Activity = { what: string; since: number; idle: boolean };
 
@@ -87,7 +89,7 @@ export type Recent = { at: number; text: string };
 export type PaneInput = {
   name: string; plan?: string; deadline?: string; approved: boolean; armed: boolean; now: number; stallMs: number;
   spent: number; limit?: number; maxWorkers: number; tasks: PaneTask[]; waiting: (Waiting & { title: string })[]; recent: Recent[];
-  decisions: OpenDecision[]; usageLimit?: UsageLimit;
+  decisions: OpenDecision[]; usageLimit?: UsageLimit; blocks?: PermissionBlock[];
 };
 
 type Tone = "bold" | "dim" | "red" | "yellow" | "green" | "cyan" | "heading";
@@ -126,7 +128,9 @@ export function renderPane(p: PaneInput, width: number, colour = false): string[
   const facts = fit(`${spend} · ${active.length} of ${p.maxWorkers} slots · ${watcher}`);
   out.push(facts.endsWith(watcher) ? c("dim", facts.slice(0, -watcher.length)) + c(p.armed ? "green" : "red", watcher) : c("dim", facts));
   if (p.usageLimit) out.push(c("yellow", fit(`Usage limit reached · work resumes at ${resetPhrase(p.usageLimit, p.now)}`)));
-  const needsYou = (t: PaneTask) => NEEDS_YOU.includes(t.task.status) || !!t.closed;
+  const blocksOf = (t: PaneTask) => (t.task.status === "pr-open" ? [] : (p.blocks ?? []).filter((b) => b.task === t.task.id));
+  const needsYou = (t: PaneTask) => NEEDS_YOU.includes(t.task.status) || !!t.closed || blocksOf(t).length > 0;
+  const own = (p.blocks ?? []).filter((b) => b.role === "orchestrator");
   const section = (title: string, rows: string[]) => rows.length && out.push("", c("heading", title.toUpperCase()), ...rows);
 
   // Runs started before workers were numbered have none to show, so the column only appears when it says something.
@@ -143,10 +147,16 @@ export function renderPane(p: PaneInput, width: number, colour = false): string[
   };
 
   section("Needs you", [
-    ...active.filter(needsYou).flatMap((t) => [
-      head(t, t.closed ? "worker closed" : statusLabel(t.task), "red"),
-      ...(t.note && !t.closed ? [detail(t.note, "red")] : []),
-    ]),
+    ...(own.length ? [twoSides(" The orchestrator", permissionLabel(own), "red"), ...own.flatMap((b) => blockParts(b).map((l) => detail(l, "red")))] : []),
+    ...active.filter(needsYou).flatMap((t) => {
+      const held = blocksOf(t);
+      const label = t.closed ? "worker closed" : held.length && t.task.status === "running" ? permissionLabel(held) : statusLabel(t.task);
+      return [
+        head(t, label, "red"),
+        ...(t.note && !t.closed ? [detail(t.note, "red")] : []),
+        ...held.flatMap((b) => blockParts(b).map((l) => detail(l, "red"))),
+      ];
+    }),
     ...p.decisions.map((d) => {
       const right = `decision from ${d.by}`;
       const l = fit(`${d.id.padEnd(5)}${d.title}`, width - right.length - 3);
@@ -234,6 +244,7 @@ export function gatherPane(repo: Repo, now = Date.now(), costs: Map<string, numb
     recent: recent.filter((r) => !Number.isNaN(r.at)).sort((a, b) => b.at - a.at).slice(0, RECENT),
     decisions: loadDecisions(repo).filter((d) => d.status === "proposed").map((d) => ({ id: d.id, title: d.title, by: d.by })),
     usageLimit: activeLimit(repo, now),
+    blocks: openBlocks(repo),
   };
 }
 

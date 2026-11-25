@@ -4,6 +4,7 @@ import type { Question } from "../src/questions.ts";
 import type { Task } from "../src/state.ts";
 import type { Proc } from "../src/procs.ts";
 import { scan, type Cursor, type Probes } from "../src/watch.ts";
+import type { PermissionBlock } from "../src/permissions.ts";
 
 process.env.TZ = "UTC";
 
@@ -150,6 +151,19 @@ describe("stalls", () => {
     });
   });
 
+  test("never nudges or restarts a worker waiting at a permission prompt, and counts its silence afresh once it's answered", () => {
+    const prompt: PermissionBlock = { role: "worker", task: "T1", id: "p1", at: "", kind: "prompt", tool: "Bash", target: "gh pr merge 41", rule: "Bash(gh pr merge *)" };
+    const waiting = (last: number): Probes => ({ ...quiet(last), blocks: () => [prompt] });
+    let cursor = scan([task("T1")], start, waiting(0), [], check(20 * min)).cursor;
+    for (const now of [40, 90, 200]) {
+      const r = scan([task("T1")], cursor, waiting(0), [], check(now * min));
+      expect(r).toMatchObject({ nudge: [], restart: [] });
+      expect(r.reasons.filter((l) => l.startsWith("stuck"))).toEqual([]);
+      cursor = r.cursor;
+    }
+    expect(scan([task("T1")], cursor, quiet(200 * min), [], check(210 * min)).nudge).toEqual([]);
+  });
+
   test("leaves workers alone that aren't running", () => {
     expect(scan([task("T1", { status: "done" })], start, quiet(0), [], check(60 * min)).reasons).toEqual([]);
     expect(scan([task("T1", { status: "blocked" })], start, quiet(0), [], check(60 * min)).reasons).toEqual([]);
@@ -259,5 +273,25 @@ describe("usage limit", () => {
     const r = scan(crew(), stale, limited([]), [], check("17:00"));
     expect(r).toMatchObject({ pause: [], resume: [], reasons: [] });
     expect(r.cursor.limit).toBeUndefined();
+  });
+});
+
+describe("permission blocks", () => {
+  const b = (id: string, extra: Partial<PermissionBlock> = {}): PermissionBlock =>
+    ({ role: "worker", task: "T5", worker: "W2", id, at: "", kind: "auto-mode", tool: "Bash", target: "gh pr merge 41", rule: "Bash(gh pr merge *)", ...extra });
+  const start = { ...empty, main: "aaa" };
+  const blocked = (blocks: PermissionBlock[]): Probes => ({ ...probes({}), blocks: () => blocks });
+
+  test("wakes the orchestrator once per block with the line to tell the user", () => {
+    const first = scan([task("T5")], start, blocked([b("x1")]));
+    expect(first.reasons).toEqual(["permission T5: W2 on T5 was blocked from running `gh pr merge 41` by auto mode. To allow it, add `Bash(gh pr merge *)` in /permissions in that worker's tab, or tell me to skip it."]);
+    expect(scan([task("T5")], first.cursor, blocked([b("x1")])).reasons).toEqual([]);
+    const second = scan([task("T5")], first.cursor, blocked([b("x1"), b("x2", { target: "gh pr merge 42" })]));
+    expect(second.reasons).toHaveLength(1);
+    expect(second.reasons[0]).toContain("`gh pr merge 42`");
+  });
+
+  test("never wakes the orchestrator for its own blocks", () => {
+    expect(scan([], start, blocked([b("o1", { role: "orchestrator", task: undefined, worker: undefined })])).reasons).toEqual([]);
   });
 });

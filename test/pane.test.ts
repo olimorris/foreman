@@ -81,3 +81,19 @@ test("while the account waits for its usage limit, the pane says when work resum
   expect(lines[lines.findIndex((l) => l.includes("filter notes by tag")) + 1]).toContain("paused until the usage limit resets");
   expect(lines[lines.findIndex((l) => l.includes("tag colours")) + 1]).toContain("review waits for the usage limit");
 });
+
+test("open permission blocks move their task to Needs you, each with what was blocked", () => {
+  const blocks: PaneInput["blocks"] = [
+    { role: "worker", task: "T2", worker: "W1", id: "x1", at: at(2), kind: "prompt", tool: "Bash", target: "gh pr merge 41", rule: "Bash(gh pr merge *)" },
+    { role: "orchestrator", id: "o1", at: at(1), kind: "auto-mode", tool: "Bash", target: "gh run list", rule: "Bash(gh run list *)" },
+  ];
+  const lines = renderPane({ ...sample, blocks }, 90);
+  const find = (s: string) => lines.findIndex((l) => l.includes(s));
+  expect(find("The orchestrator")).toBe(find("NEEDS YOU") + 1);
+  expect(lines[find("The orchestrator")]).toMatch(/needs a permission$/);
+  expect(lines[find("The orchestrator") + 2]).toContain("allow it with Bash(gh run list *)");
+  expect(lines[find("filter notes by tag")]).toMatch(/waiting at a permission prompt$/);
+  expect(lines[find("filter notes by tag") + 1]).toContain("waiting at a permission prompt to run `gh pr merge 41`");
+  expect(find("filter notes by tag")).toBeLessThan(find("WORKING"));
+  for (const l of renderPane({ ...sample, blocks }, 40)) expect(l.length).toBeLessThanOrEqual(40);
+});

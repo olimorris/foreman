@@ -6,6 +6,12 @@
     "Stop": [
       { "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/foreman\" hook stop", "timeout": 15 }] }
     ],
+    "PermissionRequest": [
+      { "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/foreman\" hook permission-request", "timeout": 10 }] }
+    ],
+    "PermissionDenied": [
+      { "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/foreman\" hook permission-denied", "timeout": 10 }] }
+    ],
     "PreToolUse": [
       {
         "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",

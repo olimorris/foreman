@@ -60,6 +60,7 @@ export const GROUPS: Group[] = [
       { usage: "resume <task>", about: "Reopen a stopped worker's session", full: "resume <task> [--model <name>]" },
       { usage: "restart <task>", about: "Close a worker and reopen its session", full: "restart <task> [--model <name>]" },
       { usage: "tidy <task>", about: "Stop processes a task's old runs left behind" },
+      { usage: "unblock <task>", about: "Close a task's permission blocks once the user allowed or skipped them" },
       { usage: "deliver <task>", about: "Push the branch and open the PR", full: 'deliver <task> [--title "<type>: <summary>"] [--dry-run]' },
       { usage: "teardown <task>", about: "Remove a finished task's tab, worktree and branch", full: "teardown <task> [--discard]" },
     ],
@@ -86,7 +87,7 @@ export const GROUPS: Group[] = [
       { usage: "shots <task>", about: "Screenshot a task's screens" },
       { usage: "sync", about: "Mark merged tasks and ask workers to rebase" },
       { usage: "watch", about: "Wait until something needs the orchestrator" },
-      { usage: "hook <event>", about: "Run one of Claude Code's hooks", full: "hook session-start | stop | pre-tool-use" },
+      { usage: "hook <event>", about: "Run one of Claude Code's hooks", full: "hook session-start | stop | pre-tool-use | permission-request | permission-denied" },
     ],
   },
 ];
