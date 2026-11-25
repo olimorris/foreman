@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { MAX_REVISIONS, parseVerdict, renderFeedback, reviewerCommand, roundDir, runReview, sendFeedback, startReview, verdictLine, type Verdict } from "../src/review.ts";
 import { saveConfig } from "../src/config.ts";
+import { saveLimit } from "../src/limits.ts";
 import { readEvents } from "../src/events.ts";
 import { fill, parseScreens, splitArgs } from "../src/shots.ts";
 import { findTask, withTasks, type Task } from "../src/state.ts";
@@ -99,5 +100,49 @@ describe("sendFeedback", () => {
   test("refuses after the revision limit and on an approval", () => {
     expect(() => sendFeedback(reviewed(changes, { reviews: 3, revisions: MAX_REVISIONS }), "T1", fakeTerminal())).toThrow("Escalate to the user");
     expect(() => sendFeedback(reviewed({ ...changes, verdict: "approve" }), "T1", fakeTerminal())).toThrow("no feedback to send");
+  });
+});
+
+describe("the usage limit", () => {
+  const HIT = Date.parse("2026-11-25T14:00:00Z");
+  const RESET = Date.parse("2026-11-25T15:45:00Z");
+  const verdict = JSON.stringify({ structured_output: { ...changes, verdict: "approve", issues: [] } });
+  const atLimit = JSON.stringify({ is_error: true, result: `Claude AI usage limit reached|${RESET / 1000}` });
+
+  function reviewable() {
+    const repo = tempRepo();
+    withTasks(repo, (ts) => ts.push({ id: "T1", status: "done", branch: "main", base: "main", worktree: repo.root, owns: ["src/"], socket: "/nonexistent.sock", createdAt: "" }));
+    mkdirSync(join(repo.foreman, "tasks", "T1"), { recursive: true });
+    writeFileSync(join(repo.foreman, "tasks", "T1", "brief.md"), "## Intent\n\nx\n");
+    saveConfig(repo, { budget: {} });
+    let now = HIT;
+    const calls: number[] = [];
+    const said: string[] = [];
+    const deps = (outputs: string[]) => ({
+      reviewer: () => (calls.push(now), { code: 0, stdout: outputs.shift()!, stderr: "" }),
+      sleep: async (ms: number) => void (now += ms),
+      now: () => now,
+      say: (l: string) => void said.push(l),
+    });
+    return { repo, calls, said, deps };
+  }
+
+  test("a review that hits the limit waits for the reset and runs the same round again", async () => {
+    const { repo, calls, said, deps } = reviewable();
+    const line = await runReview(repo, "T1", deps([atLimit, verdict]));
+    expect(line).toStartWith("approve, round 1");
+    expect(calls.length).toBe(2);
+    expect(calls[1]).toBeGreaterThanOrEqual(RESET);
+    expect(said[0]).toContain("so the review of T1 starts then");
+    expect(findTask(repo, "T1").reviews).toBe(1);
+    expect(readEvents(repo, "T1").map((e) => e.type)).toEqual(["reviewed"]);
+  });
+
+  test("a review started during the wait is held until the reset", async () => {
+    const { repo, calls, deps } = reviewable();
+    saveLimit(repo, { since: HIT, resetsAt: RESET, by: "T2", paused: ["T2"], announced: true });
+    expect(await runReview(repo, "T1", deps([verdict]))).toStartWith("approve, round 1");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toBeGreaterThanOrEqual(RESET);
   });
 });

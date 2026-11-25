@@ -33,6 +33,7 @@ export function statusLabel(task: Task): string {
   switch (task.status) {
     case "running": return "working";
     case "over-budget": return "stopped, over budget";
+    case "limited": return "paused for the usage limit";
     case "done": return "finished, in review";
     case "needs-decision": return "needs a decision";
     case "exited": return "worker closed";

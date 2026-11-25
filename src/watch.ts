@@ -11,14 +11,16 @@ import { baseRef } from "./snapshot.ts";
 import { budgetOf, lastActivity, overBudget, planSpend, taskCost, taskLimit, usd } from "./cost.ts";
 import { loadConfig } from "./config.ts";
 import { loadPlan, readyTasks, maxWorkers, stackable } from "./plan.ts";
-import { restartWorker, stopWorker } from "./stop.ts";
+import { pauseForLimit, restartWorker, resume, stopWorker } from "./stop.ts";
+import { clockAt, loadLimit, resetPhrase, resumeDue, saveLimit, workerLimit, type LimitHit, type UsageLimit } from "./limits.ts";
+import { taskDir } from "./paths.ts";
 import { inFlight, loadTasks, updateTask, type Task } from "./state.ts";
 import { busy, commandName, isWorker, pidAlive, processesIn, sample, tidy, unstoppableLine, type CpuSample, type Proc } from "./procs.ts";
 
 export type PrState = { state: string; comments: number; base?: string };
 export type TrackedPr = { key: string; number: number; base?: string };
 export type Stall = { since: number; nudged: boolean; escalated: boolean; cpu?: CpuSample; measuredAt?: number; busyAt?: number };
-export type Cursor = { events: Record<string, number>; main?: string; exited: string[]; prs?: Record<string, PrState>; budget?: Record<string, number>; stalls?: Record<string, Stall>; restarts?: Record<string, number>; unanswered?: string[]; unstoppable?: number[] };
+export type Cursor = { events: Record<string, number>; main?: string; exited: string[]; prs?: Record<string, PrState>; budget?: Record<string, number>; stalls?: Record<string, Stall>; restarts?: Record<string, number>; unanswered?: string[]; unstoppable?: number[]; limit?: UsageLimit; limitEnded?: number; held?: string[] };
 export type Nudge = { id: string; text: string };
 
 export type Probes = {
@@ -29,7 +31,10 @@ export type Probes = {
   lastActivity?(task: Task): number | undefined;
   questions?(): Question[];
   processes?(task: Task): Proc[];
+  limit?(task: Task): LimitHit | undefined;
 };
+
+export type ScanResult = { reasons: string[]; cursor: Cursor; nudge: Nudge[]; restart: string[]; pause: string[]; resume: string[]; notice?: string };
 
 export type Clock = { now: number; stallMs: number; answerMs?: number; waiting?: (id: string) => string[] };
 
@@ -40,11 +45,21 @@ export const BUSY_STALLS = 4;
 // Passes come as often as files change, and CPU time measured over a second or two is mostly noise.
 const MIN_SAMPLE_MS = 10_000;
 
-export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: TrackedPr[] = [], clock?: Clock): { reasons: string[]; cursor: Cursor; nudge: Nudge[]; restart: string[] } {
-  const next: Cursor = { ...cursor, events: { ...cursor.events }, exited: [...cursor.exited], prs: { ...cursor.prs }, stalls: { ...cursor.stalls }, restarts: { ...cursor.restarts }, unanswered: [...(cursor.unanswered ?? [])] };
+export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: TrackedPr[] = [], clock?: Clock): ScanResult {
+  const next: Cursor = { ...cursor, events: { ...cursor.events }, exited: [...cursor.exited], prs: { ...cursor.prs }, stalls: { ...cursor.stalls }, restarts: { ...cursor.restarts }, unanswered: [...(cursor.unanswered ?? [])], ...(cursor.limit ? { limit: { ...cursor.limit, paused: [...cursor.limit.paused] } } : {}) };
   const reasons: string[] = [];
   const nudge: Nudge[] = [];
   const restart: string[] = [];
+  const working: string[] = [];
+
+  // A worker at the usage limit replies to nothing until the reset, so it must not look hung.
+  for (const task of next.limit ? [] : tasks.filter((t) => t.tab && t.status === "running")) {
+    const hit = probes.limit?.(task);
+    if (hit && hit.at > (next.limitEnded ?? 0)) {
+      next.limit = { since: hit.at, resetsAt: hit.resetsAt, ...(hit.guessed ? { guessed: true } : {}), by: task.id, paused: [] };
+      break;
+    }
+  }
 
   for (const task of tasks) {
     const events = probes.events(task.id);
@@ -53,7 +68,7 @@ export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: Tracked
     }
     next.events[task.id] = events.length;
 
-    if (!task.tab || task.status === "exited" || task.status === "over-budget") continue;
+    if (!task.tab || task.status === "exited" || task.status === "over-budget" || task.status === "limited") continue;
     const alive = probes.alive(task);
     // A resumed worker can exit again, and that exit must be reported too.
     if (alive) next.exited = next.exited.filter((id) => id !== task.id);
@@ -61,7 +76,8 @@ export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: Tracked
       reasons.push(`exited ${task.id}`);
       next.exited.push(task.id);
     }
-    if (alive && clock) checkStall(task, probes, clock, next, reasons, nudge, restart);
+    if (alive && task.status === "running") working.push(task.id);
+    if (alive && clock && !next.limit) checkStall(task, probes, clock, next, reasons, nudge, restart);
   }
   for (const id of [...Object.keys(next.stalls!), ...Object.keys(next.restarts!)]) {
     if (!tasks.some((t) => t.id === id && t.status === "running")) delete next.stalls![id], delete next.restarts![id];
@@ -89,14 +105,41 @@ export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: Tracked
   if (sha && next.main && sha !== next.main) reasons.push(`main-moved ${sha.slice(0, 8)}`);
   if (sha) next.main = sha;
 
-  return { reasons, cursor: next, nudge, restart };
+  const { pause, resume, notice } = waitOutLimit(tasks, next, working, reasons, clock?.now);
+  return { reasons, cursor: next, nudge, restart, pause, resume, notice };
 }
+
+// Everything else the watcher finds during the wait is held for the resume line, since the orchestrator can't take a turn until the reset either.
+function waitOutLimit(tasks: Task[], cursor: Cursor, working: string[], reasons: string[], now?: number): { pause: string[]; resume: string[]; notice?: string } {
+  const limit = cursor.limit;
+  if (!limit) return { pause: [], resume: [] };
+  if (now !== undefined && resumeDue(limit, now)) {
+    const resume = limit.paused.filter((id) => tasks.some((t) => t.id === id && t.status === "limited"));
+    if (limit.announced) reasons.unshift(`usage-limit-reset: ${resume.length ? `resumed ${list(resume)}` : "no workers were paused"}`);
+    reasons.push(...(cursor.held ?? []));
+    cursor.held = [];
+    cursor.limit = undefined;
+    cursor.limitEnded = now;
+    return { pause: [], resume };
+  }
+  const pause = working.filter((id) => !limit.paused.includes(id));
+  limit.paused.push(...pause);
+  cursor.held = [...(cursor.held ?? []), ...reasons.splice(0)];
+  if (limit.announced) return { pause, resume: [] };
+  limit.announced = true;
+  const paused = limit.paused.length ? `${list(limit.paused)} ${limit.paused.length > 1 ? "are" : "is"} paused` : "No workers were running";
+  return { pause, resume: [], notice: `usage-limit: ${limit.by} hit the usage limit, which resets at ${resetPhrase(limit, now ?? limit.since)}. ${paused} and reviews wait until then` };
+}
+
+const list = (ids: string[]) => (ids.length > 1 ? `${ids.slice(0, -1).join(", ")} and ${ids.at(-1)}` : ids[0] ?? "");
 
 // A worker idling on a hung background command never wakes by itself, so it's nudged, then restarted, and only a worker that keeps hanging reaches the orchestrator.
 function checkStall(task: Task, probes: Probes, check: Clock, cursor: Cursor, reasons: string[], nudge: Nudge[], restart: string[]): void {
   const stalls = cursor.stalls!;
-  const last = task.status === "running" ? probes.lastActivity?.(task) : undefined;
-  if (last === undefined) return void delete stalls[task.id];
+  const replied = task.status === "running" ? probes.lastActivity?.(task) : undefined;
+  if (replied === undefined) return void delete stalls[task.id];
+  // A resumed worker's last reply is from before the wait, so its silence counts from the resume.
+  const last = Math.max(replied, cursor.limitEnded ?? 0);
   const prev = stalls[task.id];
   const s = prev?.since === last ? prev : (stalls[task.id] = { since: last, nudged: false, escalated: false, cpu: prev?.cpu, measuredAt: prev?.measuredAt, busyAt: prev?.busyAt });
   const all = probes.processes?.(task) ?? [];
@@ -194,6 +237,7 @@ export async function watch(repo: Repo, base: string, term: Terminal): Promise<n
     alive: (task) => (task.tab ? term.alive(task.tab) : true),
     lastActivity: (task) => lastActivity(repo, task),
     questions: () => loadQuestions(repo),
+    limit: (task) => workerLimit(repo, task),
   };
   const stallMs = (loadConfig(repo).stallMinutes ?? STALL_MINUTES) * 60_000;
   const waiting = (id: string) => {
@@ -207,6 +251,9 @@ export async function watch(repo: Repo, base: string, term: Terminal): Promise<n
 
   try {
     for (;;) {
+      // A reviewer that hits the limit records it itself, and the watcher pauses the workers on its next pass.
+      const saved = cursor.limit ? undefined : loadLimit(repo);
+      if (saved && saved.since > (cursor.limitEnded ?? 0)) cursor.limit = saved;
       const tasks = inFlight(loadTasks(repo));
       const ghDue = Date.now() - lastGh >= GH_POLL_MS;
       if (ghDue) lastGh = Date.now();
@@ -221,6 +268,22 @@ export async function watch(repo: Repo, base: string, term: Terminal): Promise<n
       cursor = result.cursor;
       for (const [id, patch] of prPatches(tasks, prs, cursor.prs ?? {})) updateTask(repo, id, patch);
       result.reasons.unshift(...untidy);
+      saveLimit(repo, cursor.limit);
+      for (const id of result.pause) {
+        try {
+          pauseForLimit(repo, tasks.find((t) => t.id === id)!, term);
+          logRun(repo, id, "paused", `usage limit, resets ${clockAt(cursor.limit!.resetsAt, Date.now())}`);
+        } catch {}
+      }
+      for (const id of result.resume) {
+        const task = tasks.find((t) => t.id === id)!;
+        try {
+          resume(repo, id, term, task.tab!.session, undefined, resumePrompt(repo, id));
+          logRun(repo, id, "resumed", "the usage limit reset");
+        } catch (err) {
+          result.reasons.push(`not-resumed ${id}: ${err instanceof Error ? err.message : err}`);
+        }
+      }
       for (const { id, text } of result.nudge) {
         try {
           sendToTask(repo, tasks.find((t) => t.id === id)!, text, term);
@@ -251,7 +314,12 @@ export async function watch(repo: Repo, base: string, term: Terminal): Promise<n
           logRun(repo, id, "stopped", limit !== undefined && spent > limit ? `over budget, ${usd(spent)} of ${usd(limit)}` : "the plan is over budget");
         }
       }
+      if (cursor.limit) cursor.held = [...(cursor.held ?? []), ...result.reasons.splice(0)];
       writeFileSync(cursorFile, JSON.stringify(cursor));
+      if (result.notice) {
+        console.log(result.notice);
+        notifyOrchestrator(repo, `[foreman watcher] ${result.notice}. The watcher stays armed through the wait and wakes you when work resumes.`);
+      }
       if (result.reasons.length) {
         const line = result.reasons.join("; ");
         console.log(line);
@@ -264,6 +332,9 @@ export async function watch(repo: Repo, base: string, term: Terminal): Promise<n
     release();
   }
 }
+
+export const resumePrompt = (repo: Repo, id: string) =>
+  `Foreman paused you while the account waited for its usage limit to reset, and it has reset now. Run git status to see where you left off, then carry on with your brief at ${join(taskDir(repo, id), "brief.md")}.`;
 
 // Stops what each worktree's old runs left behind, and drops it from the pass's process lists so it can't make a worker look busy.
 function tidyAll(tasks: Task[], procs: Map<string, Proc[]>, cursor: Cursor): string[] {

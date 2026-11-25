@@ -5,6 +5,8 @@ import type { Task } from "../src/state.ts";
 import type { Proc } from "../src/procs.ts";
 import { scan, type Cursor, type Probes } from "../src/watch.ts";
 
+process.env.TZ = "UTC";
+
 const task = (id: string, extra: Partial<Task> = {}): Task => ({
   id,
   status: "running",
@@ -193,4 +195,69 @@ describe("questions", () => {
 test("clips long notes so the wake line stays one line", () => {
   const r = scan([task("T1")], { ...empty, main: "aaa" }, probes({ T1: [ev("blocked", "x".repeat(300))] }));
   expect(r.reasons[0]!.length).toBeLessThan(120);
+});
+
+describe("usage limit", () => {
+  const min = 60_000;
+  const at = (hhmm: string) => Date.parse(`2026-11-25T${hhmm}:00Z`);
+  const hit = { at: at("14:00"), resetsAt: at("15:45"), guessed: false };
+  const limited = (atLimit: string[], events: Record<string, TaskEvent[]> = {}, sha = "aaa"): Probes => ({
+    ...probes(events, sha),
+    lastActivity: () => at("13:00"),
+    limit: (t) => (atLimit.includes(t.id) ? hit : undefined),
+  });
+  const check = (hhmm: string) => ({ now: at(hhmm), stallMs: 20 * min });
+  const crew = (status: Task["status"] = "running") => [task("T1", { status }), task("T2", { status }), task("T3", { status: "done" })];
+  const start = { ...empty, main: "aaa" };
+
+  test("a worker at the limit pauses every running worker, with no nudge, restart or stuck line", () => {
+    const r = scan(crew(), start, limited(["T1"]), [], check("14:00"));
+    expect(r).toMatchObject({ pause: ["T1", "T2"], nudge: [], restart: [], resume: [], reasons: [] });
+    expect(r.notice).toBe("usage-limit: T1 hit the usage limit, which resets at 15:45. T1 and T2 are paused and reviews wait until then");
+    expect(r.cursor.limit).toMatchObject({ by: "T1", resetsAt: at("15:45"), paused: ["T1", "T2"], announced: true });
+  });
+
+  test("holds everything else until the reset, then resumes the workers and reports what it held", () => {
+    const hitPass = scan(crew(), start, limited(["T1"]), [], check("14:00"));
+    const events = { T3: [ev("reviewed", "approve, round 1, risk low: fine")] };
+    const waiting = scan(crew("limited"), hitPass.cursor, limited(["T1"], events, "bbb"), [], check("15:00"));
+    expect(waiting).toMatchObject({ reasons: [], pause: [], resume: [], nudge: [], restart: [] });
+    expect(waiting.notice).toBeUndefined();
+    expect(scan(crew("limited"), waiting.cursor, limited(["T1"], events, "bbb"), [], check("15:45")).resume).toEqual([]);
+
+    const reset = scan(crew("limited"), waiting.cursor, limited(["T1"], events, "bbb"), [], check("15:46"));
+    expect(reset.resume).toEqual(["T1", "T2"]);
+    expect(reset.reasons).toEqual(["usage-limit-reset: resumed T1 and T2", "reviewed T3: approve, round 1, risk low: fine", "main-moved bbb"]);
+    expect(reset.cursor.limit).toBeUndefined();
+  });
+
+  test("a resumed worker's old limit line doesn't pause it again, and its silence counts from the resume", () => {
+    const hitPass = scan(crew(), start, limited(["T1"]), [], check("14:00"));
+    const reset = scan(crew("limited"), hitPass.cursor, limited(["T1"]), [], check("15:46"));
+    const after = scan(crew(), reset.cursor, limited(["T1"]), [], check("16:00"));
+    expect(after).toMatchObject({ pause: [], nudge: [], restart: [], reasons: [] });
+    expect(scan(crew(), after.cursor, limited(["T1"]), [], check("16:06")).nudge.map((n) => n.id)).toEqual(["T1", "T2"]);
+  });
+
+  test("a worker that starts working again during the wait is paused too", () => {
+    const hitPass = scan(crew(), start, limited(["T1"]), [], check("14:00"));
+    const tasks = [task("T1", { status: "limited" }), task("T2", { status: "limited" }), task("T3")];
+    const r = scan(tasks, hitPass.cursor, limited([]), [], check("14:30"));
+    expect(r.pause).toEqual(["T3"]);
+    expect(r.cursor.limit!.paused).toEqual(["T1", "T2", "T3"]);
+  });
+
+  test("a limit the reviewer recorded pauses the workers on the next pass", () => {
+    const fromReviewer = { ...start, limit: { since: at("14:00"), resetsAt: at("15:45"), by: "T3's reviewer", paused: [] } };
+    const r = scan(crew(), fromReviewer, limited([]), [], check("14:01"));
+    expect(r.pause).toEqual(["T1", "T2"]);
+    expect(r.notice).toStartWith("usage-limit: T3's reviewer hit the usage limit, which resets at 15:45");
+  });
+
+  test("a wait whose time has already passed when the watcher first sees it ends without a line", () => {
+    const stale = { ...start, limit: { since: at("14:00"), resetsAt: at("15:45"), by: "T3's reviewer", paused: [] } };
+    const r = scan(crew(), stale, limited([]), [], check("17:00"));
+    expect(r).toMatchObject({ pause: [], resume: [], reasons: [] });
+    expect(r.cursor.limit).toBeUndefined();
+  });
 });

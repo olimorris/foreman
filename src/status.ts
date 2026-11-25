@@ -4,6 +4,7 @@ import type { Repo } from "./paths.ts";
 import { loadPlan, maxWorkers, readyTasks, stackable } from "./plan.ts";
 import { plainTitle } from "./spawn.ts";
 import { loadTasks, type Task } from "./state.ts";
+import { activeLimit, resetPhrase } from "./limits.ts";
 import type { Style } from "./style.ts";
 
 export type Row = { cells: string[]; tone: (s: Style) => (s: string) => string; toneAt?: number; dim?: boolean };
@@ -14,12 +15,13 @@ const finished = (t: Task) => t.status === "torn-down" || t.status === "merged";
 
 function tone(t: Task): Row["tone"] {
   if (t.status === "pr-open") return (s) => s.green;
+  if (t.status === "limited") return (s) => s.yellow;
   if (NEEDS_YOU.includes(t.status)) return (s) => s.red;
   if (finished(t)) return (s) => s.dim;
   return (s) => s.cyan;
 }
 
-export function statusView(repo: Repo, style: Style, armed: boolean): string {
+export function statusView(repo: Repo, style: Style, armed: boolean, now = Date.now()): string {
   const tasks = byActivity(loadTasks(repo));
   const plan = loadPlan(repo);
   const row = (t: Task): Row => ({
@@ -43,6 +45,7 @@ export function statusView(repo: Repo, style: Style, armed: boolean): string {
 
   const budget = budgetOf(repo);
   const spent = tasks.reduce((sum, t) => sum + taskCost(repo, t).total, 0) + orchestratorCost(repo).usd;
+  const limit = activeLimit(repo, now);
   const head = [
     ...(plan ? [style.bold(plan.title) + (plan.approvedAt ? "" : style.yellow("  (not approved yet)"))] : []),
     ...(plan?.deadline ? [style.dim(`Deadline: ${plan.deadline}`)] : []),
@@ -50,6 +53,7 @@ export function statusView(repo: Repo, style: Style, armed: boolean): string {
       armed ? style.green("Watcher on") : style.red("Watcher off, so nothing will wake the orchestrator"),
       budget.plan !== undefined ? `${usd(spent)} of ${usd(budget.plan)} spent` : `${usd(spent)} spent`,
     ].join(style.dim("  ·  ")),
+    ...(limit ? [style.yellow(`Waiting for the usage limit to reset at ${resetPhrase(limit, now)}. Workers are paused, and no task or review starts until then.`)] : []),
   ];
   const body = sectionLines(sections, style, (r) => [r.cells.length - 1]);
   return [...head, ...(tasks.length || waiting.length ? body : ["", "No tasks yet."])].join("\n");

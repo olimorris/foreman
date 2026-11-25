@@ -67,13 +67,23 @@ const PHRASE: Record<RunWhat, (note?: string) => string> = {
   restarted: (n) => `restarted${n ? `: ${n}` : ""}`,
   stopped: (n) => `stopped${n ? `: ${n}` : ""}`,
   paused: () => "paused",
-  resumed: () => "resumed",
+  resumed: (n) => `resumed${n ? `: ${n}` : ""}`,
   "pr-opened": (n) => `opened PR ${n ?? ""}`.trim(),
   "pr-updated": (n) => `updated PR ${n ?? ""}`.trim(),
   merged: (n) => `merged${n ? ` PR ${n}` : ""}`,
   "torn-down": (n) => `torn down${n ? `, ${n}` : ""}`,
 };
 const WARNS: RunWhat[] = ["nudged", "restarted", "stopped"];
+
+// The watcher logs "usage limit, resets 15:45" when it pauses a worker for the account's usage limit.
+const LIMIT_NOTE = "usage limit";
+
+function limitWait(task: string, paused: RunEntry, resumed?: RunEntry): Line {
+  const at = Date.parse(paused.at);
+  if (!resumed) return { at, task, tone: "warn", text: `paused for the ${paused.note}` };
+  const to = Date.parse(resumed.at);
+  return { at, task, tone: "warn", text: `waited ${duration(to - at)} for the usage limit to reset`, until: to };
+}
 
 const EVENT_LABEL: Record<TaskEvent["type"], string> = { done: "done", blocked: "blocked", "needs-decision": "needs a decision", rebased: "rebased", reviewed: "reviewed", exited: "worker closed" };
 
@@ -103,7 +113,13 @@ export function buildTimeline(input: TimelineInput): Line[] {
     const own = entriesOf(t.id);
     if (t.createdAt !== undefined && !own.some((e) => e.what === "started")) lines.push({ at: t.createdAt, task: t.id, text: "started" });
     if (t.mergedAt !== undefined && !own.some((e) => e.what === "merged")) lines.push({ at: t.mergedAt, task: t.id, text: "merged" });
-    for (const e of own) lines.push({ at: Date.parse(e.at), task: t.id, text: PHRASE[e.what](e.note), ...(WARNS.includes(e.what) ? { tone: "warn" as const } : {}) });
+    for (const [i, e] of own.entries()) {
+      if (e.what === "paused" && e.note?.startsWith(LIMIT_NOTE)) {
+        lines.push(limitWait(t.id, e, own.slice(i + 1).find((x) => x.what === "resumed")));
+        continue;
+      }
+      lines.push({ at: Date.parse(e.at), task: t.id, text: PHRASE[e.what](e.note), ...(WARNS.includes(e.what) ? { tone: "warn" as const } : {}) });
+    }
     for (const e of t.events) lines.push({ at: Date.parse(e.at), task: t.id, text: `${EVENT_LABEL[e.type]}${e.note ? `: ${e.note}` : ""}`, ...(e.type === "blocked" ? { tone: "warn" as const } : {}) });
     const reports = t.events.filter(handsBack).map((e) => Date.parse(e.at));
     const cuts = [...own.filter((e) => ENDS_WORK.includes(e.what)).map((e) => Date.parse(e.at)), ...(t.mergedAt !== undefined ? [t.mergedAt] : [])];

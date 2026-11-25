@@ -1,7 +1,8 @@
-import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { loadConfig } from "./config.ts";
-import { budgetOf, jsonlFiles, loadSessions, orchestratorCost, sessionsFile, taskCost, transcriptDir, usd } from "./cost.ts";
+import { budgetOf, orchestratorCost, taskCost, usd } from "./cost.ts";
+import { activeLimit, latestTranscript, resetPhrase, tailLines, type UsageLimit } from "./limits.ts";
 import { readEvents } from "./events.ts";
 import { loadDecisions } from "./ledger.ts";
 import { statusLabel } from "./overview.ts";
@@ -75,25 +76,8 @@ function describeTool(b: Block, cwd: string): string {
 
 const clip = (s: string, width: number) => (s.length > width ? s.slice(0, width - 3).trimEnd() + "..." : s);
 
-const TAIL_BYTES = 256 * 1024;
-
-function tailLines(file: string): string[] {
-  const size = statSync(file).size;
-  const fd = openSync(file, "r");
-  const buf = Buffer.alloc(Math.min(size, TAIL_BYTES));
-  try {
-    readSync(fd, buf, 0, buf.length, size - buf.length);
-  } finally {
-    closeSync(fd);
-  }
-  // The first line of a tail usually starts mid-line.
-  return buf.toString("utf8").split("\n").slice(size > buf.length ? 1 : 0);
-}
-
 export function workerActivity(repo: Repo, task: Task): Activity | undefined {
-  const sessions = loadSessions(sessionsFile(repo, task.id));
-  const files = jsonlFiles(transcriptDir(task.worktree)).filter((f) => sessions.some((s) => f.includes(s)));
-  const latest = files.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
+  const latest = latestTranscript(repo, task);
   return latest ? readActivity(tailLines(latest), task.worktree) : undefined;
 }
 
@@ -103,7 +87,7 @@ export type Recent = { at: number; text: string };
 export type PaneInput = {
   name: string; plan?: string; deadline?: string; approved: boolean; armed: boolean; now: number; stallMs: number;
   spent: number; limit?: number; maxWorkers: number; tasks: PaneTask[]; waiting: (Waiting & { title: string })[]; recent: Recent[];
-  decisions: OpenDecision[];
+  decisions: OpenDecision[]; usageLimit?: UsageLimit;
 };
 
 type Tone = "bold" | "dim" | "red" | "yellow" | "green" | "cyan" | "heading";
@@ -141,6 +125,7 @@ export function renderPane(p: PaneInput, width: number, colour = false): string[
   const watcher = p.armed ? "watcher on" : "watcher off";
   const facts = fit(`${spend} · ${active.length} of ${p.maxWorkers} slots · ${watcher}`);
   out.push(facts.endsWith(watcher) ? c("dim", facts.slice(0, -watcher.length)) + c(p.armed ? "green" : "red", watcher) : c("dim", facts));
+  if (p.usageLimit) out.push(c("yellow", fit(`Usage limit reached · work resumes at ${resetPhrase(p.usageLimit, p.now)}`)));
   const needsYou = (t: PaneTask) => NEEDS_YOU.includes(t.task.status) || !!t.closed;
   const section = (title: string, rows: string[]) => rows.length && out.push("", c("heading", title.toUpperCase()), ...rows);
 
@@ -174,8 +159,9 @@ export function renderPane(p: PaneInput, width: number, colour = false): string[
     const tone: Tone = idle >= p.stallMs ? "red" : idle >= p.stallMs / 2 ? "yellow" : "dim";
     return { text: duration(idle), tone };
   };
-  section("Working", active.filter((t) => !needsYou(t) && (t.task.status === "running" || t.task.status === "done")).flatMap((t) => {
-    if (t.task.status === "done") return [head(t, usd(t.spent)), detail(`in review, round ${(t.task.reviews ?? 0) || 1}`, "cyan")];
+  section("Working", active.filter((t) => !needsYou(t) && ["running", "done", "limited"].includes(t.task.status)).flatMap((t) => {
+    if (t.task.status === "limited") return [head(t, usd(t.spent)), detail("paused until the usage limit resets", "yellow")];
+    if (t.task.status === "done") return [head(t, usd(t.spent)), detail(p.usageLimit ? "review waits for the usage limit" : `in review, round ${(t.task.reviews ?? 0) || 1}`, p.usageLimit ? "yellow" : "cyan")];
     const a = t.activity;
     if (!a) return [head(t, usd(t.spent)), detail("starting")];
     const q = quiet(a);
@@ -247,6 +233,7 @@ export function gatherPane(repo: Repo, now = Date.now(), costs: Map<string, numb
     waiting,
     recent: recent.filter((r) => !Number.isNaN(r.at)).sort((a, b) => b.at - a.at).slice(0, RECENT),
     decisions: loadDecisions(repo).filter((d) => d.status === "proposed").map((d) => ({ id: d.id, title: d.title, by: d.by })),
+    usageLimit: activeLimit(repo, now),
   };
 }
 

@@ -57,3 +57,16 @@ Findings that shaped the design, checked against Claude Code 2.1.331 and Rex 0.1
 ## Reviewer
 
 - `claude -p --agent <name> --json-schema …` returns prose with `structured_output` empty. Without `--agent`, the schema is honoured. So the reviewer runs with `--append-system-prompt-file prompts/reviewer.md --tools Read,Grep,Glob`.
+
+## Usage limit
+
+Checked against Claude Code 2.1.332 without spending usage: its docs, its changelog, its binary's strings and transcripts already on this machine. None of those transcripts had hit a usage limit, so the line Foreman matches is inferred from other API errors.
+
+- The tab shows "You've hit your session limit · resets 3:45pm" or "You've hit your weekly limit · resets Mon 12:00am". The time is the machine's local time, with no date unless it's further out.
+- `autoContinueAtUsageLimit` defaults to true. An interactive session then waits with "Continuing automatically at 3:45pm · Esc to cancel" and carries on by itself at the reset, up to three times in a row. It doesn't wait if Claude Code exits or relaunches during the wait.
+- `claude -p` never waits. It exits with the limit message as its result, so a review that hits the limit fails unless Foreman reruns it.
+- Every API error lands in the transcript as an assistant line with `"model":"<synthetic>"`, `"isApiErrorMessage":true`, an `error` type such as `authentication_failed` or `rate_limit`, and the message as its text. There's no reset time field, so Foreman reads it from the text. Versions before 2.1 wrote `Claude AI usage limit reached|<epoch seconds>` instead.
+- `error: "rate_limit"` covers ordinary throttling too ("API Error: Rate limit reached"), which Claude Code retries itself. Only text about the usage limit or "hit your limit" counts as the account's limit.
+- The only machine-readable reset time is the status line's input: `rate_limits.five_hour.resets_at` and `rate_limits.seven_day.resets_at`, in epoch seconds, for Pro, Max and Ultra accounts only. Using it would mean replacing the user's status line in every worker, so Foreman doesn't.
+- The StopFailure hook gets `error: "rate_limit"` with no reset time.
+- When the text has no time Foreman can read, it tries again an hour later. A worker resumed too early hits the limit again at no cost and is paused with the new time.

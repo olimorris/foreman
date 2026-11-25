@@ -168,3 +168,16 @@ test("replyTimes takes the line's own timestamp, not one inside a tool's input",
   writeFileSync(file, JSON.stringify({ message: { content: [{ type: "tool_use", input: { timestamp: "2020-01-01T00:00:00Z" } }] }, type: "assistant", timestamp: "2026-11-25T00:24:00Z" }) + "\n");
   expect(replyTimes(file)).toEqual([at("00:24")]);
 });
+
+test("the timeline shows each worker's wait for the usage limit, and one still waiting", () => {
+  const log: RunEntry[] = [
+    { at: iso("14:00"), task: "T1", what: "paused", note: "usage limit, resets 15:45" },
+    { at: iso("15:46"), task: "T1", what: "resumed", note: "the usage limit reset" },
+    { at: iso("14:00"), task: "T2", what: "paused", note: "usage limit, resets 15:45" },
+  ];
+  const input: TimelineInput = { title: "notes", now: at("15:00"), stallMs: 20 * MIN, log, tasks: [history("T1", { createdAt: at("13:00") }), history("T2", { createdAt: at("13:00") })] };
+  const text = renderTimeline(input, buildTimeline(input), { style: plain });
+  expect(text).toContain("14:00  waited 1h 46m for the usage limit to reset, until 15:46");
+  expect(text).toContain("15:46  resumed: the usage limit reset");
+  expect(text).toContain("14:00  paused for the usage limit, resets 15:45");
+});
