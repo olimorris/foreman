@@ -129,6 +129,52 @@ test("bashWriteTargets ignores > inside quoted text and heredoc bodies", () => {
   expect(bashWriteTargets(`git commit -m "fix (cd x) > y" && echo z > a.txt`, "/w")).toEqual(["/w/a.txt"]);
 });
 
+describe("bashWriteTargets reads quoted text as data", () => {
+  test("an angle bracket placeholder in a quoted report step isn't a redirect", () => {
+    expect(bashWriteTargets(`foreman report done "built x" --test "open <file> and check it"`, "/w")).toEqual([]);
+    expect(bashWriteTargets(`foreman report done "the worker's tab" --test "open <file>" --assume 'it says "done" <here>'`, "/w")).toEqual([]);
+    expect(bashWriteTargets(`foreman propose "use <name>" --body 'rejected "<other>"' --paths src/x.ts`, "/w")).toEqual([]);
+  });
+
+  test("escaped quotes inside double quotes don't end the quoted text", () => {
+    const t18 = `foreman report done "x" \\\n --test "config shows the title \\"# ADR-{N}: {title}\\" with a \\"## Status\\" section." \\\n --test "starts \\"# ADR-0001: <title>\\" followed by \\"## Status\\""`;
+    expect(bashWriteTargets(t18, "/w")).toEqual([]);
+    expect(areaLock(bash(t18), worker)).toBeUndefined();
+  });
+
+  test("a quoted argument can span lines and hold either kind of quote", () => {
+    expect(bashWriteTargets(`foreman report done "x" \\\n  --test "line one\nopen <file>\nit's \`here\`" \\\n  --assume "it's <fine>"`, "/w")).toEqual([]);
+    expect(bashWriteTargets(`echo $'it\\'s > x'`, "/w")).toEqual([]);
+  });
+
+  test("an escaped angle bracket or one in a comment isn't a redirect", () => {
+    expect(bashWriteTargets(`echo a \\> b`, "/w")).toEqual([]);
+    expect(bashWriteTargets(`echo hi # don't > x`, "/w")).toEqual([]);
+  });
+
+  test("real redirects after quoted text are still caught, quoted targets included", () => {
+    expect(bashWriteTargets(`foreman report done "a > b" > out.txt`, "/w")).toEqual(["/w/out.txt"]);
+    expect(bashWriteTargets(`echo "a \\"q\\" <b>" > out.txt`, "/w")).toEqual(["/w/out.txt"]);
+    expect(bashWriteTargets(`echo "it's" > "my file.txt"`, "/w")).toEqual(["/w/my file.txt"]);
+    expect(bashWriteTargets(`echo x > "dir"/a.txt`, "/w")).toEqual(["/w/dir/a.txt"]);
+    expect(bashWriteTargets(`echo x > my\\ file.txt`, "/w")).toEqual(["/w/my file.txt"]);
+    expect(bashWriteTargets(`echo x > "$HOME/a b.txt"`, "/w")).toEqual([`${homedir()}/a b.txt`]);
+    expect(bashWriteTargets(`echo x | tee "notes <1>.md"`, "/w")).toEqual(["/w/notes <1>.md"]);
+  });
+
+  test("a heredoc inside a quoted command substitution is data, and redirects in the substitution count", () => {
+    expect(bashWriteTargets(`git commit -m "$(cat <<'EOF'\nfeat: x\n\nIt's "a" <b>\nEOF\n)" && echo y > a.txt`, "/w")).toEqual(["/w/a.txt"]);
+    expect(bashWriteTargets(`echo "$(echo x > a.txt)"`, "/w")).toEqual(["/w/a.txt"]);
+    expect(bashWriteTargets(`echo $((1 > 2))`, "/w")).toEqual([]);
+  });
+
+  test("a here-string or a << with no closing tag doesn't hide the lines after it", () => {
+    expect(bashWriteTargets(`cat <<< "x"\necho y > a.txt`, "/w")).toEqual(["/w/a.txt"]);
+    expect(bashWriteTargets(`jq . <<< "$json" > out.json`, "/w")).toEqual(["/w/out.json"]);
+    expect(bashWriteTargets(`(( a << 2 ))\necho y > a.txt`, "/w")).toEqual(["/w/a.txt"]);
+  });
+});
+
 test("owned treats a trailing slash as everything under it", () => {
   expect(owned("src/settings/deep/x.ts", ["src/settings/"])).toBe(true);
   expect(owned("src/settingsX/x.ts", ["src/settings/"])).toBe(false);

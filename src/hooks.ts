@@ -72,7 +72,8 @@ function writeTargets(input: HookInput): string[] {
   return typeof path === "string" ? [resolve(input.cwd, path)] : [];
 }
 
-const WORD = String.raw`"[^"]*"|'[^']*'|[^\s;&|()<>]+`;
+// stripText leaves quoted text only as double-quoted pieces with no quotes inside, so a word is a run of those and plain characters.
+const WORD = String.raw`(?:"[^"]*"|[^\s;&|()<>"])+`;
 const BASH_TOKENS = new RegExp(
   [
     String.raw`(?<open>\()`,
@@ -111,17 +112,170 @@ export function bashWriteTargets(command: string, cwd: string): string[] {
 // Expands a leading ~ or $VAR from the hook's environment, which Claude Code shares with its Bash tool. undefined when any other expansion is left.
 function expandWord(word: string): string | undefined {
   const w = word
-    .replace(/^["']|["']$/g, "")
+    .replaceAll('"', "")
     .replace(/^~(?=\/|$)/, homedir())
     .replace(/^\$\{?(\w+)\}?/, (m, name) => process.env[name] ?? m);
   return w.includes("$") || w.includes("`") ? undefined : w;
 }
 
-// A `>` inside a commit message or heredoc isn't a redirect, so blank out text that is only data.
+// A `>` inside a commit message, heredoc or comment isn't a redirect, so blank out text that is only data.
+// Quoted text right after a redirect, tee or cd keeps its value, rewritten as one double-quoted piece with no quotes inside.
 function stripText(command: string): string {
-  return command
-    .replace(/<<-?\s*(['"]?)(\w+)\1([^\n]*)\n[\s\S]*?\n\s*\2(?=\n|$)/g, (_m, _q, _tag, rest) => `<<EOF${rest}`)
-    .replace(/(>{1,2}\|?\s*|\btee\s+(?:-[a-zA-Z]+\s+)*|\b(?:cd|pushd)(?:\s+-[LPe@]+)*\s+)?("[^"]*"|'[^']*')/g, (m, op) => (op ? m : '""'));
+  let i = 0;
+  let out = "";
+  const heredocs: { tag: string; tabs: boolean }[] = [];
+  const isTarget = () => TARGET_BEFORE.test(out);
+  // A target that holds a command substitution can't be placed, so it becomes "$", which expandWord skips.
+  const piece = (value: string, expands = false, subs = "") => {
+    out += isTarget() ? `"${expands ? "$" : value.replaceAll('"', "")}"` : `""${subs}`;
+  };
+
+  // A `<<` with no closing tag line, like a shift in `(( a << 2 ))`, isn't a heredoc, so the lines after it are still scanned.
+  const skipHeredocBodies = () => {
+    for (const { tag, tabs } of heredocs.splice(0)) {
+      let at = i;
+      let closed = false;
+      while (at < command.length && !closed) {
+        const eol = command.indexOf("\n", at);
+        const line = command.slice(at, eol < 0 ? command.length : eol);
+        at = eol < 0 ? command.length : eol + 1;
+        closed = (tabs ? line.replace(/^\t+/, "") : line).trim() === tag;
+      }
+      if (!closed) return;
+      i = at;
+    }
+  };
+
+  const heredocTag = () => {
+    const tabs = command[i] === "-";
+    if (tabs) i++;
+    while (command[i] === " " || command[i] === "\t") i++;
+    let tag = "";
+    while (i < command.length && !/[\s;&|()<>]/.test(command[i]!)) {
+      const c = command[i++]!;
+      if (c === "'" || c === '"') {
+        const close = command.indexOf(c, i);
+        tag += command.slice(i, close < 0 ? command.length : close);
+        i = close < 0 ? command.length : close + 1;
+      } else if (c === "\\") tag += command[i++] ?? "";
+      else tag += c;
+    }
+    if (tag) heredocs.push({ tag, tabs });
+  };
+
+  const singleQuoted = (ansi: boolean) => {
+    let value = "";
+    while (i < command.length && command[i] !== "'") {
+      if (ansi && command[i] === "\\") i++;
+      value += command[i++] ?? "";
+    }
+    i++;
+    piece(value);
+  };
+
+  // Command substitutions inside double quotes still run, so they stay in the output for their redirects to count.
+  const doubleQuoted = () => {
+    let value = "";
+    let expands = false;
+    let subs = "";
+    while (i < command.length && command[i] !== '"') {
+      const c = command[i]!;
+      if (c === "\\") {
+        value += command[i + 1] ?? "";
+        i += 2;
+      } else if (c === "$" && command[i + 1] === "(" && command[i + 2] !== "(") {
+        i += 2;
+        expands = true;
+        subs += `$(${substitution(")")})""`;
+      } else if (c === "`") {
+        i++;
+        expands = true;
+        subs += `(${substitution("`")})""`;
+      } else {
+        value += c;
+        i++;
+      }
+    }
+    i++;
+    piece(value, expands, subs);
+  };
+
+  // Scans unquoted shell text until `end`, and returns what it wrote to `out` along the way.
+  const substitution = (end: string) => {
+    const before = out;
+    out = "";
+    words(end);
+    const inner = out;
+    out = before;
+    return inner;
+  };
+
+  const words = (end?: string) => {
+    let depth = 0;
+    while (i < command.length) {
+      const c = command[i]!;
+      const next = command[i + 1];
+      if (end === "`" && c === "`") return void i++;
+      if (end === ")" && c === ")" && depth === 0) return void i++;
+      if (c === "\\") {
+        i += 2;
+        if (next !== "\n") piece(next ?? "");
+      } else if (c === "'") {
+        i++;
+        singleQuoted(false);
+      } else if (c === "$" && next === "'") {
+        i += 2;
+        singleQuoted(true);
+      } else if (c === '"') {
+        i++;
+        doubleQuoted();
+      } else if (c === "$" && next === "(" && command[i + 2] === "(") {
+        i = arithmeticEnd(command, i + 3);
+        out += "0";
+      } else if (c === "$" && next === "(") {
+        i += 2;
+        out += `$(${substitution(")")})`;
+      } else if (c === "`") {
+        i++;
+        out += `(${substitution("`")})`;
+      } else if (c === "#" && (out === "" || /[\s;&|()]$/.test(out))) {
+        while (i < command.length && command[i] !== "\n") i++;
+      } else if (c === "<" && next === "<" && command[i + 2] === "<") {
+        i += 3;
+        out += "<<<";
+      } else if (c === "<" && next === "<") {
+        i += 2;
+        heredocTag();
+        out += "<<_";
+      } else if (c === "\n") {
+        i++;
+        out += "\n";
+        skipHeredocBodies();
+      } else {
+        if (c === "(") depth++;
+        if (c === ")") depth--;
+        out += c;
+        i++;
+      }
+    }
+  };
+
+  words();
+  return out;
+}
+
+const TARGET_BEFORE = /(?:>{1,2}\|?\s*|\btee\s+(?:-[a-zA-Z]+\s+)*|\b(?:cd|pushd)(?:\s+-[LPe@]+)*\s+)(?:"[^"]*"|[^\s;&|()<>"])*$/;
+
+function arithmeticEnd(command: string, from: number): number {
+  let depth = 0;
+  for (let i = from; i < command.length; i++) {
+    if (command[i] === "(") depth++;
+    else if (command[i] === ")") {
+      if (depth > 0) depth--;
+      else if (command[i + 1] === ")") return i + 2;
+    }
+  }
+  return command.length;
 }
 
 // Claude Code overrides a Stop hook after repeated blocks, and an endless block loop burns turns, so give up after a few.
