@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { loadConfig, neverRules, telegramSetup, telegramWhen, type TelegramSetup } from "./config.ts";
 import { isInside, type Repo } from "./paths.ts";
@@ -18,11 +19,11 @@ export type LockContext =
 
 const EDIT_TOOLS = ["Edit", "Write", "MultiEdit", "NotebookEdit"];
 
-export function areaLock(input: HookInput, ctx: LockContext): string | undefined {
+export function areaLock(input: HookInput, ctx: LockContext, scratch = scratchDirs()): string | undefined {
   const tool = input.tool_name ?? "";
   const isBash = tool === "Bash";
   if (!isBash && !EDIT_TOOLS.includes(tool)) return undefined;
-  const targets = writeTargets(input).map((p) => resolve(input.cwd, p));
+  const targets = writeTargets(input);
   const { repo } = ctx;
   const worktrees = join(repo.foreman, "worktrees");
 
@@ -47,8 +48,8 @@ export function areaLock(input: HookInput, ctx: LockContext): string | undefined
       return ".foreman/ holds Foreman's state. Use the foreman CLI instead of writing there.";
     } else if (isInside(p, repo.root)) {
       return `${p} is outside your worktree (${task.worktree}).`;
-    } else if (!isBash) {
-      return `${p} is outside your worktree (${task.worktree}).`;
+    } else if (!isBash && !scratch.some((dir) => isInside(p, dir))) {
+      return `${p} is outside your worktree (${task.worktree}). Put throwaway files in the session scratchpad or ${tmpdir()}.`;
     }
   }
   return undefined;
@@ -58,27 +59,69 @@ export function owned(rel: string, globs: string[]): boolean {
   return globs.some((g) => new Bun.Glob(g.endsWith("/") ? `${g}**` : g).match(rel));
 }
 
-function writeTargets(input: HookInput): string[] {
-  const ti = input.tool_input ?? {};
-  if (input.tool_name === "Bash") return bashWriteTargets(String(ti.command ?? ""));
-  const path = ti.file_path ?? ti.notebook_path;
-  return typeof path === "string" ? [path] : [];
+// Claude Code's session scratchpad lives under /tmp, which macOS links to /private/tmp, while TMPDIR points elsewhere.
+export function scratchDirs(): string[] {
+  const tmp = tmpdir();
+  return [...new Set(["/tmp", "/private/tmp", tmp, realpathSync(tmp)])];
 }
 
+function writeTargets(input: HookInput): string[] {
+  const ti = input.tool_input ?? {};
+  if (input.tool_name === "Bash") return bashWriteTargets(String(ti.command ?? ""), input.cwd);
+  const path = ti.file_path ?? ti.notebook_path;
+  return typeof path === "string" ? [resolve(input.cwd, path)] : [];
+}
+
+const WORD = String.raw`"[^"]*"|'[^']*'|[^\s;&|()<>]+`;
+const BASH_TOKENS = new RegExp(
+  [
+    String.raw`(?<open>\()`,
+    String.raw`(?<close>\))`,
+    String.raw`(?<=(?:^|[\n;&|(]|\bthen|\bdo|\belse)\s*)(?<cd>cd|pushd)(?:\s+-[LPe@]+)*(?:\s+(?<dir>${WORD}))?(?=\s*(?:$|[\n;&|)]))`,
+    String.raw`(?<![<>&\d])\d?>{1,2}\|?\s*(?<out>${WORD})`,
+    String.raw`\btee\s+(?:-[a-zA-Z]+\s+)*(?<tee>${WORD})`,
+  ].join("|"),
+  "g",
+);
+
 // Best effort only: catches redirects and tee, not writes made by programs the command runs.
-export function bashWriteTargets(command: string): string[] {
+export function bashWriteTargets(command: string, cwd: string): string[] {
   const targets: string[] = [];
-  command = stripText(command);
-  for (const m of command.matchAll(/(?:^|[^<>&\d])\d?>{1,2}\|?\s*("[^"]+"|'[^']+'|[^\s;&|()<>]+)/g)) targets.push(m[1]!);
-  for (const m of command.matchAll(/\btee\s+(?:-[a-zA-Z]+\s+)*("[^"]+"|'[^']+'|[^\s;&|()<>]+)/g)) targets.push(m[1]!);
-  return targets.map((t) => t.replace(/^["']|["']$/g, "")).filter((t) => !t.startsWith("/dev/") && !t.startsWith("$"));
+  // One entry per subshell, so a `cd` inside `( )` or `$( )` doesn't move the redirects after it; undefined is a `cd` we can't follow.
+  const dirs: (string | undefined)[] = [cwd];
+  for (const m of stripText(command).matchAll(BASH_TOKENS)) {
+    const g = m.groups!;
+    const here = dirs[dirs.length - 1];
+    if (g.open) dirs.push(here);
+    else if (g.close) {
+      if (dirs.length > 1) dirs.pop();
+    } else if (g.cd) {
+      const dir = g.dir === undefined ? homedir() : expandWord(g.dir);
+      dirs[dirs.length - 1] = dir === undefined || dir === "-" || here === undefined ? undefined : resolve(here, dir);
+    } else {
+      const target = expandWord(g.out ?? g.tee!);
+      if (target === undefined || target.startsWith("/dev/")) continue;
+      if (target.startsWith("/")) targets.push(target);
+      else if (here !== undefined) targets.push(resolve(here, target));
+    }
+  }
+  return targets;
+}
+
+// Expands a leading ~ or $VAR from the hook's environment, which Claude Code shares with its Bash tool. undefined when any other expansion is left.
+function expandWord(word: string): string | undefined {
+  const w = word
+    .replace(/^["']|["']$/g, "")
+    .replace(/^~(?=\/|$)/, homedir())
+    .replace(/^\$\{?(\w+)\}?/, (m, name) => process.env[name] ?? m);
+  return w.includes("$") || w.includes("`") ? undefined : w;
 }
 
 // A `>` inside a commit message or heredoc isn't a redirect, so blank out text that is only data.
 function stripText(command: string): string {
   return command
     .replace(/<<-?\s*(['"]?)(\w+)\1([^\n]*)\n[\s\S]*?\n\s*\2(?=\n|$)/g, (_m, _q, _tag, rest) => `<<EOF${rest}`)
-    .replace(/(>{1,2}\|?\s*|\btee\s+(?:-[a-zA-Z]+\s+)*)?("[^"]*"|'[^']*')/g, (m, op) => (op ? m : '""'));
+    .replace(/(>{1,2}\|?\s*|\btee\s+(?:-[a-zA-Z]+\s+)*|\b(?:cd|pushd)(?:\s+-[LPe@]+)*\s+)?("[^"]*"|'[^']*')/g, (m, op) => (op ? m : '""'));
 }
 
 // Claude Code overrides a Stop hook after repeated blocks, and an endless block loop burns turns, so give up after a few.

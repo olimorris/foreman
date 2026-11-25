@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { homedir } from "node:os";
 import { saveConfig } from "../src/config.ts";
 import { areaLock, bashWriteTargets, hookWho, owned, recordHookBlock, sessionStartContext, stopDecision, STOP_BLOCK_BUDGET, type LockContext } from "../src/hooks.ts";
 import { openBlocks } from "../src/permissions.ts";
@@ -48,6 +49,33 @@ describe("areaLock for workers", () => {
     expect(areaLock(bash("swift test"), worker)).toBeUndefined();
   });
 
+  test("allows writes in the scratchpad and temp folders but nowhere else on disk", () => {
+    const scratch = ["/tmp", "/private/tmp", "/var/folders/x/T"];
+    expect(areaLock(edit("/private/tmp/claude-501/proj/session/scratchpad/spike.ts"), worker, scratch)).toBeUndefined();
+    expect(areaLock(edit("/tmp/notes.md"), worker, scratch)).toBeUndefined();
+    expect(areaLock(edit("/var/folders/x/T/out.json"), worker, scratch)).toBeUndefined();
+    expect(areaLock(edit("/Users/me/elsewhere/a.txt"), worker, scratch)).toContain("outside your worktree");
+    expect(areaLock(edit("/tmp/../etc/hosts"), worker, scratch)).toContain("outside your worktree");
+    expect(areaLock(edit("/r/src/settings/Pane.swift"), worker, scratch)).toContain("outside your worktree");
+    expect(areaLock(edit("/r/.foreman/notes.md"), worker, scratch)).toContain(".foreman/");
+  });
+
+  test("still guards a repo that itself lives in a temp folder", () => {
+    const tmpRepo = { root: "/tmp/r", foreman: "/tmp/r/.foreman" };
+    const tmpTask = { ...task, worktree: "/tmp/r/.foreman/worktrees/T1" };
+    const ctx: LockContext = { role: "worker", repo: tmpRepo, task: tmpTask };
+    const at = (file_path: string) => ({ cwd: tmpTask.worktree, tool_name: "Write", tool_input: { file_path } });
+    expect(areaLock(at("/tmp/r/src/a.ts"), ctx, ["/tmp"])).toContain("outside your worktree");
+    expect(areaLock(at("/tmp/r/.foreman/worktrees/T2/src/settings/a"), ctx, ["/tmp"])).toContain(".foreman/");
+    expect(areaLock(at("/tmp/scratch/a.ts"), ctx, ["/tmp"])).toBeUndefined();
+  });
+
+  test("reads a relative redirect against the folder the command cd'd into", () => {
+    expect(areaLock(bash("cd /private/tmp/spike && echo x > out.txt"), worker)).toBeUndefined();
+    expect(areaLock(bash("cd /r && echo x > out.txt"), worker)).toContain("outside your worktree");
+    expect(areaLock(bash("cd src/settings && echo x > a.txt"), worker)).toBeUndefined();
+  });
+
   test("covers MultiEdit and NotebookEdit and ignores read tools", () => {
     expect(areaLock({ cwd: wt, tool_name: "NotebookEdit", tool_input: { notebook_path: "nb.ipynb" } }, worker)).toBeDefined();
     expect(areaLock({ cwd: wt, tool_name: "MultiEdit", tool_input: { file_path: "src/x.ts" } }, worker)).toBeDefined();
@@ -70,17 +98,35 @@ describe("areaLock for the orchestrator", () => {
 });
 
 test("bashWriteTargets finds redirects and tee, skipping fd dups and /dev", () => {
-  expect(bashWriteTargets("a > out.txt && b >> 'log file' 2>&1")).toEqual(["out.txt", "log file"]);
-  expect(bashWriteTargets("cmd | tee -a notes.md")).toEqual(["notes.md"]);
-  expect(bashWriteTargets("cmd 2>/dev/null; x &>/dev/null")).toEqual([]);
-  expect(bashWriteTargets("[ a -gt 1 ] && echo ok")).toEqual([]);
+  expect(bashWriteTargets("a > out.txt && b >> 'log file' 2>&1", "/w")).toEqual(["/w/out.txt", "/w/log file"]);
+  expect(bashWriteTargets("cmd | tee -a notes.md", "/w")).toEqual(["/w/notes.md"]);
+  expect(bashWriteTargets("cmd 2>/dev/null; x &>/dev/null", "/w")).toEqual([]);
+  expect(bashWriteTargets("[ a -gt 1 ] && echo ok", "/w")).toEqual([]);
+});
+
+test("bashWriteTargets follows cd through the command, but not out of a subshell", () => {
+  expect(bashWriteTargets("cd /tmp/s && echo x > a.txt", "/w")).toEqual(["/tmp/s/a.txt"]);
+  expect(bashWriteTargets("cd sub; echo x > a.txt; cd ..; echo y > b.txt", "/w")).toEqual(["/w/sub/a.txt", "/w/b.txt"]);
+  expect(bashWriteTargets(`cd "/tmp/my dir" && echo x > a.txt`, "/w")).toEqual(["/tmp/my dir/a.txt"]);
+  expect(bashWriteTargets("(cd /tmp && echo x > a.txt); echo y > b.txt", "/w")).toEqual(["/tmp/a.txt", "/w/b.txt"]);
+  expect(bashWriteTargets("echo $(cd /tmp && pwd) > b.txt", "/w")).toEqual(["/w/b.txt"]);
+  expect(bashWriteTargets("cd && echo x > a.txt", "/w")).toEqual([`${homedir()}/a.txt`]);
+  expect(bashWriteTargets("echo cd /tmp > a.txt", "/w")).toEqual(["/w/a.txt"]);
+});
+
+test("bashWriteTargets expands ~ and known variables and skips what it can't place", () => {
+  expect(bashWriteTargets("echo x > ~/a.txt", "/w")).toEqual([`${homedir()}/a.txt`]);
+  expect(bashWriteTargets("echo x > $HOME/a.txt", "/w")).toEqual([`${homedir()}/a.txt`]);
+  expect(bashWriteTargets("echo x > $FOREMAN_NO_SUCH_VAR/a.txt", "/w")).toEqual([]);
+  expect(bashWriteTargets("cd - && echo x > a.txt && echo y > /abs.txt", "/w")).toEqual(["/abs.txt"]);
 });
 
 test("bashWriteTargets ignores > inside quoted text and heredoc bodies", () => {
-  expect(bashWriteTargets(`git commit -m "Add x\n\nCo-Authored-By: Claude <noreply@anthropic.com>"`)).toEqual([]);
-  expect(bashWriteTargets("echo 'a > b' > out.txt")).toEqual(["out.txt"]);
-  expect(bashWriteTargets("git commit -F - <<'EOF'\nTitle\n\nBy: <a@b.c> and x > y\nEOF")).toEqual([]);
-  expect(bashWriteTargets("cat <<EOF > notes.md\nline > other\nEOF")).toEqual(["notes.md"]);
+  expect(bashWriteTargets(`git commit -m "Add x\n\nCo-Authored-By: Claude <noreply@anthropic.com>"`, "/w")).toEqual([]);
+  expect(bashWriteTargets("echo 'a > b' > out.txt", "/w")).toEqual(["/w/out.txt"]);
+  expect(bashWriteTargets("git commit -F - <<'EOF'\nTitle\n\nBy: <a@b.c> and x > y\nEOF", "/w")).toEqual([]);
+  expect(bashWriteTargets("cat <<EOF > notes.md\nline > other\nEOF", "/w")).toEqual(["/w/notes.md"]);
+  expect(bashWriteTargets(`git commit -m "fix (cd x) > y" && echo z > a.txt`, "/w")).toEqual(["/w/a.txt"]);
 });
 
 test("owned treats a trailing slash as everything under it", () => {
