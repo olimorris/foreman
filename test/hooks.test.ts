@@ -127,3 +127,28 @@ describe("the never list", () => {
     for (const never of [undefined, [], [" "]]) expect(orchestratorContext(never)).not.toContain("Never do these");
   });
 });
+
+describe("Telegram pings", () => {
+  const context = (telegram: { when?: string } | undefined, chats: string[]) => {
+    const repo = tempRepo();
+    if (telegram) saveConfig(repo, { telegram });
+    return sessionStartContext({ cwd: repo.root }, { role: "orchestrator", repo }, fakeTerminal(), () => ({ token: true, chats }));
+  };
+
+  test("the orchestrator gets the user's words for when to ping, and the chat to send to", () => {
+    const text = context({ when: "only when a question has waited 10 minutes, or the run is finished" }, ["412587349"]);
+    expect(text).toContain("Telegram pings are on. Ping the user with the Telegram plugin's reply tool, chat_id 412587349, when this holds, in their words: only when a question has waited 10 minutes, or the run is finished");
+  });
+
+  test("a setting without when still turns pings on", () => {
+    expect(context({}, ["1"])).toContain("in their words: when a question needs the user's answer, or the run is finished");
+  });
+
+  test("before pairing, the orchestrator is told no ping can reach the user", () => {
+    expect(context({ when: "always" }, [])).toContain("isn't paired with the user yet");
+  });
+
+  test("without the setting, nothing is said about Telegram", () => {
+    expect(context(undefined, ["1"])).not.toContain("Telegram");
+  });
+});
