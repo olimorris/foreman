@@ -126,6 +126,15 @@ describe("teardown", () => {
     expect(teardown(repo, "T1", false, term).message).toContain("1 uncommitted file");
   });
 
+  test("keeps uncommitted files even when the task is marked merged", () => {
+    const { repo, task, term } = spawned();
+    updateTask(repo, "T1", { mergedAt: "2026-11-25T08:33:52.150Z", status: "merged" });
+    writeFileSync(join(task.worktree, "hello.txt"), "hi\n");
+    const r = teardown(repo, "T1", false, term);
+    expect(r.message).toContain("1 uncommitted file");
+    expect(term.closed).toEqual([]);
+  });
+
   test("removes everything once the branch is merged", () => {
     const { repo, task, term } = spawned();
     writeFileSync(join(task.worktree, "hello.txt"), "hi\n");

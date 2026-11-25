@@ -39,7 +39,9 @@ export type TeardownResult = { removed: boolean; message: string };
 
 export function teardown(repo: Repo, id: string, discard: boolean, term: Terminal, claudeConfig?: string): TeardownResult {
   const task = findTask(repo, id);
-  const lost = task.mergedAt ? { commits: 0, dirty: 0 } : unmergedWork(repo, task.branch, baseRef(repo, task.base), task.worktree);
+  const work = unmergedWork(repo, task.branch, baseRef(repo, task.base), task.worktree);
+  // Uncommitted files are never in a merge, so they still count when the task is marked merged.
+  const lost = task.mergedAt ? { commits: 0, dirty: work.dirty } : work;
   if ((lost.commits || lost.dirty) && !discard) {
     return {
       removed: false,
