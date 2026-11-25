@@ -9,6 +9,10 @@ export type Terminal = {
   /** Binaries that must be on PATH for this terminal. */
   requires: string[];
   open(session: string, label: string, cwd: string, cmd: string[], keepOpen?: boolean): Tab;
+  /** The pane Foreman was run from, or undefined outside this terminal. */
+  currentPane?(): string | undefined;
+  /** Opens a pane beside another in the same tab, or beside the session's first pane when none is given. Optional: without it, Foreman opens a tab instead. */
+  openBeside?(session: string, anchor: string | undefined, label: string, cwd: string, cmd: string[]): Tab;
   newSession(name: string, cwd: string, cmd: string[]): string;
   findSession(name: string): string | undefined;
   alive(tab: Tab): boolean;

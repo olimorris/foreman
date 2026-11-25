@@ -70,7 +70,7 @@ Open Rex in your repo and start Foreman:
 foreman up
 ```
 
-This opens a `foreman-<repo>` session with the orchestrator in it. Give it your backlog and deadline in plain words, or point it at a file:
+This opens a `foreman-<repo>` session with the orchestrator in it, and the status pane beside it. Give it your backlog and deadline in plain words, or point it at a file:
 
 > Here's my backlog: BACKLOG.md. Deadline is Friday.
 
@@ -84,6 +84,18 @@ From there:
 6. When the run is done, Foreman writes `.foreman/summary.md`: the PRs in the order to review them, how to test each one, and the assumptions the workers made that you should check. Run `foreman summary` to get one mid-run.
 
 All state lives in `.foreman/` in your repo, which Foreman keeps out of git. If the orchestrator restarts, it picks up from there.
+
+### Status pane
+
+The status pane sits to the right of the orchestrator and shows the run at a glance. It redraws every couple of seconds:
+
+- **Needs you**: tasks waiting on a decision, blocked, stopped or with a closed worker, with the question or reason underneath
+- **Working**: each worker's task, what it's doing right now, such as the command it's running or the file it's editing, and for how long
+- **Ready to merge**: PRs waiting for you, with the reviewer's risk
+- **Waiting**: planned tasks and what they wait on
+- **Recent**: the last few things that happened
+
+A worker that's been quiet for half the stall time turns yellow, and red once it reaches it. If you close the pane, `foreman pane` opens it again beside the tab you run it from.
 
 ### Screenshots
 

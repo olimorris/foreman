@@ -22,6 +22,7 @@ export const GROUPS: Group[] = [
       { usage: "plan show", about: "Show the stored plan" },
       { usage: "next [--max <n>]", about: "Start every task that's ready" },
       { usage: "status [--json]", about: "What each task is doing" },
+      { usage: "pane", about: "Open the status pane beside this tab" },
       { usage: "summary", about: "Write the run summary of PRs to review" },
     ],
   },

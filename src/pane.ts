@@ -1,0 +1,314 @@
+import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from "node:fs";
+import { basename, join, relative } from "node:path";
+import { loadConfig } from "./config.ts";
+import { budgetOf, jsonlFiles, loadSessions, orchestratorCost, sessionsFile, taskCost, transcriptDir, usd } from "./cost.ts";
+import { readEvents } from "./events.ts";
+import { loadDecisions } from "./ledger.ts";
+import { statusLabel } from "./overview.ts";
+import { plainTitle } from "./spawn.ts";
+import type { Repo } from "./paths.ts";
+import { loadPlan, maxWorkers, readyTasks, type Waiting } from "./plan.ts";
+import { roundDir, type Verdict } from "./review.ts";
+import { loadTasks, type Task } from "./state.ts";
+import type { Tab, Terminal } from "./terminal.ts";
+import { pluginRoot } from "./paths.ts";
+import { writeJson } from "./state.ts";
+import { STALL_MINUTES, watcherArmed } from "./watch.ts";
+
+export type Activity = { what: string; since: number; idle: boolean };
+
+type Block = { type: string; id?: string; name?: string; input?: Record<string, unknown>; tool_use_id?: string };
+
+// Each content block is its own transcript line, so a tool call still waiting for its result is what the worker is doing now.
+export function readActivity(lines: string[], cwd: string): Activity | undefined {
+  const pending = new Map<string, Activity>();
+  let last: Activity | undefined;
+  for (const line of lines) {
+    if (!line.includes('"type":"assistant"') && !line.includes('"tool_result"')) continue;
+    let entry: { type?: string; timestamp?: string; message?: { content?: Block[] | string; stop_reason?: string } };
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const at = Date.parse(entry.timestamp ?? "");
+    const blocks = Array.isArray(entry.message?.content) ? entry.message!.content : [];
+    if (Number.isNaN(at)) continue;
+    if (entry.type === "assistant") {
+      for (const b of blocks) if (b.type === "tool_use" && b.id) pending.set(b.id, { what: describeTool(b, cwd), since: at, idle: false });
+      last = entry.message?.stop_reason === "end_turn" ? { what: "waiting", since: at, idle: true } : { what: "thinking", since: at, idle: false };
+    } else if (entry.type === "user") {
+      for (const b of blocks) if (b.type === "tool_result" && b.tool_use_id) pending.delete(b.tool_use_id);
+      last = { what: "thinking", since: at, idle: false };
+    }
+  }
+  return [...pending.values()].at(-1) ?? last;
+}
+
+function describeTool(b: Block, cwd: string): string {
+  const input = b.input ?? {};
+  const path = (p: unknown) => (typeof p === "string" ? (p.startsWith(cwd) ? relative(cwd, p) : basename(p)) : "");
+  switch (b.name) {
+    case "Bash": {
+      const first = String(input.command ?? "").split("\n")[0]!;
+      // Workers often start a command by changing into their own worktree, which says nothing.
+      return `$ ${first.replace(/^cd\s+\S+\s*(;|&&)\s*/, "")}`;
+    }
+    case "Edit":
+    case "MultiEdit":
+    case "Write":
+      return `editing ${path(input.file_path)}`;
+    case "Read":
+      return `reading ${path(input.file_path)}`;
+    case "Grep":
+    case "Glob":
+      return `searching for ${input.pattern ?? "files"}`;
+    case "Agent":
+    case "Task":
+      return "running a subagent";
+    case "TodoWrite":
+      return "planning";
+    default:
+      return `using ${b.name}`;
+  }
+}
+
+const clip = (s: string, width: number) => (s.length > width ? s.slice(0, width - 3).trimEnd() + "..." : s);
+
+const TAIL_BYTES = 256 * 1024;
+
+function tailLines(file: string): string[] {
+  const size = statSync(file).size;
+  const fd = openSync(file, "r");
+  const buf = Buffer.alloc(Math.min(size, TAIL_BYTES));
+  try {
+    readSync(fd, buf, 0, buf.length, size - buf.length);
+  } finally {
+    closeSync(fd);
+  }
+  // The first line of a tail usually starts mid-line.
+  return buf.toString("utf8").split("\n").slice(size > buf.length ? 1 : 0);
+}
+
+export function workerActivity(repo: Repo, task: Task): Activity | undefined {
+  const sessions = loadSessions(sessionsFile(repo, task.id));
+  const files = jsonlFiles(transcriptDir(task.worktree)).filter((f) => sessions.some((s) => f.includes(s)));
+  const latest = files.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
+  return latest ? readActivity(tailLines(latest), task.worktree) : undefined;
+}
+
+export type PaneTask = { task: Task; title: string; spent: number; risk?: Verdict["risk"]; note?: string; activity?: Activity; closed?: boolean };
+export type OpenDecision = { id: string; title: string; by: string };
+export type Recent = { at: number; text: string };
+export type PaneInput = {
+  name: string; plan?: string; deadline?: string; approved: boolean; armed: boolean; now: number; stallMs: number;
+  spent: number; limit?: number; maxWorkers: number; tasks: PaneTask[]; waiting: (Waiting & { title: string })[]; recent: Recent[];
+  decisions: OpenDecision[];
+};
+
+type Tone = "bold" | "dim" | "red" | "yellow" | "green" | "cyan" | "heading";
+const CODES: Record<Tone, string> = { bold: "1", dim: "2", red: "31", yellow: "33", green: "32", cyan: "36", heading: "1;33" };
+type Paint = (tone: Tone, s: string) => string;
+export const paint = (colour: boolean): Paint => (tone, s) => (colour && s ? `\x1b[${CODES[tone]}m${s}\x1b[0m` : s);
+
+export function duration(ms: number): string {
+  const m = Math.floor(ms / 60_000);
+  if (m < 1) return `${Math.max(0, Math.floor(ms / 1000))}s`;
+  if (m < 60) return `${m}m`;
+  return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
+}
+
+const clock = (at: number) => new Date(at).toTimeString().slice(0, 5);
+
+const NEEDS_YOU: Task["status"][] = ["needs-decision", "blocked", "exited", "over-budget"];
+const merged = (t: Task) => !!t.mergedAt || t.status === "merged";
+
+// Columns are fitted to the pane's width: a line is cut before it's coloured, so colour codes never count towards the width.
+export function renderPane(p: PaneInput, width: number, colour = false): string[] {
+  const c = paint(colour);
+  const fit = (s: string, room = width) => clip(s, Math.max(4, room));
+  const out: string[] = [];
+  const twoSides = (left: string, right: string, tone: Tone = "dim", leftTone?: Tone) => {
+    const l = fit(left, width - right.length - 2);
+    return `${leftTone ? c(leftTone, l) : l}${" ".repeat(Math.max(2, width - l.length - right.length))}${c(tone, right)}`;
+  };
+
+  out.push(twoSides(`FOREMAN  ${p.name}`, clock(p.now), "dim", "heading"));
+  if (p.plan) out.push(c("bold", fit(p.plan + (p.approved ? "" : "  (not approved yet)"))));
+  if (p.deadline) out.push(c("dim", fit(`Due ${p.deadline}`)));
+  const spend = p.limit !== undefined ? `${usd(p.spent)} of ${usd(p.limit)} spent` : `${usd(p.spent)} spent`;
+  const active = p.tasks.filter((t) => !merged(t.task) && t.task.status !== "torn-down");
+  const watcher = p.armed ? "watcher on" : "watcher off";
+  const facts = fit(`${spend} · ${active.length} of ${p.maxWorkers} slots · ${watcher}`);
+  out.push(facts.endsWith(watcher) ? c("dim", facts.slice(0, -watcher.length)) + c(p.armed ? "green" : "red", watcher) : c("dim", facts));
+  const needsYou = (t: PaneTask) => NEEDS_YOU.includes(t.task.status) || !!t.closed;
+  const section = (title: string, rows: string[]) => rows.length && out.push("", c("heading", title.toUpperCase()), ...rows);
+
+  // Runs started before workers were numbered have none to show, so the column only appears when it says something.
+  const workers = p.tasks.some((t) => t.task.worker);
+  const head = (t: PaneTask, right: string, rightTone: Tone = "dim") => {
+    const label = `${t.task.id.padEnd(4)}${workers ? (t.task.worker ?? "").padEnd(4) : ""}${t.title}`;
+    const l = fit(label, width - right.length - 3);
+    return ` ${c("bold", l.slice(0, 4))}${l.slice(4)}${" ".repeat(Math.max(2, width - 1 - l.length - right.length))}${c(rightTone, right)}`;
+  };
+  const indent = workers ? 9 : 5;
+  const detail = (text: string, tone: Tone = "dim", right = "", rightTone: Tone = "dim") => {
+    const t = fit(text, width - indent - (right ? right.length + 2 : 0));
+    return `${" ".repeat(indent)}${c(tone, t)}${right ? " ".repeat(Math.max(2, width - indent - t.length - right.length)) + c(rightTone, right) : ""}`;
+  };
+
+  section("Needs you", [
+    ...active.filter(needsYou).flatMap((t) => [
+      head(t, t.closed ? "worker closed" : statusLabel(t.task), "red"),
+      ...(t.note && !t.closed ? [detail(t.note, "red")] : []),
+    ]),
+    ...p.decisions.map((d) => {
+      const right = `decision from ${d.by}`;
+      const l = fit(`${d.id.padEnd(5)}${d.title}`, width - right.length - 3);
+      return ` ${c("bold", l.slice(0, 5))}${l.slice(5)}${" ".repeat(Math.max(2, width - 1 - l.length - right.length))}${c("red", right)}`;
+    }),
+  ]);
+
+  const quiet = (a: Activity) => {
+    const idle = p.now - a.since;
+    const tone: Tone = idle >= p.stallMs ? "red" : idle >= p.stallMs / 2 ? "yellow" : "dim";
+    return { text: duration(idle), tone };
+  };
+  section("Working", active.filter((t) => !needsYou(t) && (t.task.status === "running" || t.task.status === "done")).flatMap((t) => {
+    if (t.task.status === "done") return [head(t, usd(t.spent)), detail(`in review, round ${(t.task.reviews ?? 0) || 1}`, "cyan")];
+    const a = t.activity;
+    if (!a) return [head(t, usd(t.spent)), detail("starting")];
+    const q = quiet(a);
+    return [head(t, usd(t.spent)), detail(a.idle ? "idle" : a.what, a.idle ? q.tone : "cyan", q.text, q.tone)];
+  }));
+
+  section("Ready to merge", active.filter((t) => t.task.status === "pr-open").map((t) =>
+    head(t, `#${t.task.pr ?? "?"}${t.risk ? ` risk ${t.risk}` : ""}`, t.risk === "high" ? "red" : t.risk === "medium" ? "yellow" : "green")));
+
+  section("Waiting", p.waiting.map((w) => ` ${c("bold", w.id.padEnd(4))}${c("dim", fit(w.reason, width - 5))}`));
+
+  const done = p.tasks.filter((t) => merged(t.task));
+  if (done.length) out.push("", c("dim", fit(`Merged: ${done.map((t) => t.task.id + (t.task.pr ? ` #${t.task.pr}` : "")).join(", ")}`)));
+
+  if (p.recent.length) section("Recent", p.recent.map((r) => ` ${c("dim", clock(r.at))}  ${fit(r.text, width - 8)}`));
+  if (!p.tasks.length && !p.waiting.length) out.push("", c("dim", "No tasks yet. Give the orchestrator a backlog."));
+  return out;
+}
+
+const RECENT = 6;
+
+function verdictOf(repo: Repo, task: Task): Verdict | undefined {
+  const file = join(roundDir(repo, task.id, task.reviews ?? 0), "verdict.json");
+  try {
+    return task.reviews && existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const EVENT_WORDS: Record<string, string> = { done: "finished", blocked: "blocked", "needs-decision": "needs a decision", rebased: "rebased", exited: "worker closed", reviewed: "reviewed" };
+
+// costs holds each task's spend and the orchestrator's under "foreman", as spendByTask returns them.
+export function gatherPane(repo: Repo, now = Date.now(), costs: Map<string, number> = new Map(), closed: Set<string> = new Set()): PaneInput {
+  const tasks = loadTasks(repo);
+  const plan = loadPlan(repo);
+  const max = maxWorkers(repo);
+  const recent: Recent[] = [];
+  const paneTasks = tasks.map((task): PaneTask => {
+    const events = readEvents(repo, task.id);
+    for (const e of events) recent.push({ at: Date.parse(e.at), text: `${task.id} ${EVENT_WORDS[e.type] ?? e.type}${e.note ? `: ${e.note}` : ""}` });
+    recent.push({ at: Date.parse(task.createdAt), text: `${task.id} started${task.worker ? ` on ${task.worker}` : ""}` });
+    if (task.mergedAt) recent.push({ at: Date.parse(task.mergedAt), text: `${task.id} merged${task.pr ? ` #${task.pr}` : ""}` });
+    const lastNote = [...events].reverse().find((e) => e.type === task.status)?.note;
+    return {
+      task,
+      title: plainTitle(task.title ?? plan?.tasks.find((t) => t.id === task.id)?.title ?? ""),
+      spent: costs.get(task.id) ?? 0,
+      risk: verdictOf(repo, task)?.risk,
+      note: lastNote,
+      activity: task.status === "running" ? workerActivity(repo, task) : undefined,
+      closed: task.status === "running" && closed.has(task.id),
+    };
+  });
+  const waiting = plan?.approvedAt ? readyTasks(plan, tasks, max).waiting.map((w) => ({ ...w, title: plan.tasks.find((t) => t.id === w.id)?.title ?? "" })) : [];
+  const budget = budgetOf(repo);
+  return {
+    name: basename(repo.root),
+    plan: plan?.title,
+    deadline: plan?.deadline,
+    approved: !!plan?.approvedAt,
+    armed: watcherArmed(repo),
+    now,
+    stallMs: (loadConfig(repo).stallMinutes ?? STALL_MINUTES) * 60_000,
+    spent: [...costs.values()].reduce((s, n) => s + n, 0),
+    limit: budget.plan,
+    maxWorkers: max,
+    tasks: paneTasks,
+    waiting,
+    recent: recent.filter((r) => !Number.isNaN(r.at)).sort((a, b) => b.at - a.at).slice(0, RECENT),
+    decisions: loadDecisions(repo).filter((d) => d.status === "proposed").map((d) => ({ id: d.id, title: d.title, by: d.by })),
+  };
+}
+
+// Spend comes from reading whole transcripts, so it's refreshed less often than what the workers are doing.
+export function spendByTask(repo: Repo): Map<string, number> {
+  const costs = new Map(loadTasks(repo).map((t) => [t.id, taskCost(repo, t).total]));
+  costs.set("foreman", orchestratorCost(repo).usd);
+  return costs;
+}
+
+const REDRAW_MS = 2_000;
+const SPEND_MS = 30_000;
+
+// Checking whether each worker's tab is still open asks the terminal, so it's refreshed with the spend rather than on every redraw.
+function closedTabs(repo: Repo, term: Terminal): Set<string> {
+  return new Set(loadTasks(repo).filter((t) => t.status === "running" && t.tab && !term.alive(t.tab)).map((t) => t.id));
+}
+
+export async function livePane(repo: Repo, term: Terminal): Promise<never> {
+  const out = process.stdout;
+  out.write("\x1b[?25l");
+  const restore = () => (out.write("\x1b[?25h\n"), process.exit(0));
+  process.on("SIGINT", restore);
+  process.on("SIGTERM", restore);
+  let costs = new Map<string, number>();
+  let closed = new Set<string>();
+  let checkedAt = 0;
+  // A half-written config or a transcript removed mid-read must not kill the pane, or foreman pane would open a second one beside the dead one.
+  const draw = () => {
+    try {
+      if (Date.now() - checkedAt >= SPEND_MS) (costs = spendByTask(repo)), (closed = closedTabs(repo, term)), (checkedAt = Date.now());
+      const lines = renderPane(gatherPane(repo, Date.now(), costs, closed), Math.max(30, (out.columns ?? 60) - 1), !process.env.NO_COLOR);
+      // Rewriting in place instead of clearing first stops the pane flickering on every redraw.
+      out.write("\x1b[H" + lines.map((l) => l + "\x1b[K").join("\n") + "\x1b[J");
+    } catch (err) {
+      out.write(`\x1b[H\x1b[2Jforeman pane: ${err instanceof Error ? err.message : err}\x1b[J`);
+    }
+  };
+  out.on("resize", draw);
+  for (;;) {
+    draw();
+    await Bun.sleep(REDRAW_MS);
+  }
+}
+
+export const paneFile = (repo: Repo) => join(repo.foreman, "pane.json");
+
+export function savedPane(repo: Repo): Tab | undefined {
+  try {
+    return JSON.parse(readFileSync(paneFile(repo), "utf8"));
+  } catch {
+    return undefined;
+  }
+}
+
+
+// A second pane would draw the same thing twice, so an open one is left alone.
+export function openPane(repo: Repo, term: Terminal, session: string, anchor?: string): boolean {
+  const open = savedPane(repo);
+  if (open && open.session === session && term.alive(open)) return false;
+  const cmd = [join(pluginRoot, "bin", "foreman"), "pane", "--live"];
+  const tab = term.openBeside ? term.openBeside(session, anchor, "status", repo.root, cmd) : term.open(session, "status", repo.root, cmd);
+  writeJson(paneFile(repo), tab);
+  return true;
+}
