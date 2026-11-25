@@ -3,8 +3,8 @@ import type { Repo } from "./paths.ts";
 import type { Terminal } from "./terminal.ts";
 import { sendToTask } from "./send.ts";
 import { baseRef } from "./snapshot.ts";
-import { inFlight, loadTasks, updateTask, type Task } from "./state.ts";
-import { logRun } from "./events.ts";
+import { loadTasks, updateTask, type Task } from "./state.ts";
+import { isFinished, transition } from "./lifecycle.ts";
 
 export type SyncProbes = {
   fetch(base: string): void;
@@ -59,10 +59,9 @@ export function sync(repo: Repo, base: string, term: Terminal, probes: SyncProbe
   const ref = baseRef(repo, base);
   const head = run(["git", "-C", repo.root, "rev-parse", ref]).stdout.trim();
   const result: SyncResult = { head, merged: [], mergedEarly: [], asked: [], failed: [], retargeted: [] };
-  const open = inFlight(loadTasks(repo)).filter((t) => !t.mergedAt);
+  const open = loadTasks(repo).filter((t) => !isFinished(t));
   const markMerged = (task: Task) => {
-    updateTask(repo, task.id, { mergedAt: new Date().toISOString(), status: "merged" });
-    logRun(repo, task.id, "merged", task.pr ? `#${task.pr}` : undefined);
+    transition(repo, task.id, { type: "merged" });
     result.merged.push(task.id);
   };
 

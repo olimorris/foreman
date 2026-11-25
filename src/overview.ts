@@ -4,6 +4,7 @@ import type { Repo } from "./paths.ts";
 import { loadPlan } from "./plan.ts";
 import { plainTitle } from "./spawn.ts";
 import { loadTasks, type Task } from "./state.ts";
+import { isFinished } from "./lifecycle.ts";
 import { sectionLines, type Row, type Section } from "./status.ts";
 import { PLAIN, type Style } from "./style.ts";
 
@@ -50,8 +51,7 @@ export function table(rows: string[][], rightAligned: number[] = []): string[] {
 
 // Finished tasks still count towards the plan, but the ones still being built are what the reader acts on.
 export function byActivity(tasks: Task[]): Task[] {
-  const finished = (t: Task) => t.status === "torn-down" || t.status === "merged";
-  return [...tasks.filter((t) => !finished(t)), ...tasks.filter(finished)];
+  return [...tasks.filter((t) => !isFinished(t)), ...tasks.filter(isFinished)];
 }
 
 const BAR = 12;
@@ -70,9 +70,8 @@ export function budgetOverview(repo: Repo, style: Style = PLAIN, change = "Chang
   const all = byActivity(loadTasks(repo));
   const planned = planSpending(repo, all);
   const counted = new Set(planned.tasks.map((c) => c.id));
-  const done = (t: Task) => t.status === "torn-down" || t.status === "merged";
   // An earlier plan's task still in flight has its own limit, so it stays on show without counting towards this plan.
-  const tasks = all.filter((t) => counted.has(t.id) || !done(t));
+  const tasks = all.filter((t) => counted.has(t.id) || !isFinished(t));
   const costs = new Map(tasks.map((t) => [t.id, taskCost(repo, t)]));
   const orch = planned.orchestrator;
   const spent = planned.usd;
@@ -80,11 +79,11 @@ export function budgetOverview(repo: Repo, style: Style = PLAIN, change = "Chang
   const row = (t: Task): Row => {
     const limit = taskLimit(budget, t.id);
     const cells = [t.id, ...(numbered ? [t.worker ?? ""] : []), taskTitle(repo, t, 56), usd(costs.get(t.id)!.total), limit !== undefined ? `of ${usd(limit)}` : "no limit"];
-    return { cells: done(t) ? cells : [...cells.slice(0, -1), `${cells.at(-1)!}  ${bar(costs.get(t.id)!.total, limit, style)}`], tone: () => (s: string) => s, dim: done(t) };
+    return { cells: isFinished(t) ? cells : [...cells.slice(0, -1), `${cells.at(-1)!}  ${bar(costs.get(t.id)!.total, limit, style)}`], tone: () => (s: string) => s, dim: isFinished(t) };
   };
   const sections: Section[] = [
-    { title: "In progress", rows: tasks.filter((t) => !done(t) && counted.has(t.id)).map(row) },
-    { title: "Finished", rows: tasks.filter(done).map(row) },
+    { title: "In progress", rows: tasks.filter((t) => !isFinished(t) && counted.has(t.id)).map(row) },
+    { title: "Finished", rows: tasks.filter(isFinished).map(row) },
     { title: "From earlier plans", rows: tasks.filter((t) => !counted.has(t.id)).map(row) },
     { title: "Foreman itself", rows: [{ cells: ["", ...(numbered ? [""] : []), "The orchestrator", usd(orch.usd), ""], tone: () => (s: string) => s }] },
   ].filter((s) => s.rows.length);

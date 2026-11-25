@@ -8,7 +8,8 @@ import { loadDecisions } from "./ledger.ts";
 import { taskDir, type Repo } from "./paths.ts";
 import { CONVENTIONAL, loadPlan, stackable } from "./plan.ts";
 import { latest, rounds, type PrDraft, type Shot, type Verdict } from "./rounds.ts";
-import { diffBase, findTask, loadTasks, updateTask, type Task } from "./state.ts";
+import { diffBase, findTask, loadTasks, type Task } from "./state.ts";
+import { transition } from "./lifecycle.ts";
 import { loadSessions, sessionsFile, taskCost, transcriptDir } from "./cost.ts";
 
 export type { Shot } from "./rounds.ts";
@@ -178,8 +179,7 @@ export function deliver(repo: Repo, id: string, opts: { dryRun?: boolean; title?
   }
   const url = must(["gh", "pr", "create", "--base", buildsOn?.branch ?? task.base, "--head", task.branch, "--title", title, "--body-file", packet], { cwd: repo.root }).trim().split("\n").at(-1)!;
   const pr = Number(url.match(/\/pull\/(\d+)/)?.[1]);
-  updateTask(repo, id, { pr, status: "pr-open" });
-  logRun(repo, id, "pr-opened", `#${pr}`);
+  transition(repo, id, { type: "pr-opened", pr });
   const started = new Set(loadTasks(repo).map((t) => t.id));
   const next = stackable(repo) ? loadPlan(repo)?.tasks.filter((t) => t.deps.includes(id) && !started.has(t.id)).map((t) => t.id) ?? [] : [];
   return { packet, title, pr, url, note: `opened PR #${pr}: ${url}${next.length ? `. Call next, which can start ${next.join(", ")} on top of it` : ""}${titleNote}` };

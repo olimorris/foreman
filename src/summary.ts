@@ -8,6 +8,7 @@ import { loadPlan, type Plan } from "./plan.ts";
 import { loadQuestions, type Question } from "./questions.ts";
 import { latest, type Verdict } from "./rounds.ts";
 import { loadTasks, type Task } from "./state.ts";
+import { isFinished, isMerged } from "./lifecycle.ts";
 import { run } from "./exec.ts";
 import { loadTogether, renderTogether, staleness, type Together } from "./together.ts";
 
@@ -96,10 +97,10 @@ const UNFINISHED: Record<string, string> = {
 export function gather(repo: Repo, plan: Plan | undefined): SummaryInput {
   const tasks = loadTasks(repo);
   const titleOf = (id: string) => plan?.tasks.find((t) => t.id === id)?.title ?? lastDone(repo, id)?.note ?? id;
-  const merged = tasks.filter((t) => t.mergedAt).map((t) => t.id);
+  const merged = tasks.filter(isMerged).map((t) => t.id);
   const ready: Ready[] = [];
   const unfinished: Unfinished[] = [];
-  for (const task of tasks.filter((t) => !t.mergedAt && t.status !== "torn-down")) {
+  for (const task of tasks.filter((t) => !isFinished(t))) {
     const verdict = latest(repo, task)?.verdict;
     if (task.pr || (task.status === "done" && verdict?.verdict === "approve")) {
       const blocks = plan?.tasks.filter((p) => p.deps.includes(task.id) && !merged.includes(p.id)).map((p) => p.id) ?? [];
@@ -158,7 +159,7 @@ export async function page(text: string): Promise<void> {
 }
 
 // A task keeps its PR open while its worker is blocked, over budget or fixing review feedback.
-const hasOpenPr = (t: Task) => !!t.pr && !t.mergedAt && t.status !== "torn-down";
+const hasOpenPr = (t: Task) => !!t.pr && !isFinished(t);
 
 export function openPrs(repo: Repo): Task[] {
   return reviewOrder(gather(repo, loadPlan(repo)).ready).map((r) => r.task).filter(hasOpenPr);

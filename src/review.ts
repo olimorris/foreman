@@ -12,6 +12,7 @@ import { sendToTask } from "./send.ts";
 import { capture, parseScreens, type Capture } from "./shots.ts";
 import { checkModel, taskLabel } from "./spawn.ts";
 import { diffBase, findTask, loadTasks, updateTask, type Task } from "./state.ts";
+import { transition } from "./lifecycle.ts";
 import { budgetLeft } from "./cost.ts";
 import { loadSkills, prSkill, PR_SKILL, skillFolders, type Skill } from "./skills.ts";
 import { latest, roundDir, roundFiles, rounds, type Verdict } from "./rounds.ts";
@@ -200,7 +201,7 @@ export function sendFeedback(repo: Repo, id: string, term: Terminal): string {
     throw new Error(`${id} has had ${revisions} revision rounds. Escalate to the user with the screenshots in ${roundDir(repo, id, round)} instead`);
   }
   sendToTask(repo, task, renderFeedback(verdict, round), term);
-  updateTask(repo, id, { revisions: revisions + 1, status: "running" });
+  transition(repo, id, { type: "feedback" });
   return `sent round ${round} feedback to ${id} (revision ${revisions + 1} of ${MAX_REVISIONS})`;
 }
 

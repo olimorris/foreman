@@ -10,7 +10,6 @@ import { asRole } from "./tools/tool.ts";
 import { styleFor } from "./style.ts";
 import { runReview } from "./review.ts";
 import { join } from "node:path";
-import { logRun } from "./events.ts";
 import { areaLock, hookWho, recordHookBlock, sessionStartContext, stopHook, type HookInput, type LockContext } from "./hooks.ts";
 import { findRepo, pluginRoot, socketPath, type Repo } from "./paths.ts";
 import { terminal } from "./integrations/index.ts";
@@ -144,8 +143,7 @@ async function main(argv: string[]): Promise<number> {
       const [id] = positional;
       if (!id) throw usageError("restart");
       const session = requireSession(term, "restart");
-      const task = restartWorker(repo, findTask(repo, id), term, session, opts.model?.[0]);
-      logRun(repo, id, "restarted");
+      const task = restartWorker(repo, findTask(repo, id), term, session, { model: opts.model?.[0] });
       console.log(`restarted ${id}'s worker in a new tab, carrying on its last session${onModel(task)}`);
       return 0;
     }
@@ -154,8 +152,7 @@ async function main(argv: string[]): Promise<number> {
       const [id] = positional;
       if (!id) throw usageError("resume");
       const session = requireSession(term, "resume");
-      const task = resume(repo, id, term, session, opts.model?.[0]);
-      logRun(repo, id, "resumed");
+      const task = resume(repo, id, term, session, { model: opts.model?.[0] });
       console.log(`resumed ${id}'s worker in a new tab${onModel(task)}`);
       return 0;
     }

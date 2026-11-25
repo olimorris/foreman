@@ -11,6 +11,7 @@ import type { Repo } from "./paths.ts";
 import { loadPlan, maxWorkers, readyTasks, type Waiting } from "./plan.ts";
 import { latest, type Verdict } from "./rounds.ts";
 import { loadTasks, type Task } from "./state.ts";
+import { isFinished, isMerged, needsUser } from "./lifecycle.ts";
 import type { Tab, Terminal } from "./terminal.ts";
 import { pluginRoot } from "./paths.ts";
 import { writeJson } from "./state.ts";
@@ -106,8 +107,6 @@ export function duration(ms: number): string {
 
 const clock = (at: number) => new Date(at).toTimeString().slice(0, 5);
 
-const NEEDS_YOU: Task["status"][] = ["needs-decision", "blocked", "exited", "over-budget"];
-const merged = (t: Task) => !!t.mergedAt || t.status === "merged";
 
 // Columns are fitted to the pane's width: a line is cut before it's coloured, so colour codes never count towards the width.
 export function renderPane(p: PaneInput, width: number, colour = false): string[] {
@@ -123,13 +122,14 @@ export function renderPane(p: PaneInput, width: number, colour = false): string[
   if (p.plan) out.push(c("bold", fit(p.plan + (p.approved ? "" : "  (not approved yet)"))));
   if (p.deadline) out.push(c("dim", fit(`Due ${p.deadline}`)));
   const spend = p.limit !== undefined ? `${usd(p.spent)} of ${usd(p.limit)} spent` : `${usd(p.spent)} spent`;
-  const active = p.tasks.filter((t) => !merged(t.task) && t.task.status !== "torn-down");
+  const active = p.tasks.filter((t) => !isFinished(t.task));
   const watcher = p.armed ? "watcher on" : "watcher off";
   const facts = fit(`${spend} · ${active.length} of ${p.maxWorkers} slots · ${watcher}`);
   out.push(facts.endsWith(watcher) ? c("dim", facts.slice(0, -watcher.length)) + c(p.armed ? "green" : "red", watcher) : c("dim", facts));
   if (p.usageLimit) out.push(c("yellow", fit(`Usage limit reached · work resumes at ${resetPhrase(p.usageLimit, p.now)}`)));
   const blocksOf = (t: PaneTask) => (t.task.status === "pr-open" ? [] : (p.blocks ?? []).filter((b) => b.task === t.task.id));
-  const needsYou = (t: PaneTask) => NEEDS_YOU.includes(t.task.status) || !!t.closed || blocksOf(t).length > 0;
+  // An open PR has its own section below, so it isn't listed twice.
+  const needsYou = (t: PaneTask) => (needsUser(t.task) && t.task.status !== "pr-open") || !!t.closed || blocksOf(t).length > 0;
   const own = (p.blocks ?? []).filter((b) => b.role === "orchestrator");
   const section = (title: string, rows: string[]) => rows.length && out.push("", c("heading", title.toUpperCase()), ...rows);
 
@@ -183,7 +183,7 @@ export function renderPane(p: PaneInput, width: number, colour = false): string[
 
   section("Waiting", p.waiting.map((w) => ` ${c("bold", w.id.padEnd(4))}${c("dim", fit(w.reason, width - 5))}`));
 
-  const done = p.tasks.filter((t) => merged(t.task));
+  const done = p.tasks.filter((t) => isMerged(t.task));
   if (done.length) out.push("", c("dim", fit(`Merged: ${done.map((t) => t.task.id + (t.task.pr ? ` #${t.task.pr}` : "")).join(", ")}`)));
 
   if (p.recent.length) section("Recent", p.recent.map((r) => ` ${c("dim", clock(r.at))}  ${fit(r.text, width - 8)}`));

@@ -15,6 +15,7 @@ import { pauseForLimit, restartWorker, resume, stopWorker } from "./stop.ts";
 import { clockAt, loadLimit, resetPhrase, resumeDue, saveLimit, workerLimit, type LimitHit, type UsageLimit } from "./limits.ts";
 import { taskDir } from "./paths.ts";
 import { inFlight, loadTasks, updateTask, type Task } from "./state.ts";
+import { tabOpen } from "./lifecycle.ts";
 import { approved, automergeOn, checksOf, mergeCall, mergePr, repoMergeMethod, type Check, type Merge, type MergeMethod } from "./automerge.ts";
 import { blockLine, syncBlocks, type PermissionBlock } from "./permissions.ts";
 import { busy, commandName, isWorker, pidAlive, processesIn, sample, tidy, unstoppableLine, type CpuSample, type Proc } from "./procs.ts";
@@ -77,7 +78,7 @@ export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: Tracked
     }
     next.events[task.id] = events.length;
 
-    if (!task.tab || task.status === "exited" || task.status === "over-budget" || task.status === "limited") continue;
+    if (!tabOpen(task)) continue;
     const alive = probes.alive(task);
     // A resumed worker can exit again, and that exit must be reported too.
     if (alive) next.exited = next.exited.filter((id) => id !== task.id);
@@ -304,15 +305,13 @@ export async function watchFor(repo: Repo, base: string, term: Terminal, { signa
       saveLimit(repo, cursor.limit);
       for (const id of result.pause) {
         try {
-          pauseForLimit(repo, tasks.find((t) => t.id === id)!, term);
-          logRun(repo, id, "paused", `usage limit, resets ${clockAt(cursor.limit!.resetsAt, Date.now())}`);
+          pauseForLimit(repo, tasks.find((t) => t.id === id)!, term, `usage limit, resets ${clockAt(cursor.limit!.resetsAt, Date.now())}`);
         } catch {}
       }
       for (const id of result.resume) {
         const task = tasks.find((t) => t.id === id)!;
         try {
-          resume(repo, id, term, task.tab!.session, undefined, resumePrompt(repo, id));
-          logRun(repo, id, "resumed", "the usage limit reset");
+          resume(repo, id, term, task.tab!.session, { prompt: resumePrompt(repo, id), note: "the usage limit reset" });
         } catch (err) {
           result.reasons.push(`not-resumed ${id}: ${err instanceof Error ? err.message : err}`);
         }
@@ -326,8 +325,7 @@ export async function watchFor(repo: Repo, base: string, term: Terminal, { signa
       for (const id of result.restart) {
         const task = tasks.find((t) => t.id === id)!;
         try {
-          restartWorker(repo, task, term, task.tab!.session);
-          logRun(repo, id, "restarted", `no reply for ${(2 * stallMs) / 60_000}m`);
+          restartWorker(repo, task, term, task.tab!.session, { note: `no reply for ${(2 * stallMs) / 60_000}m` });
         } catch (err) {
           result.reasons.push(`stuck ${id}: restarting its hung worker failed: ${err instanceof Error ? err.message : err}`);
         }
@@ -349,11 +347,10 @@ export async function watchFor(repo: Repo, base: string, term: Terminal, { signa
         cursor.budget = over.alerted;
         for (const id of over.stop) {
           const task = tasks.find((t) => t.id === id)!;
-          if (!stopWorker(repo, task, term)) continue;
-          result.reasons.push(`stopped ${id}`);
           const spent = costs.find((c) => c.id === id)!.total;
           const limit = taskLimit(budget, id);
-          logRun(repo, id, "stopped", limit !== undefined && spent > limit ? `over budget, ${usd(spent)} of ${usd(limit)}` : "the plan is over budget");
+          if (!stopWorker(repo, task, term, "budget", limit !== undefined && spent > limit ? `over budget, ${usd(spent)} of ${usd(limit)}` : "the plan is over budget")) continue;
+          result.reasons.push(`stopped ${id}`);
         }
       }
       if (cursor.limit) cursor.held = [...(cursor.held ?? []), ...result.reasons.splice(0)];

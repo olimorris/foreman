@@ -7,7 +7,6 @@ import { loadConfig, saveConfig } from "../config.ts";
 import { budgetLeft, budgetOf, usd } from "../cost.ts";
 import { accept, findContext, reject, writeIndex } from "../decisions.ts";
 import { deliver } from "../deliver.ts";
-import { logRun } from "../events.ts";
 import { terminal } from "../integrations/index.ts";
 import { findDecision, loadDecisions, propose } from "../ledger.ts";
 import { activeLimit, limitLine } from "../limits.ts";
@@ -23,7 +22,8 @@ import { capture, parseScreens } from "../shots.ts";
 import { adrLayout, loadSkills } from "../skills.ts";
 import { baseRef, snapshot } from "../snapshot.ts";
 import { ensureForeman, spawn } from "../spawn.ts";
-import { findTask, loadTasks, updateTask } from "../state.ts";
+import { findTask, loadTasks } from "../state.ts";
+import { transition } from "../lifecycle.ts";
 import { restartWorker, resume, stopWorker } from "../stop.ts";
 import { sync } from "../sync.ts";
 import { teardown } from "../teardown.ts";
@@ -281,8 +281,7 @@ export function orchestratorTools(term: () => Terminal = terminal): Tool[] {
         const id = args.task as string;
         const task = findTask(repo, id);
         const via = sendToTask(repo, task, (args.message as string).trim(), term());
-        // A blocked worker that gets an answer is working again.
-        if (task.status === "blocked" || task.status === "needs-decision") updateTask(repo, id, { status: "running" });
+        transition(repo, id, { type: "messaged" });
         return `sent to ${id} via ${via}`;
       }),
     tool("review", "Review a task whose worker reported done. It opens a review tab, and the verdict arrives through the watcher. Load the review skill first.",
@@ -323,7 +322,6 @@ export function orchestratorTools(term: () => Terminal = terminal): Tool[] {
       (args, repo) => {
         const id = args.task as string;
         const stopped = stopWorker(repo, findTask(repo, id), term());
-        if (stopped) logRun(repo, id, "paused");
         return stopped ? `stopped ${id}'s worker. Its work so far is in its worktree` : `${id} had no worker running`;
       }),
     tool("resume", "Reopen a stopped worker's session in a new tab.",
@@ -331,8 +329,7 @@ export function orchestratorTools(term: () => Terminal = terminal): Tool[] {
       (args, repo) => {
         const id = args.task as string;
         const t = term();
-        const task = resume(repo, id, t, sessionOf(t, "resume"), text(args, "model"));
-        logRun(repo, id, "resumed");
+        const task = resume(repo, id, t, sessionOf(t, "resume"), { model: text(args, "model") });
         return `resumed ${id}'s worker in a new tab${onModel(task)}`;
       }),
     tool("restart", "Close a task's worker and reopen its session in a new tab, carrying on where it was.",
@@ -340,8 +337,7 @@ export function orchestratorTools(term: () => Terminal = terminal): Tool[] {
       (args, repo) => {
         const id = args.task as string;
         const t = term();
-        const task = restartWorker(repo, findTask(repo, id), t, sessionOf(t, "restart"), text(args, "model"));
-        logRun(repo, id, "restarted");
+        const task = restartWorker(repo, findTask(repo, id), t, sessionOf(t, "restart"), { model: text(args, "model") });
         return `restarted ${id}'s worker in a new tab, carrying on its last session${onModel(task)}`;
       }),
     tool("tidy", "Stop processes a task's old runs left behind, such as a test run that outlived its time limit. The watcher already does this on every pass, so call it only when a worker says a leftover process is in its way.",

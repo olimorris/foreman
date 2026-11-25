@@ -4,6 +4,7 @@ import { loadConfig } from "./config.ts";
 import { overlaps } from "./decisions.ts";
 import type { Repo } from "./paths.ts";
 import { latest } from "./rounds.ts";
+import { holdsSlot, isFinished, isMerged } from "./lifecycle.ts";
 import { checkBrief, checkModel } from "./spawn.ts";
 import { loadTasks, writeJson, type Task } from "./state.ts";
 import { usageError } from "./help.ts";
@@ -105,8 +106,6 @@ export function sharedPaths(plan: Plan): string[] {
   return notes;
 }
 
-export const merged = (t: Task) => !!t.mergedAt;
-export const active = (tasks: Task[]) => tasks.filter((t) => t.status !== "torn-down" && !merged(t));
 
 export type Waiting = { id: string; reason: string };
 export type Starting = PlanTask & { stackedOn?: string };
@@ -120,12 +119,12 @@ export function stackable(repo: Repo): CanStackOn | undefined {
 
 export function readyTasks(plan: Plan, tasks: Task[], max: number, canStackOn?: CanStackOn): { start: Starting[]; waiting: Waiting[] } {
   const byId = new Map(tasks.map((t) => [t.id, t]));
-  const busy = active(tasks);
+  const busy = tasks.filter(holdsSlot);
   const start: Starting[] = [];
   const waiting: Waiting[] = [];
   for (const t of [...plan.tasks].sort(byPriority(plan))) {
     if (byId.has(t.id)) continue;
-    const blockers = t.deps.filter((d) => !byId.get(d) || !merged(byId.get(d)!));
+    const blockers = t.deps.filter((d) => !byId.get(d) || !isMerged(byId.get(d)!));
     // Only one level deep, because every rebase down a chain of unmerged branches can conflict.
     const parent = blockers.length === 1 && canStackOn ? byId.get(blockers[0]!) : undefined;
     const stackedOn = parent && !parent.stackedOn && canStackOn!(parent) ? parent.id : undefined;
@@ -170,7 +169,7 @@ export function workers(repo: Repo, args: string[]): string[] {
   const plan = { ...p, maxWorkers: n };
   writeJson(planPath(repo), plan);
   const tasks = loadTasks(repo);
-  const holding = active(tasks).length;
+  const holding = tasks.filter(holdsSlot).length;
   return [
     `${atOnce(n)} until this plan finishes`,
     ...(holding > n ? [`${holding} tasks already hold a slot. None of them stops, and new tasks wait until fewer than ${n} do`] : []),
@@ -186,7 +185,7 @@ export function loadPlan(repo: Repo): Plan | undefined {
 
 const runningPlan = (repo: Repo, stored: Plan): boolean => {
   const tasks = loadTasks(repo);
-  const done = (id: string) => tasks.some((t) => t.id === id && (t.status === "merged" || t.status === "torn-down"));
+  const done = (id: string) => tasks.some((t) => t.id === id && isFinished(t));
   return !stored.tasks.every((t) => done(t.id));
 };
 

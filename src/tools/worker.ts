@@ -4,7 +4,8 @@ import { propose } from "../ledger.ts";
 import { addNote, loadNotes, newNoteMessage, shareNote } from "../notes.ts";
 import { names, tidy, unstoppableLine } from "../procs.ts";
 import { ensureForeman } from "../spawn.ts";
-import { findTask, updateTask } from "../state.ts";
+import { findTask } from "../state.ts";
+import { transition } from "../lifecycle.ts";
 import type { Terminal } from "../terminal.ts";
 import type { Session, Tool } from "./tool.ts";
 
@@ -45,7 +46,7 @@ export function workerTools(term: () => Terminal = terminal): Tool[] {
         }
         const assumptions = lines(args.assumptions);
         appendEvent(s.repo, id, type, summary, { test: test.length ? test : undefined, assumptions: assumptions.length ? assumptions : undefined });
-        if (type !== "rebased") updateTask(s.repo, id, { status: type });
+        transition(s.repo, id, { type: "reported", report: type });
         return `reported ${type} for ${id}`;
       },
     },

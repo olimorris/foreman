@@ -3,7 +3,8 @@ import { join } from "node:path";
 import type { Repo } from "./paths.ts";
 import type { Terminal } from "./terminal.ts";
 import { sendToTask } from "./send.ts";
-import { inFlight, loadTasks, type Task } from "./state.ts";
+import { loadTasks, type Task } from "./state.ts";
+import { canHear } from "./lifecycle.ts";
 import { withLock } from "./store.ts";
 
 export type Note = { text: string; by: string; at: string };
@@ -64,9 +65,16 @@ function renderNotes(notes: Note[]): string {
   ].join("\n");
 }
 
-// Workers that are closed, stopped or finished have no session to read a message, and the one that found the fact already knows it.
+// Workers that are closed, paused or finished have no session to read a message, and the one that found the fact already knows it.
 export function noteAudience(tasks: Task[], by: string): Task[] {
-  return inFlight(tasks).filter((t) => t.id !== by && t.tab && !["exited", "over-budget", "merged"].includes(t.status));
+  return tasks.filter((t) => t.id !== by && canHear(t));
+}
+
+// A paused worker heard none of the notes added while its tab was closed, so its resume prompt carries them.
+export function missedNotes(repo: Repo, since: string | undefined): string | undefined {
+  const missed = since ? loadNotes(repo).filter((n) => n.at > since) : [];
+  if (!missed.length) return undefined;
+  return [`While you were paused, ${missed.length > 1 ? "these notes about the setup were" : "this note about the setup was"} added. Every note is in ${notesDoc(repo)}.`, ...missed.map((n) => `- ${n.text}`)].join("\n");
 }
 
 export type Shared = { sent: string[]; failed: string[] };

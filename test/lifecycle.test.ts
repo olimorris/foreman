@@ -6,7 +6,8 @@ import { appendEvent, readEvents, readRunLog } from "../src/events.ts";
 import { must, run } from "../src/exec.ts";
 import { checkBrief, spawn, tabLabel, workerCommand } from "../src/spawn.ts";
 import { saveConfig } from "../src/config.ts";
-import { findTask, loadTasks, nextWorker, updateTask, type Task } from "../src/state.ts";
+import { findTask, loadTasks, updateTask, type Task } from "../src/state.ts";
+import { canHear, isFinished, isMerged, needsUser, next, nextWorker, tabOpen, transition, type Event } from "../src/lifecycle.ts";
 import { teardown } from "../src/teardown.ts";
 import { restartWorker, resume, stopWorker } from "../src/stop.ts";
 import { pidAlive, processesIn } from "../src/procs.ts";
@@ -109,17 +110,17 @@ describe("models", () => {
   test("resume and restart can switch a task's model, so a bad one isn't stuck on the task", () => {
     const { repo, term } = spawned("T1", "haiku");
     term.alive = () => false;
-    resume(repo, "T1", term, "session:1", "sonnet");
+    resume(repo, "T1", term, "session:1", { model: "sonnet" });
     expect(modelFlag(term.opened[1]!)).toBe("sonnet");
     expect(findTask(repo, "T1").model).toBe("sonnet");
-    restartWorker(repo, findTask(repo, "T1"), term, "session:1", "opus");
+    restartWorker(repo, findTask(repo, "T1"), term, "session:1", { model: "opus" });
     expect(modelFlag(term.opened[2]!)).toBe("opus");
     expect(findTask(repo, "T1").model).toBe("opus");
   });
 
   test("restarting with a bad model leaves the running worker alone", () => {
     const { repo, term } = spawned("T1", "haiku");
-    expect(() => restartWorker(repo, findTask(repo, "T1"), term, "session:1", "sonet")).toThrow("isn't a model name");
+    expect(() => restartWorker(repo, findTask(repo, "T1"), term, "session:1", { model: "sonet" })).toThrow("isn't a model name");
     expect(term.closed).toEqual([]);
     expect(findTask(repo, "T1").model).toBe("haiku");
   });
@@ -303,4 +304,52 @@ test("concurrent task updates don't lose writes", async () => {
   expect(loadTasks(repo)[0]!.owns.length).toBe(9);
   updateTask(repo, "T1", { status: "done" });
   expect(findTask(repo, "T1").status).toBe("done");
+});
+
+describe("the task lifecycle", () => {
+  const NOW = new Date("2026-11-25T10:00:00.000Z");
+  const tab = { session: "s", window: "w2", pane: "p2" };
+  const task = (patch: Partial<Task> = {}): Task => ({ id: "T1", status: "running", branch: "foreman/T1", base: "main", worktree: "/w", owns: [], socket: "/s", createdAt: "", tab: { session: "s", window: "w", pane: "p" }, ...patch });
+  const cases: [string, Partial<Task>, Event, Partial<Task>][] = [
+    ["a report sets the status", {}, { type: "reported", report: "done" }, { status: "done" }],
+    ["a rebase report changes nothing", { status: "done" }, { type: "reported", report: "rebased" }, {}],
+    ["a message gets a blocked worker going", { status: "blocked" }, { type: "messaged" }, { status: "running" }],
+    ["a message to a working worker changes nothing", { status: "done" }, { type: "messaged" }, {}],
+    ["feedback sends the worker back to work and counts a revision", { status: "done", revisions: 1 }, { type: "feedback" }, { status: "running", revisions: 2 }],
+    ["a PR opens", { status: "done" }, { type: "pr-opened", pr: 7 }, { status: "pr-open", pr: 7 }],
+    ["a merge is timed", { status: "pr-open" }, { type: "merged" }, { status: "merged", mergedAt: NOW.toISOString() }],
+    ["a budget stop remembers what the worker was doing", { status: "done" }, { type: "paused", why: "budget" }, { status: "over-budget", pausedFrom: "done", pausedAt: NOW.toISOString() }],
+    ["the user's pause stops it the same way", {}, { type: "paused", why: "user" }, { status: "over-budget", pausedFrom: "running", pausedAt: NOW.toISOString() }],
+    ["the usage limit pauses it", {}, { type: "paused", why: "limit" }, { status: "limited", pausedFrom: "running", pausedAt: NOW.toISOString() }],
+    ["a second pause keeps the first one's starting point", { status: "limited", pausedFrom: "done", pausedAt: "x" }, { type: "paused", why: "budget" }, { status: "over-budget" }],
+    ["pausing a stopped worker again changes nothing", { status: "over-budget", pausedFrom: "done" }, { type: "paused", why: "budget" }, {}],
+    ["a resume goes back to what it was doing", { status: "limited", pausedFrom: "done", pausedAt: "x" }, { type: "resumed", tab }, { tab, status: "done", pausedFrom: undefined, pausedAt: undefined }],
+    ["a restart of a working worker keeps it working, on its new model", {}, { type: "resumed", tab, model: "opus", restarted: true }, { tab, model: "opus", status: "running", pausedFrom: undefined, pausedAt: undefined }],
+    ["teardown", { status: "merged" }, { type: "torn-down" }, { status: "torn-down" }],
+  ];
+  for (const [name, from, event, patch] of cases) test(name, () => expect(next(task(from), event, NOW)).toEqual(patch));
+
+  test("nothing happens to a torn-down task", () => {
+    expect(() => next(task({ status: "torn-down" }), { type: "reported", report: "done" })).toThrow("T1 is torn down");
+  });
+
+  test("a transition saves the change and logs what Foreman did, but a report goes only to events.jsonl", () => {
+    const { repo } = spawned();
+    transition(repo, "T1", { type: "reported", report: "done" });
+    transition(repo, "T1", { type: "paused", why: "budget", note: "over budget, $6.00 of $5.00" });
+    transition(repo, "T1", { type: "resumed", tab, restarted: true, note: "no reply for 40m" });
+    expect(findTask(repo, "T1")).toMatchObject({ status: "done", tab });
+    expect(readRunLog(repo).map((e) => [e.what, e.note])).toEqual([["started", "W1"], ["stopped", "over budget, $6.00 of $5.00"], ["restarted", "no reply for 40m"]]);
+  });
+
+  test("each question about a task has one answer", () => {
+    const statuses: Task["status"][] = ["running", "over-budget", "limited", "done", "blocked", "needs-decision", "exited", "pr-open", "merged", "torn-down"];
+    const which = (f: (t: Task) => boolean) => statuses.filter((status) => f(task({ status })));
+    expect(which(isFinished)).toEqual(["merged", "torn-down"]);
+    expect(which(needsUser)).toEqual(["over-budget", "blocked", "needs-decision", "exited", "pr-open"]);
+    expect(which(tabOpen)).toEqual(["running", "done", "blocked", "needs-decision", "pr-open", "merged"]);
+    expect(which(canHear)).toEqual(["running", "done", "blocked", "needs-decision", "pr-open"]);
+    expect(isMerged(task({ status: "torn-down", mergedAt: "x" }))).toBe(true);
+    expect(canHear(task({ tab: undefined }))).toBe(false);
+  });
 });
