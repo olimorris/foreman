@@ -11,6 +11,7 @@ export const GROUPS: Group[] = [
     title: "Start here",
     commands: [
       { usage: "doctor", about: "Check Foreman has everything it needs" },
+      { usage: "version", about: "Print the installed version (also --version)", full: "version | --version" },
       { usage: "up", about: "Start the orchestrator in a new Rex session", full: "up [--model <name>]" },
     ],
   },

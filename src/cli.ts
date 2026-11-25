@@ -19,7 +19,7 @@ import { join } from "node:path";
 import { appendEvent, logRun, REPORT_TYPES, type ReportType } from "./events.ts";
 import { areaLock, hookWho, recordHookBlock, sessionStartContext, stopHook, type HookInput, type LockContext } from "./hooks.ts";
 import { blockSummary, unblock } from "./permissions.ts";
-import { defaultBase, findRepo, pluginArgs, socketPath, type Repo } from "./paths.ts";
+import { defaultBase, findRepo, pluginArgs, pluginRoot, socketPath, type Repo } from "./paths.ts";
 import { terminal } from "./integrations/index.ts";
 import { requireSession } from "./terminal.ts";
 import { notifyOrchestrator, sendToTask } from "./send.ts";
@@ -71,6 +71,10 @@ async function main(argv: string[]): Promise<number> {
     case "--help":
     case "-h":
       console.log(helpText());
+      return 0;
+    case "version":
+    case "--version":
+      console.log(JSON.parse(readFileSync(join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8")).version);
       return 0;
     case "doctor": {
       printBanner();

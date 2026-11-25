@@ -1,4 +1,7 @@
 import { expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { GROUPS, helpText, styleFor, usageError } from "../src/help.ts";
 
 test("every command in the help fits on one line, so the descriptions line up", () => {
