@@ -4,6 +4,7 @@ import type { Terminal } from "./terminal.ts";
 import { sendToTask } from "./send.ts";
 import { baseRef } from "./snapshot.ts";
 import { inFlight, loadTasks, updateTask, type Task } from "./state.ts";
+import { logRun } from "./events.ts";
 
 export type SyncProbes = {
   fetch(base: string): void;
@@ -61,6 +62,7 @@ export function sync(repo: Repo, base: string, term: Terminal, probes: SyncProbe
   const open = inFlight(loadTasks(repo)).filter((t) => !t.mergedAt);
   const markMerged = (task: Task) => {
     updateTask(repo, task.id, { mergedAt: new Date().toISOString(), status: "merged" });
+    logRun(repo, task.id, "merged", task.pr ? `#${task.pr}` : undefined);
     result.merged.push(task.id);
   };
 

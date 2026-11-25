@@ -12,8 +12,11 @@ import { inFlight, loadTasks, type Task } from "./state.ts";
 const staticPrefix = (glob: string) => glob.split(/[*?[{]/)[0]!;
 
 export function overlaps(a: string[], b: string[]): boolean {
-  if (!a.length || !b.length) return true;
-  return a.some((x) => b.some((y) => {
+  return !a.length || !b.length || shared(a, b).length > 0;
+}
+
+export function shared(a: string[], b: string[]): string[] {
+  return a.filter((x) => b.some((y) => {
     const px = staticPrefix(x);
     const py = staticPrefix(y);
     return px.startsWith(py) || py.startsWith(px);

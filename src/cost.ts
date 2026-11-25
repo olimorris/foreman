@@ -1,6 +1,7 @@
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { loadConfig } from "./config.ts";
 import type { Repo } from "./paths.ts";
 import { roundDir } from "./review.ts";
@@ -96,12 +97,50 @@ export function taskCost(repo: Repo, task: Task): TaskCost {
   return { id: task.id, worker: worker.usd, review, total: worker.usd + review, unpriced: worker.unpriced };
 }
 
+function workerTranscripts(repo: Repo, task: Task): string[] {
+  const sessions = loadSessions(sessionsFile(repo, task.id));
+  return jsonlFiles(transcriptDir(task.worktree)).filter((f) => sessions.some((s) => f.includes(s)));
+}
+
 // Only the model's own replies count, since a nudge queued into an idle session also writes to its transcript.
 export function lastActivity(repo: Repo, task: Task): number | undefined {
-  const sessions = loadSessions(sessionsFile(repo, task.id));
-  const times = jsonlFiles(transcriptDir(task.worktree)).filter((f) => sessions.some((s) => f.includes(s))).map(lastReplyAt);
-  const known = times.filter((t): t is number => t !== undefined);
+  const known = workerTranscripts(repo, task).map(lastReplyAt).filter((t): t is number => t !== undefined);
   return known.length ? Math.max(...known) : undefined;
+}
+
+export const workerReplies = (repo: Repo, task: Task): number[] => workerTranscripts(repo, task).flatMap((f) => replyTimes(f));
+
+// Claude Code writes the line's own timestamp after its message, so the last one is the reply's even when a tool input carries its own.
+function replyAt(line: string): number | undefined {
+  if (!line.includes('"type":"assistant"')) return undefined;
+  const start = line.lastIndexOf('"timestamp":"');
+  if (start < 0) return undefined;
+  const at = Date.parse(line.slice(start + 13, line.indexOf('"', start + 13)));
+  return Number.isNaN(at) ? undefined : at;
+}
+
+// Read in chunks, because a transcript can run to hundreds of megabytes and only its reply timestamps are needed.
+export function replyTimes(file: string, chunk = 1 << 20): number[] {
+  const times: number[] = [];
+  const decoder = new StringDecoder("utf8");
+  const buf = Buffer.alloc(chunk);
+  const fd = openSync(file, "r");
+  let rest = "";
+  const take = (line: string) => {
+    const at = replyAt(line);
+    if (at !== undefined) times.push(at);
+  };
+  try {
+    for (let n; (n = readSync(fd, buf, 0, chunk, null)) > 0; ) {
+      const lines = (rest + decoder.write(buf.subarray(0, n))).split("\n");
+      rest = lines.pop()!;
+      lines.forEach(take);
+    }
+  } finally {
+    closeSync(fd);
+  }
+  take(rest + decoder.end());
+  return times;
 }
 
 const TAIL_BYTES = 512 * 1024;
@@ -116,11 +155,8 @@ export function lastReplyAt(file: string): number | undefined {
     closeSync(fd);
   }
   for (const line of buf.toString("utf8").split("\n").reverse()) {
-    if (!line.includes('"type":"assistant"')) continue;
-    try {
-      const at = Date.parse(JSON.parse(line).timestamp);
-      if (!Number.isNaN(at)) return at;
-    } catch {}
+    const at = replyAt(line);
+    if (at !== undefined) return at;
   }
   return undefined;
 }
