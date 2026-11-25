@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { isInside, type Repo } from "./paths.ts";
-import type { Rex } from "./rex.ts";
+import type { Terminal } from "./terminal.ts";
 import { inFlight, loadTasks, type Task } from "./state.ts";
 import { watcherArmed } from "./watch.ts";
 
@@ -119,7 +119,7 @@ export function stopHook(repo: Repo): object {
   return d.warn ? { systemMessage: d.warn } : {};
 }
 
-export function sessionStartContext(input: HookInput, ctx: LockContext, rex: Rex): string {
+export function sessionStartContext(input: HookInput, ctx: LockContext, term: Terminal): string {
   if (ctx.role === "worker") {
     const task = ctx.task;
     if (!task) return "FOREMAN_TASK doesn't match a Foreman task. Do nothing and tell the user.";
@@ -131,7 +131,7 @@ export function sessionStartContext(input: HookInput, ctx: LockContext, rex: Rex
   const tasks = inFlight(loadTasks(ctx.repo));
   const armed = watcherArmed(ctx.repo);
   const lines = tasks.map((t) => {
-    const tab = t.rex ? (rex.alive(t.rex) ? "worker running" : "worker tab closed") : "no worker tab";
+    const tab = t.tab ? (term.alive(t.tab) ? "worker running" : "worker tab closed") : "no worker tab";
     const tree = existsSync(t.worktree) ? "" : ", worktree missing";
     return `- ${t.id}: ${t.status}, ${tab}${tree}, branch ${t.branch}`;
   });

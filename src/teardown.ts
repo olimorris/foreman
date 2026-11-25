@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { run } from "./exec.ts";
 import type { Repo } from "./paths.ts";
-import type { Rex } from "./rex.ts";
+import type { Terminal } from "./terminal.ts";
 import { findTask, updateTask } from "./state.ts";
 import { setTrust } from "./trust.ts";
 import { baseRef } from "./snapshot.ts";
@@ -37,7 +37,7 @@ export function stopProcessesIn(dir: string): number[] {
 
 export type TeardownResult = { removed: boolean; message: string };
 
-export function teardown(repo: Repo, id: string, discard: boolean, rex: Rex, claudeConfig?: string): TeardownResult {
+export function teardown(repo: Repo, id: string, discard: boolean, term: Terminal, claudeConfig?: string): TeardownResult {
   const task = findTask(repo, id);
   const lost = task.mergedAt ? { commits: 0, dirty: 0 } : unmergedWork(repo, task.branch, baseRef(repo, task.base), task.worktree);
   if ((lost.commits || lost.dirty) && !discard) {
@@ -46,7 +46,7 @@ export function teardown(repo: Repo, id: string, discard: boolean, rex: Rex, cla
       message: `${id} has ${lost.commits} unmerged commit(s) and ${lost.dirty} uncommitted file(s). Nothing was removed. Ask the user, and only if they agree run: foreman teardown ${id} --discard`,
     };
   }
-  if (task.rex) rex.close(task.rex);
+  if (task.tab) term.close(task.tab);
   stopProcessesIn(task.worktree);
   if (existsSync(task.worktree)) {
     const r = run(["git", "-C", repo.root, "worktree", "remove", ...(discard ? ["--force"] : []), task.worktree]);

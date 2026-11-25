@@ -1,0 +1,23 @@
+export type Tab = { session: string; window: string; pane: string };
+
+export type Terminal = {
+  name: string;
+  /** The session Foreman was run from, or undefined outside this terminal. */
+  currentSession(): string | undefined;
+  /** Variables this terminal sets that a worker must not inherit, or a user hook in the worker would act on the orchestrator's session. */
+  sessionEnv: string[];
+  /** Binaries that must be on PATH for this terminal. */
+  requires: string[];
+  open(session: string, label: string, cwd: string, cmd: string[], keepOpen?: boolean): Tab;
+  newSession(name: string, cwd: string, cmd: string[]): string;
+  findSession(name: string): string | undefined;
+  alive(tab: Tab): boolean;
+  send(tab: Tab, text: string): void;
+  close(tab: Tab): void;
+};
+
+export function requireSession(term: Terminal, command: string): string {
+  const session = term.currentSession();
+  if (!session) throw new Error(`run foreman ${command} from inside ${term.name}`);
+  return session;
+}

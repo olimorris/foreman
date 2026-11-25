@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { run } from "./exec.ts";
 import { pluginRoot } from "./paths.ts";
+import { terminal } from "./integrations/index.ts";
 
 type Check = { name: string; ok: boolean; detail: string };
 
@@ -8,7 +9,7 @@ const MIN_CLAUDE = [2, 1, 224];
 
 export function doctor(): Check[] {
   const has = (bin: string) => run(["sh", "-c", `command -v ${bin}`]).code === 0;
-  const checks: Check[] = ["bun", "git", "rex", "fswatch", "jq", "nc", "gh"].map((bin) => ({
+  const checks: Check[] = ["bun", "git", ...terminal().requires, "fswatch", "jq", "nc", "gh"].map((bin) => ({
     name: bin,
     ok: has(bin),
     detail: has(bin) ? "found" : `missing - install ${bin}`,

@@ -1,6 +1,6 @@
 import { run } from "./exec.ts";
 import type { Repo } from "./paths.ts";
-import type { Rex } from "./rex.ts";
+import type { Terminal } from "./terminal.ts";
 import { sendToTask } from "./send.ts";
 import { baseRef } from "./snapshot.ts";
 import { inFlight, loadTasks, updateTask, type Task } from "./state.ts";
@@ -26,7 +26,7 @@ export function isMerged(repo: Repo, task: Task, ref: string, prState?: string):
   return commits > 0 && git("merge-base", "--is-ancestor", task.branch, ref).code === 0;
 }
 
-export function sync(repo: Repo, base: string, rex: Rex, probes: SyncProbes = realProbes(repo)): SyncResult {
+export function sync(repo: Repo, base: string, term: Terminal, probes: SyncProbes = realProbes(repo)): SyncResult {
   if (run(["git", "-C", repo.root, "remote", "get-url", "origin"]).code === 0) probes.fetch(base);
   const ref = baseRef(repo, base);
   const head = run(["git", "-C", repo.root, "rev-parse", ref]).stdout.trim();
@@ -50,7 +50,7 @@ export function sync(repo: Repo, base: string, rex: Rex, probes: SyncProbes = re
       `Rerun your checks, then run \`foreman report rebased "<one line>"\`.`,
     ].join(" ");
     try {
-      sendToTask(repo, task, text, rex);
+      sendToTask(repo, task, text, term);
       updateTask(repo, task.id, { rebaseAsked: head });
       result.asked.push(task.id);
     } catch {

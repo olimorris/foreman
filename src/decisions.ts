@@ -4,7 +4,7 @@ import { ADR_DIRS, listAdrs } from "./adr.ts";
 import { loadConfig } from "./config.ts";
 import { decisionsDir, findDecision, loadDecisions, recordPath, updateDecision, type Decision } from "./ledger.ts";
 import { defaultBase, type Repo } from "./paths.ts";
-import type { Rex } from "./rex.ts";
+import type { Terminal } from "./terminal.ts";
 import { sendToTask } from "./send.ts";
 import { baseRef, snapshot } from "./snapshot.ts";
 import { inFlight, loadTasks, type Task } from "./state.ts";
@@ -26,14 +26,14 @@ export function recipients(tasks: Task[], d: Decision): Task[] {
 
 export type Broadcast = { decision: Decision; sent: string[]; failed: string[] };
 
-export function accept(repo: Repo, id: string, edits: Partial<Pick<Decision, "title" | "body" | "paths" | "slug" | "supersedes">>, rex: Rex): Broadcast {
+export function accept(repo: Repo, id: string, edits: Partial<Pick<Decision, "title" | "body" | "paths" | "slug" | "supersedes">>, term: Terminal): Broadcast {
   const current = findDecision(repo, id);
   if (current.status !== "proposed") throw new Error(`${id} is already ${current.status}`);
   const clean = Object.fromEntries(Object.entries(edits).filter(([, v]) => v !== undefined && !(Array.isArray(v) && !v.length)));
   const d = updateDecision(repo, id, { ...clean, status: "accepted", resolvedAt: new Date().toISOString() });
   writeIndex(repo);
   const file = recordPath(repo, id);
-  return broadcast(repo, recipients(loadTasks(repo), d), rex, (t) =>
+  return broadcast(repo, recipients(loadTasks(repo), d), term, (t) =>
     t.id === d.by
       ? `Your proposal ${id} was accepted: ${d.title}. Final text: ${file}. Carry on with it.`
       : `Decision ${id} was accepted and touches your owned paths: ${d.title}. Read ${file} and adjust your work to match it.`,
@@ -41,22 +41,22 @@ export function accept(repo: Repo, id: string, edits: Partial<Pick<Decision, "ti
   );
 }
 
-export function reject(repo: Repo, id: string, reason: string, rex: Rex): Broadcast {
+export function reject(repo: Repo, id: string, reason: string, term: Terminal): Broadcast {
   if (!reason.trim()) throw new Error("rejecting needs a reason the worker can act on");
   const current = findDecision(repo, id);
   if (current.status !== "proposed") throw new Error(`${id} is already ${current.status}`);
   const d = updateDecision(repo, id, { status: "rejected", reason, resolvedAt: new Date().toISOString() });
   writeIndex(repo);
   const proposer = inFlight(loadTasks(repo)).filter((t) => t.id === d.by);
-  return broadcast(repo, proposer, rex, () => `Your proposal ${id} (${d.title}) was rejected: ${reason}. Carry on without it.`, d);
+  return broadcast(repo, proposer, term, () => `Your proposal ${id} (${d.title}) was rejected: ${reason}. Carry on without it.`, d);
 }
 
-function broadcast(repo: Repo, tasks: Task[], rex: Rex, message: (t: Task) => string, decision: Decision): Broadcast {
+function broadcast(repo: Repo, tasks: Task[], term: Terminal, message: (t: Task) => string, decision: Decision): Broadcast {
   const sent: string[] = [];
   const failed: string[] = [];
   for (const t of tasks) {
     try {
-      sendToTask(repo, t, message(t), rex);
+      sendToTask(repo, t, message(t), term);
       sent.push(t.id);
     } catch {
       failed.push(t.id);

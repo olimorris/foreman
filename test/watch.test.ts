@@ -11,7 +11,7 @@ const task = (id: string, extra: Partial<Task> = {}): Task => ({
   worktree: `/w/${id}`,
   owns: ["src/"],
   socket: "",
-  rex: { session: "s", window: "w", block: `b-${id}` },
+  tab: { session: "s", window: "w", pane: `b-${id}` },
   createdAt: "",
   ...extra,
 });

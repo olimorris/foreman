@@ -4,7 +4,7 @@ import { readEvents, type TaskEvent } from "./events.ts";
 import { loadDecisions, type Decision } from "./ledger.ts";
 import { run } from "./exec.ts";
 import type { Repo } from "./paths.ts";
-import type { Rex } from "./rex.ts";
+import type { Terminal } from "./terminal.ts";
 import { notifyOrchestrator, sendToTask } from "./send.ts";
 import { baseRef } from "./snapshot.ts";
 import { budgetOf, lastActivity, overBudget, planSpend, taskCost } from "./cost.ts";
@@ -44,7 +44,7 @@ export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: Tracked
     }
     next.events[task.id] = events.length;
 
-    if (!task.rex || task.status === "exited" || task.status === "over-budget") continue;
+    if (!task.tab || task.status === "exited" || task.status === "over-budget") continue;
     const alive = probes.alive(task);
     // A resumed worker can exit again, and that exit must be reported too.
     if (alive) next.exited = next.exited.filter((id) => id !== task.id);
@@ -121,7 +121,7 @@ function ghPr(root: string, number: number): PrState | undefined {
   return { state: pr.state, comments: pr.comments.length + pr.reviews.filter((x: { body: string }) => x.body).length };
 }
 
-export async function watch(repo: Repo, base: string, rex: Rex): Promise<number> {
+export async function watch(repo: Repo, base: string, term: Terminal): Promise<number> {
   const pidFile = join(repo.foreman, "watch.pid");
   const other = readPid(pidFile);
   if (other && pidAlive(other)) {
@@ -139,7 +139,7 @@ export async function watch(repo: Repo, base: string, rex: Rex): Promise<number>
   const probes: Probes = {
     events: (id) => readEvents(repo, id),
     mainSha: () => run(["git", "-C", repo.root, "rev-parse", baseRef(repo, base)]).stdout.trim() || undefined,
-    alive: (task) => (task.rex ? rex.alive(task.rex) : true),
+    alive: (task) => (task.tab ? term.alive(task.tab) : true),
     lastActivity: (task) => lastActivity(repo, task),
   };
   const stallMs = (loadConfig(repo).stallMinutes ?? STALL_MINUTES) * 60_000;
@@ -164,13 +164,13 @@ export async function watch(repo: Repo, base: string, rex: Rex): Promise<number>
       cursor = result.cursor;
       for (const id of result.nudge) {
         try {
-          sendToTask(repo, tasks.find((t) => t.id === id)!, NUDGE, rex);
+          sendToTask(repo, tasks.find((t) => t.id === id)!, NUDGE, term);
         } catch {}
       }
       for (const id of result.restart) {
         const task = tasks.find((t) => t.id === id)!;
         try {
-          restartWorker(repo, task, rex, task.rex!.session);
+          restartWorker(repo, task, term, task.tab!.session);
         } catch (err) {
           result.reasons.push(`stuck ${id}: restarting its hung worker failed: ${err instanceof Error ? err.message : err}`);
         }
@@ -181,7 +181,7 @@ export async function watch(repo: Repo, base: string, rex: Rex): Promise<number>
         cursor.budget = over.alerted;
         for (const id of over.stop) {
           const task = tasks.find((t) => t.id === id)!;
-          if (stopWorker(repo, task, rex)) result.reasons.push(`stopped ${id}`);
+          if (stopWorker(repo, task, term)) result.reasons.push(`stopped ${id}`);
         }
       }
       writeFileSync(cursorFile, JSON.stringify(cursor));

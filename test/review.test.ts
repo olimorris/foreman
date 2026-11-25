@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { MAX_REVISIONS, parseVerdict, renderFeedback, roundDir, sendFeedback, verdictLine, type Verdict } from "../src/review.ts";
 import { fill, parseScreens, splitArgs } from "../src/shots.ts";
 import { findTask, withTasks, type Task } from "../src/state.ts";
-import { fakeRex, tempRepo } from "./helpers.ts";
+import { fakeTerminal, tempRepo } from "./helpers.ts";
 
 const changes: Verdict = {
   verdict: "changes",
@@ -57,7 +57,7 @@ describe("sendFeedback", () => {
     const repo = tempRepo();
     withTasks(repo, (ts) => ts.push({
       id: "T1", status: "done", branch: "foreman/T1", base: "main", worktree: "/w/T1", owns: ["src/"], socket: "/nonexistent.sock",
-      rex: { session: "s", window: "w", block: "b" }, createdAt: "", reviews: 1, ...extra,
+      tab: { session: "s", window: "w", pane: "b" }, createdAt: "", reviews: 1, ...extra,
     }));
     const dir = roundDir(repo, "T1", extra.reviews ?? 1);
     mkdirSync(dir, { recursive: true });
@@ -67,15 +67,15 @@ describe("sendFeedback", () => {
 
   test("sends to the same worker and counts the revision", () => {
     const repo = reviewed(changes);
-    const rex = fakeRex();
-    expect(sendFeedback(repo, "T1", rex)).toContain("revision 1 of 2");
-    const inbox = rex.sent[0]!.match(/read (\S+) and act/)![1]!;
+    const term = fakeTerminal();
+    expect(sendFeedback(repo, "T1", term)).toContain("revision 1 of 2");
+    const inbox = term.sent[0]!.match(/read (\S+) and act/)![1]!;
     expect(readFileSync(inbox, "utf8")).toContain("Settings > Export");
     expect(findTask(repo, "T1")).toMatchObject({ revisions: 1, status: "running" });
   });
 
   test("refuses after the revision limit and on an approval", () => {
-    expect(() => sendFeedback(reviewed(changes, { reviews: 3, revisions: MAX_REVISIONS }), "T1", fakeRex())).toThrow("Escalate to the user");
-    expect(() => sendFeedback(reviewed({ ...changes, verdict: "approve" }), "T1", fakeRex())).toThrow("no feedback to send");
+    expect(() => sendFeedback(reviewed(changes, { reviews: 3, revisions: MAX_REVISIONS }), "T1", fakeTerminal())).toThrow("Escalate to the user");
+    expect(() => sendFeedback(reviewed({ ...changes, verdict: "approve" }), "T1", fakeTerminal())).toThrow("no feedback to send");
   });
 });
