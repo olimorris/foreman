@@ -107,6 +107,14 @@ Checked against Homebrew 7.0.16 and Claude Code 2.1.332, by installing a rendere
 - After an upgrade, a running session's hooks run the new version's code, while its agents, skills and prompts stay as they were when it started.
 - A formula can depend on another tap's formula, like `oven-sh/bun/bun`. It can't depend on a cask, so Claude Code is left to `foreman doctor` and the caveats.
 - `brew audit --strict` and `brew test` pass on the formula. `libexec.install` skips dotfiles unless named, so `.claude-plugin` is listed by name.
+- homebrew/core has its own `foreman` formula, the Procfile manager. So the install needs the full name, `brew install olimorris/tap/foreman`, or Homebrew installs the other tool. Once ours is installed, `brew upgrade foreman` and `brew uninstall foreman` find it. `Formulary.resolve` loads a short name from the installed keg, which records the tap it came from. The two can't be installed side by side, since both use `/opt/homebrew/Cellar/foreman` and `bin/foreman`.
+- `brew audit` only checks for a clash with a core formula's name when the formula is in homebrew/core, so the tap's formula passes.
+- The repo `olimorris/homebrew-tap` is what `brew tap olimorris/tap` clones, since Homebrew adds the `homebrew-` prefix itself.
+- Release-please tags this repo `v0.2.0`, because `include-component-in-tag` is false and the `v` is on by default. The formula's url uses `v@VERSION@`, and the release job downloads `archive/refs/tags/$TAG.tar.gz` to hash it, so both name the same archive.
+- The release job never names a branch. `git clone` checks out the tap's default branch, `main`, with `origin/main` as its upstream, so a plain `git push` lands there.
+- The tap needs a first commit before the job runs. `git ls-remote --symref` on the empty GitHub repo returned no HEAD, so a clone of it falls back to the runner's own default branch name, and the job's push could create a branch other than `main`.
+- The release job's clone, render and push ran against a local copy of the tap. The first run committed `Formula/foreman.rb` and the second found nothing new to commit, so rerunning the job is safe.
+- The job pushes with the `HOMEBREW_TAP_TOKEN` secret, a fine-grained token limited to the tap with Contents read and write. Without the secret the job warns and passes. When the token expires, `git clone` fails with an authentication error instead, so the job goes red.
 
 ## The user's skills in worktree sessions
 
