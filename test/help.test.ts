@@ -1,4 +1,7 @@
 import { expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { GROUPS, helpText, styleFor, usageError } from "../src/help.ts";
 
 test("every command in the help fits on one line, so the descriptions line up", () => {
@@ -22,4 +25,18 @@ test("a usage error lists only that command's forms, with their full flags", () 
 test("each command name appears once per form", () => {
   const usages = GROUPS.flatMap((g) => g.commands.map((c) => c.usage));
   expect(new Set(usages).size).toBe(usages.length);
+});
+
+test("--version and version print the version in plugin.json, from any directory", () => {
+  const root = join(import.meta.dir, "..");
+  const expected = JSON.parse(readFileSync(join(root, ".claude-plugin", "plugin.json"), "utf8")).version;
+  for (const arg of ["--version", "version"]) {
+    const p = Bun.spawnSync(["bun", join(root, "src", "cli.ts"), arg], { cwd: tmpdir() });
+    expect(p.stdout.toString().trim()).toBe(expected);
+    expect(p.exitCode).toBe(0);
+  }
+});
+
+test("the help lists the version command", () => {
+  expect(helpText(styleFor({ isTTY: false }), undefined)).toMatch(/^  version\s+Print the installed version/m);
 });
