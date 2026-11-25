@@ -25,7 +25,7 @@ import { onModel, spawn } from "../spawn.ts";
 import { findTask, loadTasks } from "../state.ts";
 import { transition } from "../lifecycle.ts";
 import { restartedLine, restartWorker, resume, resumedLine, stopWorker } from "../stop.ts";
-import { sync } from "../sync.ts";
+import { needsOrchestrator, sync } from "../sync.ts";
 import { teardown } from "../teardown.ts";
 import type { Terminal } from "../terminal.ts";
 import { noInput, type Args, type Schema, type Tool } from "./tool.ts";
@@ -147,7 +147,8 @@ function spawnTool(repo: Repo, args: Args, term: Terminal): string {
   const brief = join(taskDir(repo, id), "brief.in.md");
   writeFileSync(brief, args.brief as string);
   const task = spawn(repo, { id, title: text(args, "title"), model: text(args, "model"), brief, owns: list(args, "owns"), base: text(args, "base") ?? defaultBase(repo), session }, term);
-  return `spawned ${task.id}: ${task.worktree} on ${task.branch}, ${term.name} tab ${task.tab?.window}${onModel(task)}`;
+  const on = task.stackedOn ? `, on top of ${task.stackedOn}'s branch, which isn't merged yet` : "";
+  return `spawned ${task.id}: ${task.worktree} on ${task.branch}${on}, ${term.name} tab ${task.tab?.window}${onModel(task)}`;
 }
 
 function budgetTool(repo: Repo, args: Args): string {
@@ -254,7 +255,7 @@ export const ORCHESTRATOR_TOOLS: Tool[] = [
       title: str('The PR title, as a conventional commit, such as "feat: add an export button to settings"'),
       brief: str("The brief's full text, in Markdown, with its ## Intent and ## Spec sections"),
       owns: str(`The paths or globs the task owns, such as "src/settings/** docs/settings.md". ${LIST}`),
-      base: str("The branch to start from, when it isn't the base branch"),
+      base: str("The branch to start from, when it isn't the base branch. Another task's branch, such as foreman/T4, builds on that task, and sync moves it onto the base branch once that task merges"),
       model: str("The worker's model, such as sonnet, when it shouldn't run on the default"),
     }, ["task", "title", "brief", "owns"]),
     (args, repo, term) => spawnTool(repo, args, term())),
@@ -286,11 +287,9 @@ export const ORCHESTRATOR_TOOLS: Tool[] = [
       const r = sync(repo, base, term());
       return lines([
         `${base} is at ${r.head.slice(0, 8)}`,
-        ...(r.merged.length ? [`merged: ${r.merged.join(", ")}. Tear them down, then call next`] : []),
-        ...r.mergedEarly.map((id) => `${id}'s PR merged into ${findTask(repo, id).mergedInto}, not ${base}. Keep ${id} until that branch merges`),
+        ...needsOrchestrator(repo, base, r),
         ...(r.asked.length ? [`asked to rebase: ${r.asked.join(", ")}`] : []),
         ...r.retargeted.map((id) => `moved ${id}'s PR to ${base}`),
-        ...(r.failed.length ? [`couldn't reach: ${r.failed.join(", ")}`] : []),
       ]);
     }),
   tool("teardown", "Close a task's tab and remove its worktree and branch once the work is merged. It refuses while the branch has unmerged work, unless discard is set, which needs the user's yes first.",

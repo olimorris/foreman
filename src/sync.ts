@@ -51,6 +51,16 @@ function commitsSinceStart(repo: Repo, task: Task, ref: string): number {
   return Number(git("rev-list", "--count", `${from}..${task.branch}`).stdout.trim()) || 0;
 }
 
+// The sync tool shows these alongside the rest, and the watcher's own sync wakes the orchestrator only for these.
+export function needsOrchestrator(repo: Repo, base: string, r: SyncResult): string[] {
+  const into = (id: string) => loadTasks(repo).find((t) => t.id === id)?.mergedInto;
+  return [
+    ...(r.merged.length ? [`merged: ${r.merged.join(", ")}. Tear them down, then call next`] : []),
+    ...r.mergedEarly.map((id) => `${id}'s PR merged into ${into(id)}, not ${base}. Keep ${id} until that branch merges`),
+    ...(r.failed.length ? [`couldn't reach: ${r.failed.join(", ")}`] : []),
+  ];
+}
+
 const RESOLVE = "Resolve conflicts only within your owned paths. If one needs a change elsewhere, abort the rebase and report blocked.";
 const REPORT = "Rerun your checks, then call the report tool with type rebased and one line.";
 
@@ -150,12 +160,16 @@ function follow(repo: Repo, task: Task, parent: Task, ask: Ask): void {
   ask(task, text, { rebaseAsked: tip });
 }
 
+// A move of the base after the rebase leaves the head outside the branch, so the old parent tip being gone counts as moved too.
+export function offParent(repo: Repo, task: Task, parent: Task, head = run(["git", "-C", repo.root, "rev-parse", baseRef(repo, task.base)]).stdout.trim()): boolean {
+  return isAncestor(repo, head, task.branch) || !isAncestor(repo, basedOn(repo, task, parent), task.branch);
+}
+
 // Until the worker has rebased, a review or delivery against the base would show the parent's commits as this task's change.
 // Returns true once the task is off its parent, so the caller treats it like any other task.
 function moveOff(repo: Repo, base: string, ref: string, head: string, task: Task, parent: Task, ask: Ask, retarget: (task: Task) => void): boolean {
   const from = basedOn(repo, task, parent);
-  // A move of the base after the rebase leaves the head outside the branch, so the old parent tip being gone counts as moved too.
-  if (isAncestor(repo, head, task.branch) || !isAncestor(repo, from, task.branch)) {
+  if (offParent(repo, task, parent, head)) {
     updateTask(repo, task.id, { stackedOn: undefined, parentSha: undefined });
     retarget(task);
     return true;

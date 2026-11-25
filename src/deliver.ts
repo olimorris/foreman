@@ -9,9 +9,10 @@ import { taskDir, type Repo } from "./paths.ts";
 import { CONVENTIONAL } from "./brief.ts";
 import { loadPlan, stackable } from "./plan.ts";
 import { latest, rounds, type PrDraft, type Shot, type Verdict } from "./rounds.ts";
-import { findTask, inFlight, loadTasks, type Task } from "./state.ts";
+import { findTask, inFlight, loadTasks, updateTask, type Task } from "./state.ts";
 import { diffBase } from "./base.ts";
-import { transition } from "./lifecycle.ts";
+import { isMerged as markedMerged, transition } from "./lifecycle.ts";
+import { offParent } from "./sync.ts";
 import { taskCost } from "./cost.ts";
 import { transcripts } from "./transcripts.ts";
 
@@ -126,15 +127,26 @@ export function uploadShots(repo: Repo, shots: Shot[], prefix: string, nwo: stri
   return shots.map((s) => ({ name: s.name, before: url(s, "before"), after: url(s, "after") }));
 }
 
+// Sync marks the parent merged and asks the worker to rebase, and deliver can come before the next sync sees the rebase, when the parent's branch may already be gone.
+export function parentOf(repo: Repo, task: Task, dryRun = false): { buildsOn?: Task; movedOff: boolean } {
+  const parent = task.stackedOn ? findTask(repo, task.stackedOn) : undefined;
+  if (!parent || !markedMerged(parent)) return { buildsOn: parent, movedOff: false };
+  if (!offParent(repo, task, parent)) {
+    throw new Error(`${parent.id} merged into ${task.base}, but ${task.id}'s branch still carries ${parent.id}'s commits. Call sync, wait for ${task.id}'s rebased line, then deliver again`);
+  }
+  if (!dryRun) updateTask(repo, task.id, { stackedOn: undefined, parentSha: undefined });
+  return { movedOff: true };
+}
+
 export type Delivery = { packet: string; title: string; pr?: number; url?: string; note: string };
 
 export function deliver(repo: Repo, id: string, opts: { dryRun?: boolean; title?: string } = {}): Delivery {
+  const { verdict, round, dir, shots: local } = approvedRound(repo, findTask(repo, id));
+  const { buildsOn, movedOff } = parentOf(repo, findTask(repo, id), !!opts.dryRun);
   const task = findTask(repo, id);
-  const { verdict, round, dir, shots: local } = approvedRound(repo, task);
   const brief = readFileSync(join(taskDir(repo, id), "brief.md"), "utf8");
   const done = lastDone(repo, id);
   const doneNote = done?.note;
-  const buildsOn = task.stackedOn ? findTask(repo, task.stackedOn) : undefined;
   const stat = run(["git", "-C", repo.root, "diff", "--stat", `${diffBase(repo, task)}...${task.branch}`]).stdout.trimEnd();
   const decisions = loadDecisions(repo)
     .filter((d) => d.by === id || verdict.decisions_touched.some((t) => t.includes(d.id)))
@@ -165,7 +177,7 @@ export function deliver(repo: Repo, id: string, opts: { dryRun?: boolean; title?
   if (!github) return { packet, title, note: `pushed ${task.branch}, but gh can't see a GitHub repo for origin. Open the PR by hand with the body in ${packet}${titleNote}` };
 
   if (task.pr) {
-    must(["gh", "pr", "edit", String(task.pr), "--body-file", packet, ...(useDraft ? ["--title", title] : [])], { cwd: repo.root });
+    must(["gh", "pr", "edit", String(task.pr), "--body-file", packet, ...(useDraft ? ["--title", title] : []), ...(movedOff ? ["--base", task.base] : [])], { cwd: repo.root });
     logRun(repo, id, "pr-updated", `#${task.pr}`);
     const stacked = inFlight(loadTasks(repo)).filter((t) => t.stackedOn === id).map((t) => t.id);
     const restack = stacked.length ? `. ${stacked.join(", ")} ${stacked.length > 1 ? "build" : "builds"} on this branch, so call sync to ask ${stacked.length > 1 ? "their workers" : "its worker"} to rebase` : "";

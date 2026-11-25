@@ -42,11 +42,40 @@ test("reports each new event once", () => {
   expect(scan([task("T1")], first.cursor, probes(events)).reasons).toEqual([]);
 });
 
-test("reports main moving and a worker exiting, once each", () => {
+test("syncs itself when main moves with no merge, and reports a worker exiting once", () => {
   const p = probes({}, "bbb", ["T2"]);
   const first = scan([task("T1"), task("T2")], { ...empty, main: "aaa" }, p);
-  expect(first.reasons).toEqual(["exited T2", "main-moved bbb"]);
-  expect(scan([task("T1"), task("T2")], first.cursor, p).reasons).toEqual([]);
+  expect(first).toMatchObject({ reasons: ["exited T2"], sync: true });
+  expect(scan([task("T1"), task("T2")], first.cursor, p)).toMatchObject({ reasons: [], sync: false });
+});
+
+test("leaves main moving to the orchestrator when a PR merged in the same pass", () => {
+  const p: Probes = { ...probes({}, "bbb"), pr: () => ({ state: "MERGED", comments: 0 }) };
+  const r = scan([task("T1", { pr: 7 })], { ...empty, main: "aaa", prs: { "7": { state: "OPEN", comments: 0 } } }, p, [{ key: "T1", number: 7 }]);
+  expect(r).toMatchObject({ reasons: ["merged T1 #7", "main-moved bbb"], sync: false });
+});
+
+describe("rebased lines", () => {
+  const start = { ...empty, main: "aaa" };
+  const reasons = (t: Task, note: string) => scan([t], start, probes({ [t.id]: [ev("rebased", note)] })).reasons;
+
+  test("a clean rebase of a task with no PR doesn't wake the orchestrator", () => {
+    expect(reasons(task("T1"), "rebased onto main, tests pass")).toEqual([]);
+  });
+
+  test("a rebase of a task with a PR wakes it, since it has to deliver again", () => {
+    expect(reasons(task("T1", { pr: 7 }), "rebased onto main, tests pass")).toEqual(["rebased T1: rebased onto main, tests pass"]);
+  });
+
+  test("a rebase with a conflict, a failing test or work left undone wakes it", () => {
+    expect(reasons(task("T1"), "resolved a conflict in src/a.ts")).toHaveLength(1);
+    expect(reasons(task("T1"), "rebased, but one test fails")).toHaveLength(1);
+    expect(reasons(task("T1"), "rebased, the docs are still to do")).toHaveLength(1);
+  });
+
+  test("a rebase of a stacked task wakes it, since deliver may be waiting on it", () => {
+    expect(reasons(task("T2", { stackedOn: "T1" }), "rebased onto main")).toHaveLength(1);
+  });
 });
 
 test("reports a resumed worker exiting again, and never a worker Foreman stopped", () => {
@@ -300,7 +329,7 @@ describe("a whole pass", () => {
   const start: Cursor = { ...empty, main: "aaa" };
   const cost = (id: string, total: number) => ({ id, worker: total, review: 0, total, unpriced: [] });
 
-  function recording(fail: Partial<Record<keyof Effects, string>> = {}, closed: string[] = []) {
+  function recording(fail: Partial<Record<keyof Effects, string>> = {}, closed: string[] = [], synced: string[] = []) {
     const calls: string[] = [];
     const act = (name: keyof Effects, what: string) => {
       calls.push(`${name} ${what}`);
@@ -313,6 +342,7 @@ describe("a whole pass", () => {
       restart: (t) => act("restart", t.id),
       merge: (pr) => (calls.push(`merge #${pr.number}`), fail.merge),
       stop: (t, note) => (calls.push(`stop ${t.id}: ${note}`), !closed.includes(t.id)),
+      sync: () => (act("sync", "main"), synced),
     };
     return { calls, effects };
   }
@@ -354,6 +384,23 @@ describe("a whole pass", () => {
     expect(r.cursor.unmergeable).toEqual({ "9": "abc" });
     const merged = { ...scan(tasks, start, probes({})), merge: [{ id: "T2", number: 9, sha: "def" }] };
     expect(applyPass(merged, tasks, recording().effects, 0)).toBe(1);
+  });
+
+  test("a sync with nothing for the orchestrator keeps the watch going", () => {
+    const { calls, effects } = recording();
+    const r = scan([task("T1")], start, probes({}, "bbb"));
+    applyPass(r, [task("T1")], effects, 0);
+    expect(calls).toEqual(["sync main"]);
+    expect(r.reasons).toEqual([]);
+  });
+
+  test("a sync that finds a merge, or fails, wakes the orchestrator", () => {
+    const found = scan([task("T1")], start, probes({}, "bbbbbbbbbb"));
+    applyPass(found, [task("T1")], recording({}, [], ["merged: T1. Tear them down, then call next"]).effects, 0);
+    expect(found.reasons).toEqual(["main-moved bbbbbbbb, and the watcher's sync found: merged: T1. Tear them down, then call next"]);
+    const failed = scan([task("T1")], start, probes({}, "bbb"));
+    applyPass(failed, [task("T1")], recording({ sync: "no origin" }).effects, 0);
+    expect(failed.reasons).toEqual(["main-moved bbb, and the watcher's sync failed, so call sync: no origin"]);
   });
 
   test("a worker at the usage limit is paused with the time it resets in the log", () => {

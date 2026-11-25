@@ -128,7 +128,7 @@ Here's my backlog: BACKLOG.md. The deadline is tomorrow. Do it as cheaply as you
 
 Foreman asks about anything unclear, then plans the work. If the plan differs from your backlog, such as splitting or cutting an item, it waits for your approval. If you don't answer within 30 minutes, Foreman makes the call and notes it in the summary. Workers open in their own tabs, and approved work arrives as PRs. `foreman help` lists the commands for you. The orchestrator and workers use Foreman's MCP tools instead.
 
-The orchestrator waits on long-running work as [MCP tasks](https://modelcontextprotocol.io/extensions/tasks/overview), so you no longer see a message from another session each time it wakes. Its tab shows "MCP task still running" while it waits, and "MCP task ... completed" when something needs it.
+The orchestrator waits on long-running work as [MCP tasks](https://modelcontextprotocol.io/extensions/tasks/overview), so you no longer see a message from another session each time it wakes. Its tab shows "MCP task still running" while it waits, and "MCP task ... completed" when something needs it. Routine changes don't wake it: when the base branch moves without a task merging, Foreman asks the workers to rebase by itself.
 
 ### Status
 
