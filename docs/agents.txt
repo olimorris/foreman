@@ -122,6 +122,7 @@ Settings live in `.foreman/config.json` in the user's repo. The file is plain JS
 - `screenshots` (object): how to run the app for before and after screenshots. See below.
 - `prScreenshots` (`"local"` or `"branch"`, default `"local"`): `"local"` keeps screenshots on the user's machine and lists their paths in the PR. `"branch"` pushes them to a `foreman-screenshots` branch so they show in the PR on GitHub.
 - `never` (array of strings): things Foreman must never do in this repo, one plain sentence each, like `"Merge a release PR. The user cuts every release."`. The orchestrator gets the list in its session-start context and follows it above any other instruction. Every new brief lists it, and the reviewer treats a change that breaks one as an issue. An empty or missing list adds nothing. Nothing blocks these actions yet, so the list relies on each session following it.
+- `telegram` (object): turns on pings through Claude Code's Telegram plugin, like `{ "when": "only when a question has waited 10 minutes, or the run is finished" }`. `when` is free text in the user's own words, and the orchestrator gets it in its session-start context. Without `when`, the orchestrator pings when a question needs the user's answer or the run is finished. Without `telegram`, nothing changes. See "Telegram" below for setting up the plugin.
 - `prices` (object): prices for models Foreman doesn't know, so it can work out their cost. Maps a model id to dollars per million tokens: `{ "my-model": { "input": 3, "output": 15, "cacheRead": 0.3 } }`. Foreman already knows claude-fable-5-2, claude-opus-5-5, claude-sonnet-5-5 and claude-haiku-5-5.
 - `context` (string): the path to the repo's glossary of domain terms, which every brief points workers at. Foreman finds `CONTEXT.md` or `docs/CONTEXT.md` on its own.
 - `adr` (object): how the repo writes its architecture decision records. `foreman adr detect` fills it in from the repo's ADR folder, and `foreman adr init [--dir <path>]` sets up a new one. Don't write it by hand.
@@ -155,6 +156,23 @@ For a macOS app:
 - `env`: environment variables for the app, like `{ "UI_TESTING": "1" }`.
 
 Each copy of a macOS app runs with its own bundle id and home folder, so screenshots never touch the user's real app data.
+
+## Telegram
+
+With `telegram` set in `.foreman/config.json`, the orchestrator pings the user through Claude Code's official Telegram plugin, and the user can answer from Telegram. Set it up once:
+
+1. The user creates a bot: they message @BotFather on Telegram, send `/newbot` and copy the token.
+2. In any Claude Code session: `/plugin install telegram@claude-plugins-official`, then `/telegram:configure <token>`. The token goes to `~/.claude/channels/telegram/.env`.
+3. Add `telegram` to `.foreman/config.json` with the user's own words for when to ping.
+4. Run `foreman up`. The user DMs the bot, which replies with a pairing code, and runs `/telegram:access pair <code>` in the orchestrator's tab. Pings start straight away, with no restart, because the orchestrator reads the paired chat from the plugin's `access.json`. After that, `/telegram:access policy allowlist` stops strangers getting pairing codes.
+5. `foreman doctor` checks the plugin is installed, has a token and is paired.
+
+How it works:
+
+- `foreman up` starts the orchestrator with `--channels plugin:<the installed plugin>`, which lets messages from Telegram reach it. The plugin may be installed as `telegram@claude-plugins-official` or `telegram@anthropic-plugin-directory`, and Foreman uses whichever is installed.
+- Only one session at a time can own the bot. Each session that loads the plugin starts its own bot and stops the one already running. So workers and the reviewer always start with the plugin turned off, whether or not `telegram` is set. Any other Claude Code session the user opens with the plugin on will take the bot from the orchestrator until the orchestrator restarts.
+- The orchestrator pings with the plugin's `reply` tool when the `when` text matches, in a line or two that names the task and worker. A message from Telegram counts as the user's own words, the same as typing in the orchestrator's tab.
+- Messages from Telegram need the user's Claude Code account to allow channels. Some Team and Enterprise organisations turn them off. Pings still go out without them, but answers have to go in the orchestrator's tab.
 
 ## What Foreman does on its own
 
@@ -191,6 +209,7 @@ mkdir -p .foreman/skills && cp -r ~/Code/Foreman/.claude/skills/pull-request .fo
 ## When something goes wrong
 
 - Something won't start: run `foreman doctor`.
+- Telegram pings stopped: another Claude Code session with the Telegram plugin on took the bot. Close it, then restart the orchestrator.
 - `foreman up` says the session already exists: the orchestrator is already running in that terminal session. Switch to it in your terminal.
 - The status pane is gone: run `foreman pane` from the orchestrator's tab.
 - A task stopped over budget: `foreman budget <task> <usd>`, then `foreman resume <task>`.

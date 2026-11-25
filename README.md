@@ -22,6 +22,7 @@ Foreman gives you the team and the manager, right inside Claude Code.
 - :rotating_light: Spots hung workers and restarts them
 - :memo: Warns every worker about known problems, like flaky tests
 - :zzz: Keeps working while you're away, and logs every call it makes
+- :iphone: Pings you on Telegram, and takes your answers from there
 - :clipboard: Writes a summary of the PRs to review, in order
 
 > [!IMPORTANT]
@@ -144,6 +145,23 @@ Foreman merges each task's PR itself once the reviewer approves it and every che
 
 Foreman only merges its own task PRs, from `foreman/<task>` branches. Release PRs, the decisions PR and your own PRs stay with you. Your `never` list still applies. The reviewer won't approve a PR that a rule about merging covers, such as "Merge a PR that changes a migration", and switching automerge on lists those rules. A PR built on another task's branch waits until that task merges. Merges use squash when the repo allows it. `foreman automerge off` hands merging back to you, and `foreman status` shows when it's on.
 
+### Pings on Telegram
+
+Foreman can ping you on Telegram when something needs you, and you can answer from there. It goes through Claude Code's official Telegram plugin, so only the orchestrator talks to you. Set it up once:
+
+1. Create a bot: message [@BotFather](https://t.me/BotFather) on Telegram, send `/newbot` and copy the token it gives you.
+2. In any Claude Code session, run `/plugin install telegram@claude-plugins-official`, then `/telegram:configure <token>`.
+3. Say when you want a ping in `.foreman/config.json`, in your own words:
+
+   ```json
+   { "telegram": { "when": "only when a question has waited 10 minutes, or the run is finished" } }
+   ```
+
+4. Run `foreman up`, then DM your bot. It replies with a pairing code. In the orchestrator's tab, run `/telegram:access pair <code>`. Pings start straight away, with no restart.
+5. Run `foreman doctor` to check the plugin is installed and paired.
+
+The orchestrator pings you when your words say to, in a line or two that names the task and worker. Anything you send the bot reaches the orchestrator as if you'd typed it in its tab. Workers and the reviewer never load the plugin, because each session that loads it takes the bot over. Messages you send only reach the orchestrator if your Claude Code account allows channels. Some Team and Enterprise organisations turn them off, and pings still go out.
+
 ### The PRs to review
 
 ```sh
@@ -202,7 +220,8 @@ Settings live in `.foreman/config.json` in your repo, and every one is optional.
   "testMinutes": 15,
   "screenshots": { "adapter": "web", "start": "npm run dev -- --port {port}", "url": "http://localhost:{port}" },
   "prScreenshots": "local",
-  "never": ["Merge a release PR. I cut every release."]
+  "never": ["Merge a release PR. I cut every release."],
+  "telegram": { "when": "only when a question has waited 10 minutes, or the run is finished" }
 }
 ```
 
@@ -221,6 +240,7 @@ Settings live in `.foreman/config.json` in your repo, and every one is optional.
 | `screenshots` | How to run your app for before and after screenshots |
 | `prScreenshots` | `"local"` lists screenshot paths in the PR. `"branch"` pushes them to a `foreman-screenshots` branch so they show on GitHub |
 | `never` | Things Foreman must never do in this repo, one plain sentence each. The orchestrator sees the list when it starts, every brief lists it and the reviewer treats a change that breaks one as an issue |
+| `telegram` | Turns on pings through Claude Code's Telegram plugin. `when` says in your own words when the orchestrator should ping you. See [Pings on Telegram](#pings-on-telegram) |
 
 For a macOS app, `screenshots` builds the app instead of starting a server:
 

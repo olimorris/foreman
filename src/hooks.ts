@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
-import { loadConfig, neverRules } from "./config.ts";
+import { loadConfig, neverRules, telegramSetup, telegramWhen, type TelegramSetup } from "./config.ts";
 import { isInside, type Repo } from "./paths.ts";
 import type { Terminal } from "./terminal.ts";
 import { inFlight, loadTasks, type Task } from "./state.ts";
@@ -120,7 +120,7 @@ export function stopHook(repo: Repo): object {
   return d.warn ? { systemMessage: d.warn } : {};
 }
 
-export function sessionStartContext(input: HookInput, ctx: LockContext, term: Terminal): string {
+export function sessionStartContext(input: HookInput, ctx: LockContext, term: Terminal, telegram: () => TelegramSetup = telegramSetup): string {
   if (ctx.role === "worker") {
     const task = ctx.task;
     if (!task) return "FOREMAN_TASK doesn't match a Foreman task. Do nothing and tell the user.";
@@ -129,6 +129,7 @@ export function sessionStartContext(input: HookInput, ctx: LockContext, term: Te
     }
     return `You are the Foreman worker for task ${task.id}. Your brief: ${join(ctx.repo.foreman, "tasks", task.id, "brief.md")}`;
   }
+  const config = loadConfig(ctx.repo);
   const tasks = inFlight(loadTasks(ctx.repo));
   const armed = watcherArmed(ctx.repo);
   const lines = tasks.map((t) => {
@@ -141,8 +142,19 @@ export function sessionStartContext(input: HookInput, ctx: LockContext, term: Te
     ...(lines.length ? lines : ["- no tasks in flight"]),
     `Watcher: ${armed ? "armed" : "not armed"}.`,
     ...(tasks.length && !armed ? ["Run the recover skill, then start `foreman watch` in the background."] : []),
-    ...neverSection(neverRules(loadConfig(ctx.repo))),
+    ...neverSection(neverRules(config)),
+    ...telegramSection(telegramWhen(config), telegram),
   ].join("\n");
+}
+
+function telegramSection(when: string | undefined, setup: () => TelegramSetup): string[] {
+  if (!when) return [];
+  const { chats, access } = setup();
+  const chat = chats[0];
+  if (!chat) {
+    return ["", `Telegram pings are on, but the Telegram plugin isn't paired with the user yet. Once they pair in this tab with /telegram:access pair, the chat_id is the first entry in allowFrom in ${access}, and your words for when to ping are: ${when}`];
+  }
+  return ["", `Telegram pings are on. Ping the user with the Telegram plugin's reply tool, chat_id ${chat}, when this holds, in their words: ${when}`];
 }
 
 function neverSection(rules: string[]): string[] {

@@ -51,6 +51,14 @@ test("the reviewer runs on reviewerModel when it's set, and Claude Code's defaul
   expect(reviewerCommand(repo, "T1")).not.toContain("--model");
 });
 
+test("the reviewer starts with every installed Telegram plugin turned off", () => {
+  const repo = tempRepo();
+  const cmd = reviewerCommand(repo, "T1", undefined, undefined, ["telegram@anthropic-plugin-directory"]);
+  expect(JSON.parse(cmd[cmd.indexOf("--settings") + 1]!)).toEqual({ enabledPlugins: { "telegram@anthropic-plugin-directory": false } });
+  expect(cmd).not.toContain("--channels");
+  expect(reviewerCommand(repo, "T1", undefined, undefined, [])).not.toContain("--settings");
+});
+
 test("a bad reviewerModel fails before the review opens or a round is counted", async () => {
   const repo = tempRepo();
   withTasks(repo, (ts) => ts.push({ id: "T1", status: "done", branch: "foreman/T1", base: "main", worktree: repo.root, owns: ["src/"], socket: "/nonexistent.sock", createdAt: "" }));

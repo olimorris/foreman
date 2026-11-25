@@ -1,6 +1,6 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { loadConfig, neverRules } from "./config.ts";
+import { loadConfig, neverRules, telegramPlugins, withoutTelegram } from "./config.ts";
 import { indexPath, writeIndex } from "./decisions.ts";
 import { appendEvent, lastDone } from "./events.ts";
 import { must, run, type Result, type RunOptions } from "./exec.ts";
@@ -130,7 +130,7 @@ export function reviewerModel(repo: Repo): string | undefined {
   return model;
 }
 
-export function reviewerCommand(repo: Repo, id: string, budget?: number, model?: string): string[] {
+export function reviewerCommand(repo: Repo, id: string, budget?: number, model?: string, telegram = telegramPlugins()): string[] {
   const skills = loadSkills(repo);
   return [
     // Not --agent: with it, --json-schema leaves structured_output empty.
@@ -140,6 +140,7 @@ export function reviewerCommand(repo: Repo, id: string, budget?: number, model?:
     "--append-system-prompt-file", join(pluginRoot, "prompts", "reviewer.md"),
     "--tools", "Read,Grep,Glob", "--allowedTools", "Read,Grep,Glob", "--add-dir", taskDir(repo, id), join(repo.foreman, "decisions"),
     ...(skills.length ? [skillsDir(repo)] : []),
+    ...(telegram.length ? ["--settings", JSON.stringify(withoutTelegram(telegram))] : []),
   ];
 }
 

@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { run } from "./exec.ts";
-import { pluginRoot } from "./paths.ts";
+import { channelPlugin, loadConfig, telegramPlugins, telegramSetup, type Config, type TelegramSetup } from "./config.ts";
+import { findRepo, pluginRoot } from "./paths.ts";
 import { availableTerminals, terminal } from "./integrations/index.ts";
 import type { Check, Terminal } from "./terminal.ts";
 
@@ -47,7 +48,27 @@ export function doctor(): Check[] {
   const browsers = join(process.env.HOME ?? "", "Library", "Caches", "ms-playwright");
   const playwright = run(["bunx", "playwright", "--version"]).code === 0 && run(["sh", "-c", `ls -d "${browsers}"/chromium* >/dev/null 2>&1`]).code === 0;
   checks.push({ name: "playwright", ok: playwright, detail: playwright ? "found (web screenshots)" : "run: bunx playwright install chromium (only needed for web screenshots)" });
+  checks.push(...telegramChecks(repoConfig(), telegramPlugins(), telegramSetup));
   return checks;
+}
+
+function repoConfig(): Config {
+  try {
+    return loadConfig(findRepo());
+  } catch {
+    return {};
+  }
+}
+
+export function telegramChecks(config: Config, plugins: string[], setup: () => TelegramSetup): Check[] {
+  if (!config.telegram) return [];
+  if (!plugins.length) {
+    return [{ name: "telegram", ok: false, detail: `the Telegram plugin isn't installed. In Claude Code, run /plugin install ${channelPlugin(plugins)}` }];
+  }
+  const { token, chats } = setup();
+  if (!token) return [{ name: "telegram", ok: false, detail: "the plugin has no bot token. In Claude Code, run /telegram:configure <token from @BotFather>" }];
+  if (!chats.length) return [{ name: "telegram", ok: false, detail: "not paired. Run foreman up, DM your bot on Telegram, then run /telegram:access pair <code> in the orchestrator's tab" }];
+  return [{ name: "telegram", ok: true, detail: `${channelPlugin(plugins)} installed and paired` }];
 }
 
 function compare(a: number[], b: number[]): number {

@@ -2,7 +2,7 @@ import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, writ
 import { join } from "node:path";
 import { must } from "./exec.ts";
 import { baseRef } from "./snapshot.ts";
-import { loadConfig, neverRules } from "./config.ts";
+import { loadConfig, neverRules, telegramPlugins, withoutTelegram } from "./config.ts";
 import { findContext, writeIndex } from "./decisions.ts";
 import { pluginArgs, socketPath, taskDir, worktreeDir, type Repo } from "./paths.ts";
 import type { Terminal } from "./terminal.ts";
@@ -78,7 +78,7 @@ export function spawn(repo: Repo, opts: SpawnOptions, term: Terminal): Task {
   return task;
 }
 
-export function workerCommand(task: Task, term: Terminal, prompt: string, resume?: string): string[] {
+export function workerCommand(task: Task, term: Terminal, prompt: string, resume?: string, telegram = telegramPlugins()): string[] {
   return [
     // Without the terminal's session ids, a user hook that names "your session" can't rename the orchestrator's session from a worker.
     "env", ...term.sessionEnv.flatMap((v) => ["-u", v]), "FOREMAN_ROLE=worker", `FOREMAN_TASK=${task.id}`,
@@ -89,7 +89,7 @@ export function workerCommand(task: Task, term: Terminal, prompt: string, resume
     // Auto mode's classifier weighs the user's global "never commit" rule, but this workflow allows commits on the task branch.
     // Allow rules only reach plain Bash calls: in code mode the classifier judges the whole script first.
     "--allowedTools", "Bash(git add *)", "Bash(git commit *)", "Bash(git rebase *)", "Bash(foreman *)",
-    "--settings", JSON.stringify({ env: { CLAUDE_CODE_EXPERIMENTAL_CODE_MODE: "0" }, includeCoAuthoredBy: false }),
+    "--settings", JSON.stringify({ env: { CLAUDE_CODE_EXPERIMENTAL_CODE_MODE: "0" }, includeCoAuthoredBy: false, ...withoutTelegram(telegram) }),
     "--messaging-socket-path", task.socket,
     "-n", `foreman ${task.id}`,
     ...(resume ? ["--resume", resume] : []),

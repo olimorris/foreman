@@ -139,6 +139,17 @@ describe("models", () => {
   });
 });
 
+test("a worker starts with every installed Telegram plugin turned off, so it can't take the bot from the orchestrator", () => {
+  const { task } = spawned();
+  const settings = (telegram: string[]) => {
+    const cmd = workerCommand(task, fakeTerminal(), "go", undefined, telegram);
+    return JSON.parse(cmd[cmd.indexOf("--settings") + 1]!);
+  };
+  expect(settings(["telegram@anthropic-plugin-directory", "telegram@claude-plugins-official"]).enabledPlugins).toEqual({ "telegram@anthropic-plugin-directory": false, "telegram@claude-plugins-official": false });
+  expect(settings([])).not.toHaveProperty("enabledPlugins");
+  expect(workerCommand(task, fakeTerminal(), "go", undefined, ["telegram@x"])).not.toContain("--channels");
+});
+
 test("events append and read back in order", () => {
   const { repo } = spawned();
   appendEvent(repo, "T1", "blocked", "need the API shape");
