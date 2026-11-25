@@ -95,3 +95,14 @@ Checked against Claude Code 2.1.332: its binary's strings, transcripts already o
 - Auto mode's refusal lands in the transcript as the call's `tool_result`, with `is_error` and text starting "Permission for this action was denied by the Claude Code auto mode classifier. Reason: [Destructive or Unwanted Actions]". The text tells the model to carry on with other work, and the session does. Other refusals start "Permission for this action has been denied".
 - The Notification hook also fires for a prompt, with `notification_type` `permission_prompt`, but it only carries a message and a title. PermissionRequest names the tool and its input, so Foreman uses that.
 - A session at a prompt has already written the call's `tool_use` line and writes nothing more until the user answers. Yes runs the call. No writes a `tool_result` starting "The user doesn't want to proceed with this tool use". Either way the call gets its `tool_result`, which is how Foreman knows the prompt was answered.
+
+## Homebrew
+
+Checked against Homebrew 7.0.16 and Claude Code 2.1.332, by installing a rendered formula from a local tap, then upgrading it to a second version and running `brew cleanup`.
+
+- `bin.install_symlink libexec/"bin/foreman"` links `/opt/homebrew/bin/foreman` to the versioned folder, so `realpath` in `bin/foreman` lands in `/opt/homebrew/Cellar/foreman/<version>/libexec`. `brew cleanup` deletes that folder after an upgrade.
+- `/opt/homebrew/opt/foreman` is a link Homebrew moves to the new version on upgrade. `pluginRoot` swaps a Cellar path for it, so `--plugin-dir` and the commands Foreman opens in tabs point at the link.
+- Claude Code keeps a symlinked `--plugin-dir` as given. A `claude -p --debug-file` run with `--plugin-dir /opt/homebrew/opt/foreman/libexec` ran its hooks as `"/opt/homebrew/opt/foreman/libexec/bin/foreman" hook session-start`, not the Cellar path.
+- After an upgrade, a running session's hooks run the new version's code, while its agents, skills and prompts stay as they were when it started.
+- A formula can depend on another tap's formula, like `oven-sh/bun/bun`. It can't depend on a cask, so Claude Code is left to `foreman doctor` and the caveats.
+- `brew audit --strict` and `brew test` pass on the formula. `libexec.install` skips dotfiles unless named, so `.claude-plugin` is listed by name.
