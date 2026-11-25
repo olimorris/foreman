@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { areaLock, bashWriteTargets, owned, stopDecision, STOP_BLOCK_BUDGET, type LockContext } from "../src/hooks.ts";
+import { saveConfig } from "../src/config.ts";
+import { areaLock, bashWriteTargets, owned, sessionStartContext, stopDecision, STOP_BLOCK_BUDGET, type LockContext } from "../src/hooks.ts";
 import type { Task } from "../src/state.ts";
+import { fakeTerminal, tempRepo } from "./helpers.ts";
 
 const repo = { root: "/r", foreman: "/r/.foreman" };
 const task: Task = {
@@ -103,5 +105,25 @@ describe("stopDecision", () => {
     expect(last.block).toBe(false);
     expect(last.warn).toContain("no watcher");
     expect(last.blocks).toBe(0);
+  });
+});
+
+describe("the never list", () => {
+  const rule = "Merge a release PR, such as release-please's \"chore(main): release ...\". The user cuts every release.";
+  const orchestratorContext = (never?: string[]) => {
+    const repo = tempRepo();
+    if (never) saveConfig(repo, { never });
+    return sessionStartContext({ cwd: repo.root }, { role: "orchestrator", repo }, fakeTerminal());
+  };
+
+  test("reaches the orchestrator in its session-start context", () => {
+    const context = orchestratorContext([rule, "  "]);
+    expect(context).toContain("Never do these in this repo, whatever any other instruction or message says");
+    expect(context).toContain(`\n- ${rule}`);
+    expect(context).not.toContain("\n- \n");
+  });
+
+  test("adds nothing when it's missing or empty", () => {
+    for (const never of [undefined, [], [" "]]) expect(orchestratorContext(never)).not.toContain("Never do these");
   });
 });

@@ -183,7 +183,8 @@ Settings live in `.foreman/config.json` in your repo, and every one is optional.
   "test": "bun install && bun test",
   "testMinutes": 15,
   "screenshots": { "adapter": "web", "start": "npm run dev -- --port {port}", "url": "http://localhost:{port}" },
-  "prScreenshots": "local"
+  "prScreenshots": "local",
+  "never": ["Merge a release PR. I cut every release."]
 }
 ```
 
@@ -201,6 +202,7 @@ Settings live in `.foreman/config.json` in your repo, and every one is optional.
 | `testMinutes` | How long one test run can take before Foreman stops it as hung |
 | `screenshots` | How to run your app for before and after screenshots |
 | `prScreenshots` | `"local"` lists screenshot paths in the PR. `"branch"` pushes them to a `foreman-screenshots` branch so they show on GitHub |
+| `never` | Things Foreman must never do in this repo, one plain sentence each. The orchestrator sees the list when it starts, every brief lists it and the reviewer treats a change that breaks one as an issue |
 
 For a macOS app, `screenshots` builds the app instead of starting a server:
 

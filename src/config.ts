@@ -6,7 +6,10 @@ import type { ShotsConfig } from "./shots.ts";
 import type { Budget, Price } from "./cost.ts";
 import { writeJson } from "./state.ts";
 
-export type Config = { adr?: AdrConvention; context?: string; screenshots?: ShotsConfig; maxWorkers?: number; prScreenshots?: "branch" | "local"; budget?: Budget; prices?: Record<string, Price>; stallMinutes?: number; stackTasks?: boolean; test?: string; testMinutes?: number; answerMinutes?: number; workerModel?: string; reviewerModel?: string; orchestratorModel?: string };
+export type Config = { adr?: AdrConvention; context?: string; screenshots?: ShotsConfig; maxWorkers?: number; prScreenshots?: "branch" | "local"; budget?: Budget; prices?: Record<string, Price>; stallMinutes?: number; stackTasks?: boolean; test?: string; testMinutes?: number; answerMinutes?: number; workerModel?: string; reviewerModel?: string; orchestratorModel?: string; never?: string[] };
+
+// Blank entries would print as empty bullets under a heading that promises rules.
+export const neverRules = (config: Config): string[] => (config.never ?? []).map((r) => r.trim()).filter(Boolean);
 
 const configPath = (repo: Repo) => join(repo.foreman, "config.json");
 
