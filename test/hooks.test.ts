@@ -167,6 +167,12 @@ describe("bashWriteTargets reads quoted text as data", () => {
     expect(bashWriteTargets(`echo "$(echo x > a.txt)"`, "/w")).toEqual(["/w/a.txt"]);
     expect(bashWriteTargets(`echo $((1 > 2))`, "/w")).toEqual([]);
   });
+
+  test("a here-string or a << with no closing tag doesn't hide the lines after it", () => {
+    expect(bashWriteTargets(`cat <<< "x"\necho y > a.txt`, "/w")).toEqual(["/w/a.txt"]);
+    expect(bashWriteTargets(`jq . <<< "$json" > out.json`, "/w")).toEqual(["/w/out.json"]);
+    expect(bashWriteTargets(`(( a << 2 ))\necho y > a.txt`, "/w")).toEqual(["/w/a.txt"]);
+  });
 });
 
 test("owned treats a trailing slash as everything under it", () => {

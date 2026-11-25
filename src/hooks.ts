@@ -130,14 +130,19 @@ function stripText(command: string): string {
     out += isTarget() ? `"${expands ? "$" : value.replaceAll('"', "")}"` : `""${subs}`;
   };
 
+  // A `<<` with no closing tag line, like a shift in `(( a << 2 ))`, isn't a heredoc, so the lines after it are still scanned.
   const skipHeredocBodies = () => {
     for (const { tag, tabs } of heredocs.splice(0)) {
-      while (i < command.length) {
-        const eol = command.indexOf("\n", i);
-        const line = command.slice(i, eol < 0 ? command.length : eol);
-        i = eol < 0 ? command.length : eol + 1;
-        if ((tabs ? line.replace(/^\t+/, "") : line).trim() === tag) break;
+      let at = i;
+      let closed = false;
+      while (at < command.length && !closed) {
+        const eol = command.indexOf("\n", at);
+        const line = command.slice(at, eol < 0 ? command.length : eol);
+        at = eol < 0 ? command.length : eol + 1;
+        closed = (tabs ? line.replace(/^\t+/, "") : line).trim() === tag;
       }
+      if (!closed) return;
+      i = at;
     }
   };
 
@@ -235,7 +240,10 @@ function stripText(command: string): string {
         out += `(${substitution("`")})`;
       } else if (c === "#" && (out === "" || /[\s;&|()]$/.test(out))) {
         while (i < command.length && command[i] !== "\n") i++;
-      } else if (c === "<" && next === "<" && command[i + 2] !== "<") {
+      } else if (c === "<" && next === "<" && command[i + 2] === "<") {
+        i += 3;
+        out += "<<<";
+      } else if (c === "<" && next === "<") {
         i += 2;
         heredocTag();
         out += "<<_";
