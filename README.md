@@ -121,7 +121,7 @@ Here's my backlog: BACKLOG.md. The deadline is tomorrow. Do it as cheaply as you
 
 Foreman asks about anything unclear, then plans the work. If the plan differs from your backlog, such as splitting or cutting an item, it waits for your approval. If you don't answer within 30 minutes, Foreman makes the call and notes it in the summary. Workers open in their own tabs, and approved work arrives as PRs. `foreman help` lists every command.
 
-The orchestrator waits on long-running work as MCP tasks, so you no longer see a message from another session each time it wakes. Its tab shows "MCP task still running" while it waits, and "MCP task ... completed" when something needs it.
+The orchestrator waits on long-running work as [MCP tasks](https://modelcontextprotocol.io/extensions/tasks/overview), so you no longer see a message from another session each time it wakes. Its tab shows "MCP task still running" while it waits, and "MCP task ... completed" when something needs it.
 
 ### Status
 
@@ -255,17 +255,17 @@ For a macOS app, `screenshots` builds the app instead of starting a server:
 
 ### Your own skills
 
-Foreman follows your own skills when it builds, reviews and opens PRs. Put each one in `.foreman/skills/<name>/SKILL.md`, in [Claude Code's skill format](https://code.claude.com/docs/en/skills): frontmatter with a `name` and a `description`, then the instructions. They stay on your machine, since Foreman keeps `.foreman/` out of git.
+Put your skills in `.foreman/skills/<name>/SKILL.md`. Every session gets them, and they stay out of git.
 
-- The orchestrator and every worker load them as `user-skills:<name>`. They come from a plugin folder, `.foreman/skills-plugin`, that links to `.foreman/skills`, so they never land in a worktree a worker commits from. It's a plugin folder because Team and Enterprise logins turn off skills from MCP servers.
-- The reviewer reads every skill and checks each change against the ones whose description fits reviewing code, like a code-review skill. Breaking one sends the change back to its worker, with the skill named.
-- A skill named `pull-request` shapes the PRs Foreman opens. The reviewer writes the title and description by it, and Foreman adds the intent, assumptions, decisions, screenshots, verdict and risk below. A title that isn't a conventional commit is dropped for the task's own title.
-- A skill named `adr` shapes the decisions Foreman records. The orchestrator writes each one in its format, and in a repo with no ADR folder yet, the new folder takes the skill's title line, status and a README that describes them. An existing ADR folder keeps its own convention.
+- Workers and the orchestrator load them as `user-skills:<name>`
+- The reviewer checks each change against your review skills
+- A `pull-request` skill shapes the PRs Foreman opens
+- An `adr` skill shapes the decisions it records
 
-Foreman names each skill by its folder, so a skill copied in as `.foreman/skills/adr/` is the `adr` skill whatever its frontmatter says. Foreman's own [pull-request skill](.claude/skills/pull-request/SKILL.md) is a working example. Download it and make it yours:
+As an example, you can start from Foreman's own [pull-request skill](.claude/skills/pull-request/SKILL.md):
 
 ```sh
 mkdir -p .foreman/skills/pull-request && curl -fsSL https://raw.githubusercontent.com/olimorris/foreman/main/.claude/skills/pull-request/SKILL.md -o .foreman/skills/pull-request/SKILL.md
 ```
 
-The reviewer reads your skills at every review. The orchestrator and workers load them when their session starts, so a skill you add mid-run reaches the workers started or restarted after it. Without `.foreman/skills/`, everything works as before.
+A skill you add mid-run reaches workers started after it.
