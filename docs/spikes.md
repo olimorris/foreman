@@ -36,6 +36,16 @@ Findings that shaped the design, checked against Claude Code 2.1.331 and Rex 0.1
 - A new repo root shows the trust prompt too, and a message typed into it answers "No" and exits. `foreman up` pre-trusts the repo root.
 - Any `claude` started with `REX_SESSION` set follows the user's hook and renames that Rex session. Workers start without `REX_SESSION` and `REX_BLOCK`.
 
+## Processes
+
+- `lsof -d cwd -F pn` lists the working directory of every process in about 0.15 seconds, so the watcher runs it once a pass for all the worktrees.
+- A worker's claude process runs each Bash command as `/bin/zsh -c source <snapshot> && eval '<command>'`, so the command the worker typed is that shell's child. The claude process also starts `caffeinate` and LSP servers such as `sourcekit-lsp` in the worktree, and they sit at 0% CPU.
+- macOS `ps -o time` prints CPU time as minutes and seconds, with the minutes running past 60, like `296:01.75`. The watcher compares this between passes, because `%cpu` is a decaying average that stays up after a build stops.
+- `ps -o time` leaves out children that have exited. The man page says `-S` adds them to the parent, but on macOS 27.2 it adds nothing: a shell that had waited on a child using 2 seconds of CPU still showed `0:00.01` with and without `-S`. So a serial make whose compiler runs are short looks idle by CPU time, and the watcher counts a new process in the worktree as a sign of work instead.
+- Claude Code restarts `caffeinate -i -t 300` under the worker every 5 minutes, so new processes whose parent is the worker's claude process don't count as work.
+- On macOS a process whose parent exits moves to launchd, pid 1. Rex tabs run under `rex server`, so a worker's claude process always has a live parent.
+- A hung `timeout 900 swift test -j 3` showed as `timeout`, `swift-test` and `swiftpm-testing-helper`, all at 0% CPU.
+
 ## Base branch
 
 - The user's local `main` lags behind merged PRs. Spawns, reviews, delivery and teardown all compare against `origin/<base>` when it exists, or a stale checkout puts other tasks' merged work into a review's diff.

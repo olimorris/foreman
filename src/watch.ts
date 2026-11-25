@@ -13,11 +13,13 @@ import { loadConfig } from "./config.ts";
 import { loadPlan, readyTasks, maxWorkers, stackable } from "./plan.ts";
 import { restartWorker, stopWorker } from "./stop.ts";
 import { inFlight, loadTasks, updateTask, type Task } from "./state.ts";
+import { busy, commandName, isWorker, pidAlive, processesIn, sample, tidy, unstoppableLine, type CpuSample, type Proc } from "./procs.ts";
 
 export type PrState = { state: string; comments: number; base?: string };
 export type TrackedPr = { key: string; number: number; base?: string };
-export type Stall = { since: number; nudged: boolean; escalated: boolean };
-export type Cursor = { events: Record<string, number>; main?: string; exited: string[]; prs?: Record<string, PrState>; budget?: Record<string, number>; stalls?: Record<string, Stall>; restarts?: Record<string, number>; unanswered?: string[] };
+export type Stall = { since: number; nudged: boolean; escalated: boolean; cpu?: CpuSample; measuredAt?: number; busyAt?: number };
+export type Cursor = { events: Record<string, number>; main?: string; exited: string[]; prs?: Record<string, PrState>; budget?: Record<string, number>; stalls?: Record<string, Stall>; restarts?: Record<string, number>; unanswered?: string[]; unstoppable?: number[] };
+export type Nudge = { id: string; text: string };
 
 export type Probes = {
   events(id: string): TaskEvent[];
@@ -26,17 +28,22 @@ export type Probes = {
   pr?(number: number): PrState | undefined;
   lastActivity?(task: Task): number | undefined;
   questions?(): Question[];
+  processes?(task: Task): Proc[];
 };
 
 export type Clock = { now: number; stallMs: number; answerMs?: number; waiting?: (id: string) => string[] };
 
 export const STALL_MINUTES = 20;
 export const MAX_RESTARTS = 2;
+// A busy loop hangs too, so even a worker whose commands keep using CPU gets restarted once it has been silent this many stall periods.
+export const BUSY_STALLS = 4;
+// Passes come as often as files change, and CPU time measured over a second or two is mostly noise.
+const MIN_SAMPLE_MS = 10_000;
 
-export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: TrackedPr[] = [], clock?: Clock): { reasons: string[]; cursor: Cursor; nudge: string[]; restart: string[] } {
+export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: TrackedPr[] = [], clock?: Clock): { reasons: string[]; cursor: Cursor; nudge: Nudge[]; restart: string[] } {
   const next: Cursor = { ...cursor, events: { ...cursor.events }, exited: [...cursor.exited], prs: { ...cursor.prs }, stalls: { ...cursor.stalls }, restarts: { ...cursor.restarts }, unanswered: [...(cursor.unanswered ?? [])] };
   const reasons: string[] = [];
-  const nudge: string[] = [];
+  const nudge: Nudge[] = [];
   const restart: string[] = [];
 
   for (const task of tasks) {
@@ -86,14 +93,26 @@ export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: Tracked
 }
 
 // A worker idling on a hung background command never wakes by itself, so it's nudged, then restarted, and only a worker that keeps hanging reaches the orchestrator.
-function checkStall(task: Task, probes: Probes, check: Clock, cursor: Cursor, reasons: string[], nudge: string[], restart: string[]): void {
+function checkStall(task: Task, probes: Probes, check: Clock, cursor: Cursor, reasons: string[], nudge: Nudge[], restart: string[]): void {
   const stalls = cursor.stalls!;
   const last = task.status === "running" ? probes.lastActivity?.(task) : undefined;
   if (last === undefined) return void delete stalls[task.id];
-  let s = stalls[task.id];
-  if (!s || s.since !== last) s = stalls[task.id] = { since: last, nudged: false, escalated: false };
-  const idle = check.now - last;
-  if (idle >= 2 * check.stallMs && !s.escalated) {
+  const prev = stalls[task.id];
+  const s = prev?.since === last ? prev : (stalls[task.id] = { since: last, nudged: false, escalated: false, cpu: prev?.cpu, measuredAt: prev?.measuredAt, busyAt: prev?.busyAt });
+  const all = probes.processes?.(task) ?? [];
+  const procs = all.filter((p) => !isWorker(p, task));
+  const before = s.cpu;
+  if (!before || check.now - before.at >= MIN_SAMPLE_MS) {
+    if (before && busy(before, all, check.now, task)) s.busyAt = check.now;
+    if (before) s.measuredAt = check.now;
+    s.cpu = sample(procs, check.now);
+  }
+  // A watcher armed after a long silence has nothing to compare yet, and would restart a busy build as if it had hung.
+  if (procs.length && s.measuredAt === undefined) return;
+  const silent = check.now - last;
+  const idle = check.now - Math.max(last, s.busyAt ?? 0);
+  const command = (busy: boolean) => commandName(all, task, before ?? s.cpu!, busy);
+  if ((idle >= 2 * check.stallMs || silent >= BUSY_STALLS * check.stallMs) && !s.escalated) {
     s.escalated = true;
     const restarts = cursor.restarts![task.id] ?? 0;
     if (restarts < MAX_RESTARTS) {
@@ -103,14 +122,19 @@ function checkStall(task: Task, probes: Probes, check: Clock, cursor: Cursor, re
     }
     const waiting = check.waiting?.(task.id) ?? [];
     const blocks = waiting.length ? `, and ${waiting.join(", ")} ${waiting.length > 1 ? "wait" : "waits"} on it` : "";
-    reasons.push(`stuck ${task.id}: hung again after ${restarts} restarts${blocks}`);
+    const named = command(idle < 2 * check.stallMs);
+    const on = idle < 2 * check.stallMs ? `, though ${named ? `"${named}" is` : "its commands are"} still using CPU` : named ? `, waiting on "${named}", which uses no CPU` : "";
+    reasons.push(`stuck ${task.id}: hung again after ${restarts} restarts${on}${blocks}`);
   } else if (idle >= check.stallMs && !s.nudged) {
     s.nudged = true;
-    nudge.push(task.id);
+    nudge.push({ id: task.id, text: nudgeText(command(false), Math.round(idle / 60_000)) });
   }
 }
 
-export const NUDGE = "You've done nothing for a while. If you're waiting on a command, check it's still making progress: a test run that hasn't printed anything for minutes has usually hung. Kill it, then rerun it with a time limit, or report blocked with what you found. Never end your turn waiting on a command that has no time limit.";
+export function nudgeText(command?: string, minutes?: number): string {
+  const seen = command ? `"${command}" in your worktree has used no CPU for ${minutes} minutes, so it has most likely hung.` : "If you're waiting on a command, check it's still making progress: a test run that hasn't printed anything for minutes has usually hung.";
+  return `You've done nothing for a while. ${seen} Kill it, then rerun it with a time limit, or report blocked with what you found. Never end your turn waiting on a command that has no time limit.`;
+}
 
 // The PR's branch is the start of each task stacked on it, so closing it leaves them with work that may never merge.
 function stackedOnto(tasks: Task[], id: string): string {
@@ -188,13 +212,18 @@ export async function watch(repo: Repo, base: string, term: Terminal): Promise<n
       if (ghDue) lastGh = Date.now();
       // Merges happen on GitHub, so origin's base only moves here when it's fetched.
       if (ghDue && hasOrigin) run(["git", "-C", repo.root, "fetch", "-q", "origin", base]);
+      const procs = new Map<string, Proc[]>();
+      const live = tasks.filter((t) => existsSync(t.worktree));
+      processesIn(live.map((t) => t.worktree)).forEach((list, i) => procs.set(live[i]!.id, list));
+      const untidy = tidyAll(live, procs, cursor);
       const prs = trackedPrs(tasks, loadDecisions(repo)).filter((p) => !["MERGED", "CLOSED"].includes(cursor.prs?.[`${p.number}`]?.state ?? ""));
-      const result = scan(tasks, cursor, { ...probes, pr: ghDue ? (n) => ghPr(repo.root, n) : undefined }, prs, { now: Date.now(), stallMs, answerMs: answerMs(repo), waiting });
+      const result = scan(tasks, cursor, { ...probes, pr: ghDue ? (n) => ghPr(repo.root, n) : undefined, processes: (t) => procs.get(t.id) ?? [] }, prs, { now: Date.now(), stallMs, answerMs: answerMs(repo), waiting });
       cursor = result.cursor;
       for (const [id, patch] of prPatches(tasks, prs, cursor.prs ?? {})) updateTask(repo, id, patch);
-      for (const id of result.nudge) {
+      result.reasons.unshift(...untidy);
+      for (const { id, text } of result.nudge) {
         try {
-          sendToTask(repo, tasks.find((t) => t.id === id)!, NUDGE, term);
+          sendToTask(repo, tasks.find((t) => t.id === id)!, text, term);
           logRun(repo, id, "nudged", `no reply for ${stallMs / 60_000}m`);
         } catch {}
       }
@@ -236,6 +265,23 @@ export async function watch(repo: Repo, base: string, term: Terminal): Promise<n
   }
 }
 
+// Stops what each worktree's old runs left behind, and drops it from the pass's process lists so it can't make a worker look busy.
+function tidyAll(tasks: Task[], procs: Map<string, Proc[]>, cursor: Cursor): string[] {
+  const reasons: string[] = [];
+  const unstoppable = new Set(cursor.unstoppable ?? []);
+  for (const task of tasks) {
+    const r = tidy(task, procs.get(task.id)!);
+    const gone = new Set(r.stopped.map((p) => p.pid));
+    procs.set(task.id, procs.get(task.id)!.filter((p) => !gone.has(p.pid)));
+    // Reporting a process Foreman can't stop on every pass would wake the orchestrator every 30 seconds.
+    const fresh = r.failed.filter((p) => !unstoppable.has(p.pid));
+    if (fresh.length) reasons.push(`leftover ${task.id}: ${unstoppableLine(fresh)}`);
+    for (const p of r.failed) unstoppable.add(p.pid);
+  }
+  cursor.unstoppable = [...unstoppable].filter(pidAlive);
+  return reasons;
+}
+
 async function waitForChange(paths: string[], ms: number): Promise<void> {
   const proc = Bun.spawn(["fswatch", "-1", "-r", "-l", "0.5", ...paths], { stdout: "ignore", stderr: "ignore" });
   let timer: Timer | undefined;
@@ -248,15 +294,6 @@ export function readPid(file: string): number | undefined {
   if (!existsSync(file)) return undefined;
   const pid = Number(readFileSync(file, "utf8").trim());
   return Number.isInteger(pid) && pid > 0 ? pid : undefined;
-}
-
-export function pidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return (err as NodeJS.ErrnoException).code === "EPERM";
-  }
 }
 
 export function watcherArmed(repo: Repo): boolean {

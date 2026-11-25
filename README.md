@@ -148,13 +148,16 @@ Costs are worked out at Anthropic's list prices from each session's token use, s
 
 ### Stuck workers
 
-A worker that waits on a hung command, such as a test run that deadlocks, can sit idle for hours. Any task that shares its files can't start until it finishes. Foreman watches for this:
+A worker that waits on a hung command, such as a test run that deadlocks, can sit idle for hours. Any task that shares its files can't start until it finishes. Foreman watches for this, and tells a hung command from a slow one by its CPU use:
 
-- After 20 minutes with no reply, Foreman messages the worker to check for a hung command.
+- After 20 minutes with no reply and no CPU use from the worker's commands, Foreman messages the worker and names the command that looks hung.
 - After 40 minutes, Foreman restarts the worker's session in a new tab.
+- A worker whose commands keep using CPU, such as a long build, is left alone until it has gone 80 minutes without a reply. Then Foreman restarts it.
 - If a worker hangs again after two restarts, the orchestrator steps in.
 
-`foreman restart T3` restarts a worker by hand.
+A run that times out can leave processes behind, such as a test runner that still holds the build folder. Foreman stops any process in a worktree whose parent has exited. When it pauses, restarts or resumes a worker, it also stops that worker's own processes. Anything else open in the worktree, like your shell or editor, is left alone.
+
+`foreman restart T3` restarts a worker by hand, and `foreman tidy T3` stops what T3's old runs left behind.
 
 ### Notes
 
@@ -207,7 +210,7 @@ Foreman never makes a call about money or lost work. It always waits for you bef
 `.foreman/config.json` also takes:
 
 - `maxWorkers`: how many workers run at once (default 3)
-- `stallMinutes`: how long a worker can go without replying before Foreman nudges it (default 20)
+- `stallMinutes`: how long a worker can go without replying while its commands use no CPU, before Foreman nudges it (default 20)
 - `stackTasks`: `false` makes a task wait for its dependency to merge, instead of starting on top of its approved PR (default `true`)
 - `test`: the command that runs the repo's tests, like `swift test`. Foreman uses it for the baseline run and to check the open PRs together, both in a fresh checkout, so include any setup, like `bun install && bun test`. Foreman works it out when it plans the work
 - `testMinutes`: how long one test run can take before Foreman stops it as hung (default 15)

@@ -7,7 +7,8 @@ import { notifyOrchestrator } from "./send.ts";
 import { baseRef } from "./snapshot.ts";
 import type { Terminal } from "./terminal.ts";
 import { writeJson } from "./state.ts";
-import { pidAlive, readPid } from "./watch.ts";
+import { pidAlive } from "./procs.ts";
+import { readPid } from "./watch.ts";
 
 export const TEST_MINUTES = 15;
 export const BASELINE_RUNS = 2;
