@@ -71,6 +71,19 @@ test("the orchestrator gets every command it runs as a tool, and a worker gets n
   expect(await server(repo, "worker").list()).toEqual([]);
 });
 
+test("a long body survives the trip through foreman mcp over stdio", async () => {
+  const repo = crew();
+  const cli = join(import.meta.dir, "..", "src", "cli.ts");
+  const env = { ...process.env, FOREMAN_ROLE: "orchestrator", FOREMAN_TASK: "" };
+  const proc = Bun.spawn(["bun", cli, "mcp"], { cwd: repo.root, env, stdin: "pipe", stdout: "pipe" });
+  proc.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-11-25" } }) + "\n");
+  proc.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "propose", arguments: { title: "Saves stay off the main thread", body: LONG } } }) + "\n");
+  proc.stdin.end();
+  const replies = (await new Response(proc.stdout).text()).trim().split("\n").map((l) => JSON.parse(l));
+  expect(replies.find((r) => r.id === 2).result.content[0].text).toBe("proposed D-1");
+  expect(findDecision(repo, "D-1").body).toBe(LONG);
+});
+
 test("propose keeps a long body exactly as written", async () => {
   const repo = crew();
   const { ok } = server(repo);
@@ -162,10 +175,11 @@ test("workers and automerge need a plan to change, and say so", async () => {
 });
 
 test("the orchestrator is allowed its tools by name, and Bash only for the commands still on the CLI", () => {
-  const tools = orchestratorTools(() => fakeTerminal());
-  const allowed = orchestratorAllowedTools(tools);
+  const allowed = orchestratorAllowedTools();
   expect(allowed).toContain("mcp__foreman__accept");
   expect(allowed).toContain("mcp__foreman__spawn");
+  expect(allowed).toContain("mcp__foreman__status");
+  expect(allowed).not.toContain("mcp__foreman__report");
   expect(allowed.filter((a) => a.startsWith("Bash("))).toEqual(["Bash(foreman watch *)", "Bash(foreman baseline *)", "Bash(foreman together *)", "Bash(foreman pane *)"]);
   expect(orchestratorCommand([], "/s.sock", undefined, false)).not.toContain("Bash(foreman *)");
 });
