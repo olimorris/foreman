@@ -118,7 +118,7 @@ export function reviewerModels(repo: Repo, task: Task): string[] {
 function approvedRound(repo: Repo, task: Task): { verdict: Verdict; round: number } {
   const round = task.reviews ?? 0;
   const file = join(roundDir(repo, task.id, round), "verdict.json");
-  if (!round || !existsSync(file)) throw new Error(`${task.id} has no finished review. Run foreman review ${task.id} first`);
+  if (!round || !existsSync(file)) throw new Error(`${task.id} has no finished review. Call review for ${task.id} first`);
   const verdict = JSON.parse(readFileSync(file, "utf8")) as Verdict;
   if (verdict.verdict !== "approve") throw new Error(`${task.id}'s latest review (round ${round}) asked for changes, so there's nothing to deliver yet`);
   return { verdict, round };
@@ -173,7 +173,7 @@ export function deliver(repo: Repo, id: string, opts: { dryRun?: boolean; title?
   const useDraft = !opts.title && !!drafted && CONVENTIONAL.test(drafted);
   const title = opts.title ?? (useDraft ? drafted! : planned);
   const titleNote = !opts.title && drafted && !useDraft ? `. The pull-request skill's title "${drafted}" isn't a conventional commit, so the PR uses the task's title` : "";
-  if (!CONVENTIONAL.test(title)) throw new Error(`PR titles must be conventional commits. Rerun with --title "<type>: <summary>", like --title "feat: add tags to notes"`);
+  if (!CONVENTIONAL.test(title)) throw new Error(`PR titles must be conventional commits. Call deliver again with a title such as "feat: add tags to notes"`);
 
   const origin = run(["git", "-C", repo.root, "remote", "get-url", "origin"]).code === 0;
   const nwo = origin && !opts.dryRun ? run(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"], { cwd: repo.root }) : undefined;
@@ -198,7 +198,7 @@ export function deliver(repo: Repo, id: string, opts: { dryRun?: boolean; title?
     must(["gh", "pr", "edit", String(task.pr), "--body-file", packet, ...(useDraft ? ["--title", title] : [])], { cwd: repo.root });
     logRun(repo, id, "pr-updated", `#${task.pr}`);
     const stacked = loadTasks(repo).filter((t) => t.stackedOn === id && t.status !== "torn-down").map((t) => t.id);
-    const restack = stacked.length ? `. ${stacked.join(", ")} ${stacked.length > 1 ? "build" : "builds"} on this branch, so run foreman sync to ask ${stacked.length > 1 ? "their workers" : "its worker"} to rebase` : "";
+    const restack = stacked.length ? `. ${stacked.join(", ")} ${stacked.length > 1 ? "build" : "builds"} on this branch, so call sync to ask ${stacked.length > 1 ? "their workers" : "its worker"} to rebase` : "";
     return { packet, title, pr: task.pr, note: `pushed ${task.branch} and refreshed PR #${task.pr}${restack}${titleNote}` };
   }
   const url = must(["gh", "pr", "create", "--base", buildsOn?.branch ?? task.base, "--head", task.branch, "--title", title, "--body-file", packet], { cwd: repo.root }).trim().split("\n").at(-1)!;
@@ -207,5 +207,5 @@ export function deliver(repo: Repo, id: string, opts: { dryRun?: boolean; title?
   logRun(repo, id, "pr-opened", `#${pr}`);
   const started = new Set(loadTasks(repo).map((t) => t.id));
   const next = stackable(repo) ? loadPlan(repo)?.tasks.filter((t) => t.deps.includes(id) && !started.has(t.id)).map((t) => t.id) ?? [] : [];
-  return { packet, title, pr, url, note: `opened PR #${pr}: ${url}${next.length ? `. Run foreman next, which can start ${next.join(", ")} on top of it` : ""}${titleNote}` };
+  return { packet, title, pr, url, note: `opened PR #${pr}: ${url}${next.length ? `. Call next, which can start ${next.join(", ")} on top of it` : ""}${titleNote}` };
 }

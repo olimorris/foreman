@@ -40,6 +40,6 @@ export const OVERVIEW_TOOLS: Tool[] = [
     description: "What each task has spent against its limit, and what the plan has left.",
     inputSchema: noInput,
     roles: ["orchestrator"],
-    handler: (_args, s) => budgetOverview(s.repo, PLAIN),
+    handler: (_args, s) => budgetOverview(s.repo, PLAIN, "Change a limit with set_budget, once the user agrees: for every task, for one task with task, or for the whole plan with plan."),
   },
 ];

@@ -59,7 +59,7 @@ export function startReview(repo: Repo, id: string, term: Terminal, session = te
   const task = findTask(repo, id);
   reviewerModel(repo);
   const target = session ?? task.tab?.session;
-  if (!target) throw new Error(`run foreman review from inside ${term.name}, since the task has no tab to open the review beside`);
+  if (!target) throw new Error(`review opens a tab, but this session isn't running inside ${term.name} and ${id} has no tab to open it beside`);
   term.open(target, `review ${taskLabel(task)}`, task.worktree, [join(pluginRoot, "bin", "foreman"), "review-run", id], false);
 }
 

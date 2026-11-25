@@ -30,7 +30,7 @@ test("ids count up, and an answer replaces the open question", () => {
 
 test("a question needs a call, and Foreman never answers over the user", () => {
   const repo = tempRepo();
-  expect(() => ask(repo, { question: "Raise T3's limit?", call: " " })).toThrow("--call");
+  expect(() => ask(repo, { question: "Raise T3's limit?", call: " " })).toThrow("needs a call");
   ask(repo, { question: "Tabs or spaces?", call: "spaces" });
   answer(repo, "Q-1", { byForeman: true });
   expect(() => answer(repo, "Q-1", { byForeman: true })).toThrow("already answered");

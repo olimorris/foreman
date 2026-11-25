@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { bar, table, taskTitle } from "../src/overview.ts";
+import { bar, budgetOverview, table, taskTitle } from "../src/overview.ts";
 import { PLAIN } from "../src/style.ts";
 import type { Task } from "../src/state.ts";
 import { tempRepo } from "./helpers.ts";
@@ -47,4 +47,12 @@ test("a task on workerModel shows no model, since every task would say the same"
   const task = (model: string) => ({ id: "T1", title: "docs: explain tags", model }) as Task;
   expect(taskTitle(repo, task("sonnet"))).toBe("explain tags");
   expect(taskTitle(repo, task("opus"))).toBe("explain tags (opus)");
+});
+
+test("budgetOverview ends with the foreman budget line unless the caller names its own", () => {
+  const repo = tempRepo();
+  expect(budgetOverview(repo)).toContain("foreman budget --plan <usd>");
+  const text = budgetOverview(repo, PLAIN, "Change a limit with set_budget.");
+  expect(text.endsWith("Change a limit with set_budget.")).toBe(true);
+  expect(text).not.toContain("foreman budget");
 });

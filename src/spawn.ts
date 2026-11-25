@@ -47,7 +47,7 @@ export function spawn(repo: Repo, opts: SpawnOptions, term: Terminal): Task {
   const { id, owns, base } = opts;
   if (!/^[A-Za-z0-9][A-Za-z0-9-]*$/.test(id)) throw new Error(`task id must be letters, digits and dashes: ${id}`);
   if (loadTasks(repo).some((t) => t.id === id)) throw new Error(`task ${id} already exists`);
-  if (!owns.length) throw new Error("a task needs at least one --owns path");
+  if (!owns.length) throw new Error("a task needs at least one owns path");
   if (opts.title !== undefined && !CONVENTIONAL.test(opts.title)) throw new Error(`a task's title becomes its PR title, so it must be a conventional commit, like "feat: add tags to notes"`);
   const config = loadConfig(repo);
   const model = opts.model ?? config.workerModel;
