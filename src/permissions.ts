@@ -5,6 +5,7 @@ import type { Repo } from "./paths.ts";
 import { latest } from "./rounds.ts";
 import { jsonStore } from "./store.ts";
 import type { Task } from "./state.ts";
+import { clip } from "./text.ts";
 
 export type Role = "worker" | "reviewer" | "orchestrator";
 export type Who = { role: Role; task?: string; worker?: string };
@@ -109,8 +110,6 @@ export function commandPrefix(command: string): string {
   }
   return prefix.join(" ");
 }
-
-const clip = (s: string, width: number) => (s.length > width ? s.slice(0, width - 3) + "..." : s);
 
 export function doing(b: Pick<PermissionBlock, "tool" | "target">, verb = true): string {
   const t = b.target ? `\`${clip(b.target, 80)}\`` : "";

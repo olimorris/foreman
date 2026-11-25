@@ -4,7 +4,7 @@ import { PLAIN } from "../src/style.ts";
 import type { Task } from "../src/state.ts";
 import { tempRepo } from "./helpers.ts";
 import { saveConfig } from "../src/config.ts";
-import { plainTitle } from "../src/spawn.ts";
+import { plainTitle } from "../src/brief.ts";
 
 test("table lines up columns and right-aligns the ones asked for", () => {
   expect(table([["Task", "Spent"], ["T1", "$5.00"], ["T10", "$12.50"]], [1])).toEqual(["Task   Spent", "T1     $5.00", "T10   $12.50"]);

@@ -6,9 +6,11 @@ import { lastDone, logRun } from "./events.ts";
 import { must, run } from "./exec.ts";
 import { loadDecisions } from "./ledger.ts";
 import { taskDir, type Repo } from "./paths.ts";
-import { CONVENTIONAL, loadPlan, stackable } from "./plan.ts";
+import { CONVENTIONAL } from "./brief.ts";
+import { loadPlan, stackable } from "./plan.ts";
 import { latest, rounds, type PrDraft, type Shot, type Verdict } from "./rounds.ts";
-import { diffBase, findTask, loadTasks, type Task } from "./state.ts";
+import { findTask, inFlight, loadTasks, type Task } from "./state.ts";
+import { diffBase } from "./base.ts";
 import { transition } from "./lifecycle.ts";
 import { taskCost } from "./cost.ts";
 import { transcripts } from "./transcripts.ts";
@@ -165,7 +167,7 @@ export function deliver(repo: Repo, id: string, opts: { dryRun?: boolean; title?
   if (task.pr) {
     must(["gh", "pr", "edit", String(task.pr), "--body-file", packet, ...(useDraft ? ["--title", title] : [])], { cwd: repo.root });
     logRun(repo, id, "pr-updated", `#${task.pr}`);
-    const stacked = loadTasks(repo).filter((t) => t.stackedOn === id && t.status !== "torn-down").map((t) => t.id);
+    const stacked = inFlight(loadTasks(repo)).filter((t) => t.stackedOn === id).map((t) => t.id);
     const restack = stacked.length ? `. ${stacked.join(", ")} ${stacked.length > 1 ? "build" : "builds"} on this branch, so call sync to ask ${stacked.length > 1 ? "their workers" : "its worker"} to rebase` : "";
     return { packet, title, pr: task.pr, note: `pushed ${task.branch} and refreshed PR #${task.pr}${restack}${titleNote}` };
   }

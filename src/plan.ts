@@ -5,7 +5,7 @@ import { overlaps } from "./decisions.ts";
 import type { Repo } from "./paths.ts";
 import { latest } from "./rounds.ts";
 import { holdsSlot, isFinished, isMerged } from "./lifecycle.ts";
-import { checkBrief, checkModel } from "./spawn.ts";
+import { checkBrief, checkModel, CONVENTIONAL } from "./brief.ts";
 import { loadTasks, type Task } from "./state.ts";
 import { fileStore } from "./store.ts";
 import { usageError } from "./help.ts";
@@ -45,8 +45,6 @@ export function parsePlan(md: string): Plan {
   });
   return { title, ...(deadline ? { deadline } : {}), ...(calls.length ? { calls } : {}), ...(cut.length ? { cut } : {}), tasks };
 }
-
-export const CONVENTIONAL = /^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([\w./-]+\))?!?: \S/;
 
 export function validatePlan(plan: Plan): string[] {
   const errors: string[] = [];

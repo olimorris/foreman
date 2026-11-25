@@ -1,8 +1,9 @@
 import { budgetOf, planSpending, taskCost, usd } from "./cost.ts";
-import { byActivity, clip, statusLabel, taskTitle } from "./overview.ts";
+import { byActivity, sectionLines, statusLabel, taskTitle, type Row, type Section } from "./overview.ts";
+import { clip } from "./text.ts";
 import type { Repo } from "./paths.ts";
 import { loadPlan, maxWorkers, readyTasks, stackable } from "./plan.ts";
-import { plainTitle } from "./spawn.ts";
+import { plainTitle } from "./brief.ts";
 import { loadTasks, type Task } from "./state.ts";
 import { isFinished, needsUser } from "./lifecycle.ts";
 import { activeLimit, resetPhrase } from "./limits.ts";
@@ -12,8 +13,6 @@ import { baselineStatus } from "./baseline.ts";
 import { answerMs, loadQuestions, waitingLines } from "./questions.ts";
 import { watcherArmed } from "./watch.ts";
 
-export type Row = { cells: string[]; tone: (s: Style) => (s: string) => string; toneAt?: number; dim?: boolean; notes?: string[] };
-export type Section = { title: string; rows: Row[] };
 
 
 function tone(t: Task): Row["tone"] {
@@ -75,27 +74,6 @@ export function statusView(repo: Repo, style: Style, armed: boolean, now = Date.
   ];
   const body = sectionLines(sections, style, (r) => [r.cells.length - 1]);
   return [...head, ...(tasks.length || waiting.length || own.length ? body : ["", "No tasks yet."])].join("\n");
-}
-
-// Every section shares one set of column widths, so the rows line up down the whole page.
-export function sectionLines(sections: Section[], style: Style, rightAligned: (r: Row) => number[]): string[] {
-  const all = sections.flatMap((s) => s.rows.map((r) => r.cells));
-  const widths = all.length ? all[0]!.map((_, i) => Math.max(...all.map((c) => (c[i] ?? "").length))) : [];
-  const line = (r: Row) => {
-    const right = rightAligned(r);
-    const toneAt = r.toneAt ?? r.cells.length - 2;
-    const cells = r.cells.map((c, i) => (right.includes(i) ? c.padStart(widths[i]!) : c.padEnd(widths[i]!)));
-    // Nested colour codes reset each other, so a dimmed row is dimmed as a whole and nothing else.
-    if (r.dim) return `  ${style.dim(cells.join("  ").trimEnd())}`;
-    return `  ${cells.map((c, i) => (i === 0 ? style.bold(c) : i === toneAt ? r.tone(style)(c) : c)).join("  ").trimEnd()}`;
-  };
-  // A note sits under its row's title, outside the columns, so a long rule doesn't widen every row.
-  const notes = (r: Row) => {
-    const at = r.cells.length - 3;
-    const indent = 2 + widths.slice(0, at).reduce((sum, w) => sum + w + 2, 0);
-    return (r.notes ?? []).map((n) => `${" ".repeat(indent)}${style.red(n)}`);
-  };
-  return sections.flatMap((s) => ["", style.heading(s.title), ...s.rows.flatMap((r) => [line(r), ...notes(r)])]);
 }
 
 export function statusText(repo: Repo, style: Style): string {

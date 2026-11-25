@@ -2,11 +2,11 @@ import { loadConfig } from "./config.ts";
 import { budgetOf, countedText, planSpending, taskCost, taskLimit, usd } from "./cost.ts";
 import type { Repo } from "./paths.ts";
 import { loadPlan } from "./plan.ts";
-import { plainTitle } from "./spawn.ts";
+import { plainTitle } from "./brief.ts";
 import { loadTasks, type Task } from "./state.ts";
 import { isFinished } from "./lifecycle.ts";
-import { sectionLines, type Row, type Section } from "./status.ts";
 import { PLAIN, type Style } from "./style.ts";
+import { clip } from "./text.ts";
 
 const TITLE_WIDTH = 44;
 
@@ -26,8 +26,6 @@ export function taskTitle(repo: Repo, task: Task, width = TITLE_WIDTH): string {
   if (!title) return model;
   return [clip(plainTitle(title), width - (model ? model.length + 1 : 0)), model].filter(Boolean).join(" ");
 }
-
-export const clip = (s: string, width: number) => (s.length > width ? s.slice(0, width - 3).trimEnd() + "..." : s);
 
 // The stored statuses are Foreman's own lifecycle words, so the tables say what each one means for the user.
 export function statusLabel(task: Task): string {
@@ -99,4 +97,28 @@ export function budgetOverview(repo: Repo, style: Style = PLAIN, change = "Chang
     ...(unpriced.length ? [style.yellow(`Not counted: ${unpriced.join(", ")} has no price. Add it under "prices" in .foreman/config.json`), ""] : []),
     style.dim(change),
   ].join("\n");
+}
+
+export type Row = { cells: string[]; tone: (s: Style) => (s: string) => string; toneAt?: number; dim?: boolean; notes?: string[] };
+export type Section = { title: string; rows: Row[] };
+
+// Every section shares one set of column widths, so the rows line up down the whole page.
+export function sectionLines(sections: Section[], style: Style, rightAligned: (r: Row) => number[]): string[] {
+  const all = sections.flatMap((s) => s.rows.map((r) => r.cells));
+  const widths = all.length ? all[0]!.map((_, i) => Math.max(...all.map((c) => (c[i] ?? "").length))) : [];
+  const line = (r: Row) => {
+    const right = rightAligned(r);
+    const toneAt = r.toneAt ?? r.cells.length - 2;
+    const cells = r.cells.map((c, i) => (right.includes(i) ? c.padStart(widths[i]!) : c.padEnd(widths[i]!)));
+    // Nested colour codes reset each other, so a dimmed row is dimmed as a whole and nothing else.
+    if (r.dim) return `  ${style.dim(cells.join("  ").trimEnd())}`;
+    return `  ${cells.map((c, i) => (i === 0 ? style.bold(c) : i === toneAt ? r.tone(style)(c) : c)).join("  ").trimEnd()}`;
+  };
+  // A note sits under its row's title, outside the columns, so a long rule doesn't widen every row.
+  const notes = (r: Row) => {
+    const at = r.cells.length - 3;
+    const indent = 2 + widths.slice(0, at).reduce((sum, w) => sum + w + 2, 0);
+    return (r.notes ?? []).map((n) => `${" ".repeat(indent)}${style.red(n)}`);
+  };
+  return sections.flatMap((s) => ["", style.heading(s.title), ...s.rows.flatMap((r) => [line(r), ...notes(r)])]);
 }

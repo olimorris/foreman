@@ -7,7 +7,7 @@ import { transcripts, type Activity } from "./transcripts.ts";
 import { readEvents } from "./events.ts";
 import { loadDecisions } from "./ledger.ts";
 import { statusLabel } from "./overview.ts";
-import { plainTitle } from "./spawn.ts";
+import { plainTitle } from "./brief.ts";
 import type { Repo } from "./paths.ts";
 import { loadPlan, maxWorkers, readyTasks, type Waiting } from "./plan.ts";
 import { latest, type Verdict } from "./rounds.ts";
@@ -19,8 +19,7 @@ import { writeJson } from "./store.ts";
 import { STALL_MINUTES, watcherArmed } from "./watch.ts";
 import { blockParts, openBlocks, type PermissionBlock } from "./permissions.ts";
 import { permissionLabel } from "./status.ts";
-
-const clip = (s: string, width: number) => (s.length > width ? s.slice(0, width - 3).trimEnd() + "..." : s);
+import { clip } from "./text.ts";
 
 export type PaneTask = { task: Task; title: string; spent: number; risk?: Verdict["risk"]; note?: string; activity?: Activity; closed?: boolean };
 export type OpenDecision = { id: string; title: string; by: string };

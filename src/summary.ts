@@ -11,6 +11,7 @@ import { loadTasks, type Task } from "./state.ts";
 import { isFinished, isMerged } from "./lifecycle.ts";
 import { run } from "./exec.ts";
 import { loadTogether, renderTogether, staleness, type Together } from "./together.ts";
+import { andList } from "./text.ts";
 
 export type Ready = { task: Task; title: string; verdict?: Verdict; done?: TaskEvent; blocks: string[] };
 export type Away = { question: Question; decision?: Decision };
@@ -23,7 +24,6 @@ export type SummaryInput = {
 
 const RISK = { high: 0, medium: 1, low: 2 } as const;
 const riskRank = (r: Ready) => RISK[r.verdict?.risk ?? "medium"];
-const list = (ids: string[]) => (ids.length === 1 ? ids[0]! : `${ids.slice(0, -1).join(", ")} and ${ids.at(-1)}`);
 
 // PRs other tasks wait on come first, because nothing behind them can start until they merge. Then riskier work, while there's time to fix it.
 // A stacked PR can only merge after the one it builds on, so it never comes before it.
@@ -42,7 +42,7 @@ export function reviewOrder(ready: Ready[]): Ready[] {
 
 function why(r: Ready, parent?: Ready): string {
   if (r.task.stackedOn) return ` - builds on ${parent?.task.pr ? `#${parent.task.pr} (${r.task.stackedOn})` : r.task.stackedOn}, so merge it after that`;
-  if (r.blocks.length) return ` - ${list(r.blocks)} ${r.blocks.length === 1 ? "waits" : "wait"} for this, so it goes first`;
+  if (r.blocks.length) return ` - ${andList(r.blocks)} ${r.blocks.length === 1 ? "waits" : "wait"} for this, so it goes first`;
   if (r.verdict && r.verdict.risk !== "low") return ` - risk ${r.verdict.risk}, so review it early`;
   return "";
 }
@@ -65,7 +65,7 @@ export function renderSummary(s: SummaryInput): string {
     ]) : ["Nothing is ready yet."]),
     "",
     ...(s.together ? renderTogether(s.together.result, s.together.stale) : []),
-    ...(s.merged.length ? ["## Already merged", "", list(s.merged), ""] : []),
+    ...(s.merged.length ? ["## Already merged", "", andList(s.merged), ""] : []),
     ...(s.unfinished.length ? ["## Not finished", "", ...s.unfinished.map((u) => `- **${u.title}** (${u.id}): ${u.reason}`), ""] : []),
     ...(s.calls.length ? ["## Calls Foreman made for you", "", ...s.calls.map((c) => `- ${c}`), ""] : []),
     ...(s.away.length ? ["## Calls Foreman made while you were away", "", ...s.away.map(awayCall), ""] : []),

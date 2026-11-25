@@ -7,7 +7,7 @@ import { styleFor, type Style } from "./style.ts";
 import { statusLabel, taskTitle } from "./overview.ts";
 import type { Repo } from "./paths.ts";
 import { loadPlan } from "./plan.ts";
-import { plainTitle } from "./spawn.ts";
+import { plainTitle } from "./brief.ts";
 import { loadTasks } from "./state.ts";
 import { STALL_MINUTES } from "./watch.ts";
 

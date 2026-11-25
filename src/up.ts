@@ -1,6 +1,6 @@
 import { channelPlugin, loadConfig, telegramPlugins } from "./config.ts";
 import { loadSessions, sessionsFile, transcripts } from "./transcripts.ts";
-import { checkModel } from "./spawn.ts";
+import { checkModel } from "./brief.ts";
 import { findRepo, pluginArgs, type Repo } from "./paths.ts";
 import { skillsPluginArgs } from "./skills.ts";
 import { SERVER_NAME } from "./mcp.ts";

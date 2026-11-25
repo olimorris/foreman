@@ -7,7 +7,8 @@ import { must, run } from "./exec.ts";
 import { loadDecisions, updateDecision, type Decision } from "./ledger.ts";
 import { worktreeDir, type Repo } from "./paths.ts";
 import { adrLayout, loadSkills } from "./skills.ts";
-import { baseRef, snapshot } from "./snapshot.ts";
+import { baseRef } from "./base.ts";
+import { snapshot } from "./snapshot.ts";
 
 export type PlannedFile = { file: string; content: string; from?: string };
 export type Recorded = Record<string, { number: number; file: string }>;

@@ -7,7 +7,7 @@ import { run } from "./exec.ts";
 import type { Repo } from "./paths.ts";
 import type { Terminal } from "./terminal.ts";
 import { sendToTask } from "./send.ts";
-import { baseRef } from "./snapshot.ts";
+import { baseRef } from "./base.ts";
 import { budgetOf, overBudget, planSpend, taskCost, taskLimit, usd, type Budget, type TaskCost } from "./cost.ts";
 import { transcripts } from "./transcripts.ts";
 import { loadConfig } from "./config.ts";
@@ -20,6 +20,7 @@ import { tabOpen } from "./lifecycle.ts";
 import { approved, automergeOn, checksOf, mergeCall, mergePr, repoMergeMethod, type Check, type Merge, type MergeMethod } from "./automerge.ts";
 import { blockLine, syncBlocks, type PermissionBlock } from "./permissions.ts";
 import { busy, commandName, isWorker, pidAlive, processesIn, sample, tidy, unstoppableLine, type CpuSample, type Proc } from "./procs.ts";
+import { andList, clip } from "./text.ts";
 
 export type PrState = { state: string; comments: number; base?: string; head?: string; sha?: string; draft?: boolean; checks?: Check[] };
 export type TrackedPr = { key: string; number: number; base?: string };
@@ -79,7 +80,7 @@ export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: Tracked
   for (const task of tasks) {
     const events = probes.events(task.id);
     for (const e of events.slice(next.events[task.id] ?? 0)) {
-      reasons.push(e.note ? `${e.type} ${task.id}: ${clip(e.note)}` : `${e.type} ${task.id}`);
+      reasons.push(e.note ? `${e.type} ${task.id}: ${clip(e.note, 100)}` : `${e.type} ${task.id}`);
     }
     next.events[task.id] = events.length;
 
@@ -127,7 +128,7 @@ export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: Tracked
   next.unanswered = next.unanswered!.filter((id) => open.some((q) => q.id === id));
   for (const q of open) {
     if (!clock?.answerMs || clock.now - Date.parse(q.askedAt) < clock.answerMs || next.unanswered.includes(q.id)) continue;
-    reasons.push(`unanswered ${q.id}${q.decision ? ` (${q.decision})` : ""}: ${clip(q.question)}`);
+    reasons.push(`unanswered ${q.id}${q.decision ? ` (${q.decision})` : ""}: ${clip(q.question, 100)}`);
     next.unanswered.push(q.id);
   }
 
@@ -197,7 +198,7 @@ export function applyPass(result: ScanResult, tasks: Task[], effects: Effects, n
     const failed = effects.merge(pr);
     if (!failed) merged++;
     else {
-      result.reasons.push(`not-merged ${pr.id} #${pr.number}: ${clip(failed)}`);
+      result.reasons.push(`not-merged ${pr.id} #${pr.number}: ${clip(failed, 100)}`);
       result.cursor.unmergeable = { ...result.cursor.unmergeable, [`${pr.number}`]: pr.sha };
     }
   }
@@ -211,7 +212,7 @@ function waitOutLimit(tasks: Task[], cursor: Cursor, working: string[], reasons:
   if (!limit) return { pause: [], resume: [] };
   if (now !== undefined && resumeDue(limit, now)) {
     const resume = limit.paused.filter((id) => tasks.some((t) => t.id === id && t.status === "limited"));
-    if (limit.announced) reasons.unshift(`usage-limit-reset: ${resume.length ? `resumed ${list(resume)}` : "no workers were paused"}`);
+    if (limit.announced) reasons.unshift(`usage-limit-reset: ${resume.length ? `resumed ${andList(resume)}` : "no workers were paused"}`);
     reasons.push(...(cursor.held ?? []));
     cursor.held = [];
     cursor.limit = undefined;
@@ -223,11 +224,9 @@ function waitOutLimit(tasks: Task[], cursor: Cursor, working: string[], reasons:
   cursor.held = [...(cursor.held ?? []), ...reasons.splice(0)];
   if (limit.announced) return { pause, resume: [] };
   limit.announced = true;
-  const paused = limit.paused.length ? `${list(limit.paused)} ${limit.paused.length > 1 ? "are" : "is"} paused` : "No workers were running";
+  const paused = limit.paused.length ? `${andList(limit.paused)} ${limit.paused.length > 1 ? "are" : "is"} paused` : "No workers were running";
   return { pause, resume: [], notice: `usage-limit: ${limit.by} hit the usage limit, which resets at ${resetPhrase(limit, now ?? limit.since)}. ${paused} and reviews wait until then` };
 }
-
-const list = (ids: string[]) => (ids.length > 1 ? `${ids.slice(0, -1).join(", ")} and ${ids.at(-1)}` : ids[0] ?? "");
 
 // A worker idling on a hung background command never wakes by itself, so it's nudged, then restarted, and only a worker that keeps hanging reaches the orchestrator.
 function checkStall(task: Task, probes: Probes, check: Clock, cursor: Cursor, reasons: string[], nudge: Nudge[], restart: string[]): void {
@@ -280,8 +279,6 @@ function stackedOnto(tasks: Task[], id: string): string {
   const ids = tasks.filter((t) => t.stackedOn === id).map((t) => t.id);
   return ids.length ? `, which ${ids.join(" and ")} ${ids.length > 1 ? "build" : "builds"} on` : "";
 }
-
-const clip = (s: string) => (s.length > 100 ? s.slice(0, 97) + "..." : s);
 
 const POLL_MS = 30_000;
 // gh calls cost rate limit, and PR changes are rarely urgent.

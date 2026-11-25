@@ -2,7 +2,6 @@ import { join } from "node:path";
 import type { Repo } from "./paths.ts";
 import type { Tab } from "./terminal.ts";
 import { jsonStore } from "./store.ts";
-import { baseRef } from "./snapshot.ts";
 
 export type TaskStatus = "running" | "over-budget" | "limited" | "done" | "blocked" | "needs-decision" | "exited" | "pr-open" | "merged" | "torn-down";
 
@@ -70,11 +69,3 @@ export function updateTask(repo: Repo, id: string, patch: Partial<Task>): Task {
     return task;
   });
 }
-
-// A stacked task's own change is what it adds on top of its parent's branch, so diffs against the base would show the parent's work too.
-export function diffBase(repo: Repo, task: Task): string {
-  if (!task.stackedOn) return baseRef(repo, task.base);
-  const parent = loadTasks(repo).find((t) => t.id === task.stackedOn);
-  return parent && parent.status !== "torn-down" ? parent.branch : task.parentSha ?? baseRef(repo, task.base);
-}
-

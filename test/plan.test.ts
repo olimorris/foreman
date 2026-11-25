@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { saveConfig } from "../src/config.ts";
 import { UsageError } from "../src/help.ts";
-import { checkModel } from "../src/spawn.ts";
+import { checkModel } from "../src/brief.ts";
 import { describePlan, loadPlan, maxWorkers, parsePlan, readyTasks, savePlan, sharedPaths, validatePlan, waves, workers, type Plan } from "../src/plan.ts";
 import { withTasks, type Task } from "../src/state.ts";
 import { tempRepo } from "./helpers.ts";

@@ -6,7 +6,8 @@ import { decisionsDir, findDecision, loadDecisions, recordPath, updateDecision, 
 import { defaultBase, type Repo } from "./paths.ts";
 import type { Terminal } from "./terminal.ts";
 import { sendToTask } from "./send.ts";
-import { baseRef, snapshot } from "./snapshot.ts";
+import { baseRef } from "./base.ts";
+import { snapshot } from "./snapshot.ts";
 import { inFlight, loadTasks, type Task } from "./state.ts";
 import { settleQuestions } from "./questions.ts";
 
