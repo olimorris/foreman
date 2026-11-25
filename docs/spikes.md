@@ -17,6 +17,7 @@ Findings that shaped the design, checked against Claude Code 2.1.331 and Rex 0.1
 ## Rex
 
 - `rex block call -b <block> process` returns `child: null` once the program has exited. With `--keep-open`, a closed worker stays readable and is still detected as exited.
+- `rex block inspect BLOCK --json` works without `-s` and returns the block's session as a top-level `session_id`. `rex whoami --json` names no session outside a block, so it can't find one. Foreman uses the inspect call to find its session from `REX_BLOCK` when `REX_SESSION` is empty.
 - `rex window new` uses the login shell's environment, not the caller's.
 - Rex finds a block or window id only within the session given with `-s`, so every task records its session alongside its tab.
 

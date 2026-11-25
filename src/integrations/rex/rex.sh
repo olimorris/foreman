@@ -15,6 +15,8 @@ case "$cmd" in
     exec rex new "$name" -c "$cwd" --keep-open --json -- "$@" ;;
   find-session) # NAME
     rex ls --json | jq -c --arg n "$1" '[.. | objects | select(.label? == $n or .name? == $n)] | first // empty' ;;
+  block-session) # BLOCK
+    rex block inspect "$1" --json | jq -r '.session_id // empty' ;;
   alive) # SESSION BLOCK
     rex block call -s "$1" -b "$2" process 2>/dev/null | jq -e '.child != null' >/dev/null ;;
   send) # SESSION BLOCK TEXT

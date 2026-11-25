@@ -4,11 +4,26 @@ import type { Terminal } from "../../terminal.ts";
 
 const script = join(import.meta.dir, "rex.sh");
 
+type Env = Record<string, string | undefined>;
+
+// Rex accepts a block id where a session goes, so the id is the fallback when inspecting the block fails.
+export function sessionFor(env: Env, sessionOfBlock: (block: string) => string | undefined): string | undefined {
+  if (env.REX_SESSION) return env.REX_SESSION;
+  const block = env.REX_BLOCK;
+  if (!block) return undefined;
+  return sessionOfBlock(block) || block;
+}
+
+function sessionOfBlock(block: string): string | undefined {
+  const r = run(["sh", script, "block-session", block]);
+  return r.code === 0 ? r.stdout.trim() || undefined : undefined;
+}
+
 // Rex resolves a block or window id only within the session it's scoped to, so every tab keeps its session.
 export const rex: Terminal = {
   name: "Rex",
   inside: (env) => env.TERM_PROGRAM === "rex",
-  currentSession: () => process.env.REX_SESSION || undefined,
+  currentSession: () => sessionFor(process.env, sessionOfBlock),
   sessionEnv: ["REX_SESSION", "REX_BLOCK"],
   requires: ["rex"],
   open(session, label, cwd, cmd, keepOpen = true) {
