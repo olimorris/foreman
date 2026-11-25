@@ -262,9 +262,10 @@ Foreman can follow your own skills when it reviews work and opens PRs. Put each 
 
 - The reviewer reads every skill and checks each change against the ones whose description fits reviewing code, like a code-review skill. Breaking one sends the change back to its worker, with the skill named.
 - A skill named `pull-request` shapes the PRs Foreman opens. The reviewer writes the title and description by it, and Foreman adds the intent, assumptions, decisions, screenshots, verdict and risk below. A title that isn't a conventional commit is dropped for the task's own title.
+- A skill named `adr` shapes the decisions Foreman records. The orchestrator writes each one in its format, and in a repo with no ADR folder yet, the new folder takes the skill's title line, status and a README that describes them. An existing ADR folder keeps its own convention.
 - Workers don't see these skills, so they shape the review and the PR, not how workers build.
 
-Foreman's own [pull-request skill](.claude/skills/pull-request/SKILL.md) is a working example. Copy it in and make it yours:
+Foreman names each skill by its folder, so a skill copied in as `.foreman/skills/adr/` is the `adr` skill whatever its frontmatter says. Foreman's own [pull-request skill](.claude/skills/pull-request/SKILL.md) is a working example. Copy it in and make it yours:
 
 ```sh
 mkdir -p .foreman/skills && cp -r ~/Code/Foreman/.claude/skills/pull-request .foreman/skills/

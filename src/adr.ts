@@ -23,6 +23,8 @@ export type AdrConvention = {
 
 export type AdrRecord = { number: number; file: string; title: string };
 
+export type AdrLayout = { title: string; status: StatusStyle; sections: string[] };
+
 const RECORD = /^(\d+)([-_])(.+)\.md$/;
 const TITLE = /^(#\s*(?:ADR[-\s]?)?)(\d+)([.:)]?\s+|\s*[-:]\s+)(.*)$/i;
 
@@ -103,8 +105,8 @@ export function supersede(conv: AdrConvention, file: string, text: string, by: n
 }
 
 // Matches Strata's own convention, which is what the user chose as the default.
-export function defaultConvention(dir = "docs/decisions"): AdrConvention {
-  return {
+export function defaultConvention(dir = "docs/decisions", layout?: AdrLayout): AdrConvention {
+  const conv: AdrConvention = {
     dir,
     pad: 4,
     separator: "-",
@@ -114,6 +116,38 @@ export function defaultConvention(dir = "docs/decisions"): AdrConvention {
     supersededLine: "Superseded by ADR {n}.",
     readme: `${dir}/README.md`,
   };
+  return layout ? withLayout(conv, layout) : conv;
+}
+
+export function withLayout(conv: AdrConvention, layout: AdrLayout): AdrConvention {
+  return { ...conv, title: layout.title, status: layout.status };
+}
+
+// An ADR skill shows its record layout as an example inside a fence, so the first fenced block with a numbered heading is the template.
+export function skillLayout(body: string): AdrLayout | undefined {
+  for (const m of body.matchAll(/^(`{3,}|~{3,})[^\n]*\n([\s\S]*?)^\1[ \t]*$/gm)) {
+    const text = m[2]!;
+    if (!headingLine(text)?.match(TITLE)) continue;
+    const sections = [...text.matchAll(/^##[ \t]+(.+?)[ \t]*$/gm)].map((h) => h[1]!);
+    return { title: titleTemplate(text), status: statusStyle([text]), sections };
+  }
+  return undefined;
+}
+
+export function layoutReadme(conv: AdrConvention, layout: AdrLayout): string {
+  const title = conv.title.replace("{N}", "N".repeat(conv.pad)).replace("{n}", "N").replace("{title}", "<the decision>");
+  const moves = conv.status.kind === "none" && conv.supersededDir;
+  return [
+    "# Decisions, one per file",
+    "",
+    `- Each record is \`${"N".repeat(conv.pad)}${conv.separator}short-name.md\`, and its title line is \`${title}\`.`,
+    ...(layout.sections.length ? [`- Its sections, in order: ${layout.sections.join(", ")}.`] : []),
+    `- A new record takes one above the highest number in this folder${moves ? ", `superseded/` included" : ""}.`,
+    moves
+      ? `- When a decision is reversed, move its file to \`superseded/\`, add "${conv.supersededLine.replace("{n}", "N")}" under its title, and write the new decision as a new record.`
+      : `- When a decision is reversed, its status becomes "${conv.supersededLine.replace("{n}", "N")}" and the new decision is written as a new record.`,
+    "",
+  ].join("\n");
 }
 
 export const DEFAULT_README = `# Decisions, one per file
@@ -157,10 +191,10 @@ function titleTemplate(text: string): string {
 
 function statusStyle(texts: string[]): StatusStyle {
   const values = (re: RegExp) => texts.map((t) => t.match(re)?.[1]?.trim()).filter((v): v is string => !!v);
-  const accepted = (vs: string[]) => vs.find((v) => /accepted/i.test(v)) ?? "Accepted";
+  const accepted = (vs: string[]) => vs.flatMap((v) => v.split("|").map((x) => x.trim())).find((v) => /accepted/i.test(v)) ?? "Accepted";
   const fm = values(/^---\n[\s\S]*?^status:\s*(.+)$[\s\S]*?^---$/m);
   if (fm.length) return { kind: "frontmatter", key: "status", accepted: accepted(fm) };
-  const section = values(/^##\s*Status\s*\n\s*\n(.+)$/m);
+  const section = values(/^##\s*Status[ \t]*\n(?:\s*\n)?(.+)$/m);
   if (section.length) return { kind: "section", heading: "## Status", accepted: accepted(section) };
   const line = texts.map((t) => t.match(/^((?:\*\*)?Status:?(?:\*\*)?:?)\s*(.+)$/m)).filter((m) => !!m);
   if (line.length) return { kind: "line", label: line[0]![1]!, accepted: accepted(line.map((m) => m![2]!.trim())) };
