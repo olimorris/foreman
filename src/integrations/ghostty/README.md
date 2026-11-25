@@ -11,9 +11,10 @@ Foreman can run its orchestrator and workers in [Ghostty](https://ghostty.org) t
 
 ## Setup
 
-1. Set `FOREMAN_TERMINAL=ghostty` in your shell, such as `export FOREMAN_TERMINAL=ghostty` in your shell's startup file.
-2. Run `foreman doctor`. It checks that Ghostty is installed, its version, and that AppleScript is on.
-3. Open Ghostty in your repo and run `foreman up`. The orchestrator opens in a new Ghostty window, with the status pane beside it.
+1. Open Ghostty in your repo and run `foreman doctor`. It checks that Ghostty is installed, its version, and that AppleScript is on.
+2. Run `foreman up` in the same tab. The orchestrator opens in a new Ghostty window, with the status pane beside it.
+
+Foreman sees that it's running in Ghostty from `TERM_PROGRAM=ghostty`, which Ghostty sets in every terminal. You only need `FOREMAN_TERMINAL=ghostty` to override that, such as when you run `foreman` from another app.
 
 Run later `foreman` commands, such as `foreman pane`, from the orchestrator's tab. Workers open as tabs in the same window.
 
@@ -30,6 +31,7 @@ Run later `foreman` commands, such as `foreman pane`, from the orchestrator's ta
 `ghostty.applescript` in this folder holds every call Foreman makes, run with `osascript`. `index.ts` builds the arguments and reads the replies. Ghostty's dictionary is in `sdef /Applications/Ghostty.app`.
 
 - A session is the terminal Foreman was run from, not a Ghostty window. A window's id is built from the AppKit objects behind it and can change as tabs come and go. A terminal's id is a UUID that lasts as long as the terminal, so Foreman finds the window that holds it each time.
+- Ghostty sets `TERM_PROGRAM=ghostty` in every terminal, workers' tabs included, so Foreman picks Ghostty without a setting.
 - Ghostty sets `GHOSTTY_SURFACE_ID` in each terminal, but it's a different number from the AppleScript terminal id. Foreman finds its own terminal by walking up its process tree to the first process with a tty, since Claude Code runs commands detached from it, and matching that against each terminal's `tty`.
 - Ghostty runs a tab's command as `login -flp <user> bash --noprofile --norc -c "exec -l <command>"`, and forces `wait-after-command` on. So the command must be one shell-quoted command line, and a tab that should close runs `/bin/sh -c '<command>; osascript ghostty.applescript close-tty "$(tty)"'`.
 - A tab whose command has exited still exists, so Foreman counts a worker as running while any process holds its terminal's tty, checked with `ps -t`.

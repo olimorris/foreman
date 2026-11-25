@@ -16,10 +16,11 @@ Written against Herdr 0.9.5 from its source and docs. It hasn't been run against
 ## Setup
 
 1. Install Herdr with `brew install herdr`, or `curl -fsSL https://herdr.dev/install.sh | sh`.
-2. Set `FOREMAN_TERMINAL=herdr` in your shell profile, so every `foreman` command uses Herdr.
-3. Start Herdr by running `herdr` in your terminal.
-4. Run `foreman doctor` in a Herdr pane. It checks that `herdr` is on your PATH, its version, and that its server is running.
-5. Run `foreman up` from your repo. The orchestrator opens in a new Herdr workspace named `foreman-<repo>`, with the status pane beside it.
+2. Start Herdr by running `herdr` in your terminal.
+3. Run `foreman doctor` in a Herdr pane. It checks that `herdr` is on your PATH, its version, and that its server is running.
+4. Run `foreman up` from your repo in a Herdr pane. The orchestrator opens in a new Herdr workspace named `foreman-<repo>`, with the status pane beside it.
+
+Foreman sees that it's running in Herdr from `TERM_PROGRAM=herdr` or `HERDR_PANE_ID`. You only need `FOREMAN_TERMINAL=herdr` to override that. Before Herdr 0.9.2, a pane keeps the `TERM_PROGRAM` of the terminal you started Herdr in, so Foreman can't tell Herdr from that terminal and asks you to set `FOREMAN_TERMINAL=herdr`. Upgrading Herdr fixes it.
 
 ## How Foreman drives it
 
@@ -33,6 +34,7 @@ Foreman calls the `herdr` CLI, which talks to the running server over Herdr's so
 - Herdr removes a pane as soon as its process exits. So `alive` only asks `herdr pane get` whether Herdr still knows the pane.
 - `send` types with `herdr pane send-text`, then presses Enter with `herdr pane send-keys enter`. `herdr pane run` would send both in one write, and Herdr's own `agent prompt` delays the Enter so a coding agent doesn't read it as part of the pasted text.
 - `close` uses `herdr pane close`, which ends the process in the pane. Closing a tab's only pane closes the tab.
+- Herdr 0.9.2 and later set `TERM_PROGRAM=herdr` in every pane. Earlier versions leave the `TERM_PROGRAM` of the terminal that started the Herdr server, so Foreman also takes `HERDR_PANE_ID` as a sign it's in Herdr.
 - Herdr sets `HERDR_WORKSPACE_ID`, `HERDR_TAB_ID`, `HERDR_PANE_ID` and `HERDR_SOCKET_PATH` fresh in every pane, so a worker never sees the orchestrator's values. Foreman leaves them alone, so the worker's `herdr` calls reach the same server and Herdr can still show the worker's agent status.
 - `layout.apply` in the raw socket API can start a pane with a command, but it has no CLI wrapper and can't split an existing tab, so Foreman doesn't use it.
 

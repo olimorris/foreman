@@ -35,6 +35,10 @@ test("Orca is selectable by its folder name", () => {
   expect(terminal("orca").requires).toEqual(["orca"]);
 });
 
+test("Foreman picks Orca inside an Orca terminal without FOREMAN_TERMINAL", () => {
+  expect(terminal(undefined, undefined, { TERM_PROGRAM: "Orca", ORCA_WORKTREE_ID: "repo-1::/code/app" }).name).toBe("Orca");
+});
+
 test("a worker tab opens in the orchestrator's workspace without asking for focus", () => {
   const { term, calls, scripts } = fakeOrca({ "terminal create": created });
   const tab = term.open("repo-1::/code/app", "T1 tags", "/code/app/.foreman/worktrees/T1", ["claude", "-n", "T1"]);

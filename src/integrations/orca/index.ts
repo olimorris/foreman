@@ -70,6 +70,7 @@ export function orcaTerminal(exec: Exec = run, script: (cwd: string, cmd: string
     parseCreate(must(exec, createArgs(worktree, label, typedCommand(script(cwd, cmd)), focus)));
   return {
     name: "Orca",
+    inside: (env) => env.TERM_PROGRAM === "Orca",
     currentSession: () => process.env.ORCA_WORKTREE_ID || undefined,
     // Orca stamps every new pane with its own ORCA_* identity, and stripping it would stop Orca showing the worker's status.
     sessionEnv: [],

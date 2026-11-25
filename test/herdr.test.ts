@@ -48,6 +48,16 @@ test("Herdr is selectable by its folder name", () => {
   expect(terminal("herdr").requires).toEqual(["herdr"]);
 });
 
+test("Foreman picks Herdr inside a Herdr pane without FOREMAN_TERMINAL", () => {
+  expect(terminal(undefined, undefined, { TERM_PROGRAM: "herdr", HERDR_PANE_ID: "w1-1" }).name).toBe("Herdr");
+});
+
+test("a pane from Herdr before 0.9.2 carries the outer terminal's TERM_PROGRAM, so Foreman asks for FOREMAN_TERMINAL", () => {
+  expect(() => terminal(undefined, undefined, { TERM_PROGRAM: "ghostty", HERDR_PANE_ID: "w1-1" })).toThrow(
+    "Foreman can't tell which terminal it's in: both ghostty and herdr match. Set FOREMAN_TERMINAL to the one you're running in",
+  );
+});
+
 test("a worker opens as a tab in the orchestrator's workspace without taking focus, then runs its launch script", () => {
   const { term, calls, scripts } = fakeHerdr({ "tab create": tabCreated, "pane run": done });
   const tab = term.open("w1", "T1 tags", "/code/app/.foreman/worktrees/T1", ["claude", "-n", "T1"]);

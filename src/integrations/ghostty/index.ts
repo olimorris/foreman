@@ -101,6 +101,7 @@ function checks(): Check[] {
 // A session is the terminal Foreman was run from: Ghostty's window ids change as tabs come and go, but a terminal's id lasts as long as it does.
 export const ghostty: Terminal = {
   name: "Ghostty",
+  inside: (env) => env.TERM_PROGRAM === "ghostty",
   currentSession: hereTerminal,
   // Ghostty gives each tab its own GHOSTTY_SURFACE_ID, so a worker never inherits the orchestrator's.
   sessionEnv: [],

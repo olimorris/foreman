@@ -16,9 +16,10 @@ Written against Orca 1.4.274 from its source and docs. It hasn't been run agains
 1. Install Orca with `brew install --cask stablyai/orca/orca`, or download it from [Orca's releases](https://github.com/stablyai/orca/releases/latest).
 2. Open Orca, add your repo as a project, and turn on the CLI under Settings > General > Orca CLI.
 3. Check that `orca status --json` runs in a shell.
-4. Set `FOREMAN_TERMINAL=orca` in your shell profile, so every `foreman` command uses Orca.
-5. Run `foreman doctor` to confirm Foreman can find `orca`.
-6. Run `foreman up` from the repo. The orchestrator opens as a tab titled `foreman-<repo>` in the repo's Orca workspace, and the status pane opens as a tab beside it.
+4. Open a terminal in your repo's Orca workspace and run `foreman doctor` to confirm Foreman can find `orca`.
+5. Run `foreman up` in the same terminal. The orchestrator opens as a tab titled `foreman-<repo>` in the repo's Orca workspace, and the status pane opens as a tab beside it.
+
+Foreman sees that it's running in Orca from `TERM_PROGRAM=Orca`, which Orca sets in every terminal it opens. You only need `FOREMAN_TERMINAL=orca` to override that, such as when you run `foreman up` from another terminal app.
 
 ## How Foreman drives it
 
@@ -29,6 +30,7 @@ Written against Orca 1.4.274 from its source and docs. It hasn't been run agains
 - Orca types `--command` into your login shell rather than running it directly, so a command that's quoted for sh breaks in fish. Foreman writes the command to a small sh script in the temp folder and types `exec /bin/sh '<script>'`, which reads the same in every shell. The script deletes itself, moves into the worktree and replaces itself with the worker.
 - `alive` asks `orca terminal show`. A terminal that has exited, or one Orca no longer knows, counts as gone.
 - `send` uses `orca terminal send --text ... --enter`, and `close` uses `orca terminal close`, which stops the process in the pane.
+- Orca sets `TERM_PROGRAM=Orca` in every terminal it opens, workers' tabs included, so Foreman picks Orca without a setting. Foreman doesn't detect Orca from `ORCA_WORKTREE_ID`, because anything started from an Orca terminal can pass it on, such as a multiplexer that opens its own panes.
 - Orca sets `ORCA_WORKTREE_ID`, `ORCA_TERMINAL_HANDLE` and other `ORCA_*` variables fresh in every pane, so a worker never sees the orchestrator's values. Foreman leaves them alone, so Orca can still show each worker's agent status.
 
 ## What doesn't work as well as in Rex
