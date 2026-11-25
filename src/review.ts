@@ -10,16 +10,18 @@ import { pluginRoot, taskDir, worktreeDir, type Repo } from "./paths.ts";
 import type { Terminal } from "./terminal.ts";
 import { sendToTask } from "./send.ts";
 import { capture, parseScreens, type Capture } from "./shots.ts";
-import { checkModel, taskLabel } from "./spawn.ts";
-import { diffBase, findTask, loadTasks, updateTask, type Task } from "./state.ts";
+import { checkModel } from "./brief.ts";
+import { taskLabel } from "./spawn.ts";
+import { findTask, loadTasks, updateTask, type Task } from "./state.ts";
+import { diffBase } from "./base.ts";
+import { transition } from "./lifecycle.ts";
 import { budgetLeft } from "./cost.ts";
 import { loadSkills, prSkill, PR_SKILL, skillFolders, type Skill } from "./skills.ts";
+import { latest, roundDir, roundFiles, rounds, type Verdict } from "./rounds.ts";
 
 export const MAX_REVISIONS = 2;
 
-export type Issue = { where: string; screenshot?: string; intent: string; problem: string; expected: string };
-export type PrDraft = { title: string; description: string };
-export type Verdict = { verdict: "approve" | "changes"; summary: string; issues: Issue[]; risk: "low" | "medium" | "high"; risk_note: string; decisions_touched: string[]; pr?: PrDraft };
+export type { Issue, PrDraft, Verdict } from "./rounds.ts";
 
 export const VERDICT_SCHEMA = {
   type: "object",
@@ -53,8 +55,6 @@ export function verdictSchema(draftPr: boolean) {
   return { ...VERDICT_SCHEMA, properties: { ...VERDICT_SCHEMA.properties, pr } };
 }
 
-export const roundDir = (repo: Repo, id: string, round: number) => join(taskDir(repo, id), "review", `round-${round}`);
-
 export function startReview(repo: Repo, id: string, term: Terminal, session = term.currentSession()): void {
   const task = findTask(repo, id);
   reviewerModel(repo);
@@ -81,6 +81,7 @@ export async function runReview(repo: Repo, id: string, deps: ReviewDeps = {}): 
   const round = (task.reviews ?? 0) + 1;
   updateTask(repo, id, { reviews: round });
   const dir = roundDir(repo, id, round);
+  const files = roundFiles(dir);
   mkdirSync(dir, { recursive: true });
   try {
     const left = budgetLeft(repo, loadTasks(repo), id);
@@ -88,12 +89,12 @@ export async function runReview(repo: Repo, id: string, deps: ReviewDeps = {}): 
     const shots = await screenshots(repo, task, dir);
     // The user's local base branch lags behind merged PRs, which would put other tasks' work in this diff.
     const base = diffBase(repo, task);
-    const diff = join(dir, "diff.patch");
+    const diff = files.diff;
     writeFileSync(diff, must(["git", "-C", task.worktree, "diff", `${base}...HEAD`]));
     const stat = must(["git", "-C", task.worktree, "diff", "--shortstat", `${base}...HEAD`]).trim();
     const dirty = must(["git", "-C", task.worktree, "status", "--porcelain"]).trim();
-    const prompt = reviewPrompt({ task, against: against(task), round, diff, stat, dirty, shots, index: writeIndex(repo, task.base), previous: lastVerdict(repo, id, round), done: lastDone(repo, id), brief: join(taskDir(repo, id), "brief.md"), never: neverRules(loadConfig(repo)), automerge: loadPlan(repo)?.automerge === true, skills: loadSkills(repo) });
-    writeFileSync(join(dir, "prompt.md"), prompt);
+    const prompt = reviewPrompt({ task, against: against(task), round, diff, stat, dirty, shots, index: writeIndex(repo, task.base), previous: previousVerdict(repo, task, round), done: lastDone(repo, id), brief: join(taskDir(repo, id), "brief.md"), never: neverRules(loadConfig(repo)), automerge: loadPlan(repo)?.automerge === true, skills: loadSkills(repo) });
+    writeFileSync(files.prompt, prompt);
 
     let r = reviewer(reviewerCommand(repo, id, left.usd, model), { cwd: task.worktree, stdin: prompt, env: { FOREMAN_ROLE: "reviewer" } });
     // claude -p gives up at the usage limit instead of waiting, so the round waits for the reset and runs again.
@@ -104,11 +105,11 @@ export async function runReview(repo: Repo, id: string, deps: ReviewDeps = {}): 
       if (room.reason) throw new Error(room.reason);
       r = reviewer(reviewerCommand(repo, id, room.usd, model), { cwd: task.worktree, stdin: prompt, env: { FOREMAN_ROLE: "reviewer" } });
     }
-    writeFileSync(join(dir, "reviewer.json"), r.stdout || r.stderr);
+    writeFileSync(files.reviewer, r.stdout || r.stderr);
     const verdict = parseVerdict(r.stdout);
-    if (r.code !== 0 || !verdict) throw new Error(`the reviewer returned no verdict (exit ${r.code}); see ${join(dir, "reviewer.json")}`);
-    writeFileSync(join(dir, "verdict.json"), JSON.stringify(verdict, null, 2) + "\n");
-    writeFileSync(join(dir, "feedback.md"), renderFeedback(verdict, round));
+    if (r.code !== 0 || !verdict) throw new Error(`the reviewer returned no verdict (exit ${r.code}); see ${files.reviewer}`);
+    writeFileSync(files.verdict, JSON.stringify(verdict, null, 2) + "\n");
+    writeFileSync(files.feedback, renderFeedback(verdict, round));
     const line = verdictLine(verdict, round, task.revisions ?? 0);
     appendEvent(repo, id, "reviewed", line);
     return line;
@@ -164,17 +165,9 @@ export function parseVerdict(stdout: string): Verdict | undefined {
   return undefined;
 }
 
-export function latestVerdict(repo: Repo, task: Task): Verdict | undefined {
-  const file = join(roundDir(repo, task.id, task.reviews ?? 0), "verdict.json");
-  return task.reviews && existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : undefined;
-}
-
-function lastVerdict(repo: Repo, id: string, before: number): string | undefined {
-  for (let r = before - 1; r > 0; r--) {
-    const file = join(roundDir(repo, id, r), "verdict.json");
-    if (existsSync(file)) return file;
-  }
-  return undefined;
+function previousVerdict(repo: Repo, task: Task, before: number): string | undefined {
+  const earlier = rounds(repo, task).filter((r) => r.n < before && r.verdict).at(-1);
+  return earlier && roundFiles(earlier.dir).verdict;
 }
 
 export function verdictLine(v: Verdict, round: number, revisions: number): string {
@@ -202,16 +195,15 @@ export function renderFeedback(v: Verdict, round: number): string {
 export function sendFeedback(repo: Repo, id: string, term: Terminal): string {
   const task = findTask(repo, id);
   const round = task.reviews ?? 0;
-  const file = join(roundDir(repo, id, round), "verdict.json");
-  if (!round || !existsSync(file)) throw new Error(`${id} has no finished review`);
-  const verdict = JSON.parse(readFileSync(file, "utf8")) as Verdict;
+  const verdict = latest(repo, task)?.verdict;
+  if (!verdict) throw new Error(`${id} has no finished review`);
   if (verdict.verdict === "approve") throw new Error(`round ${round} approved ${id}, so there's no feedback to send`);
   const revisions = task.revisions ?? 0;
   if (revisions >= MAX_REVISIONS) {
     throw new Error(`${id} has had ${revisions} revision rounds. Escalate to the user with the screenshots in ${roundDir(repo, id, round)} instead`);
   }
   sendToTask(repo, task, renderFeedback(verdict, round), term);
-  updateTask(repo, id, { revisions: revisions + 1, status: "running" });
+  transition(repo, id, { type: "feedback" });
   return `sent round ${round} feedback to ${id} (revision ${revisions + 1} of ${MAX_REVISIONS})`;
 }
 
@@ -234,10 +226,9 @@ async function screenshots(repo: Repo, task: Task, dir: string): Promise<Capture
       run(["git", "-C", repo.root, "worktree", "remove", "--force", wt]);
     }
   }
-  const before = join(dir, "before");
+  const { before, after } = roundFiles(dir);
   mkdirSync(before, { recursive: true });
   for (const s of screens) if (existsSync(join(cache, `${s.name}.png`))) cpSync(join(cache, `${s.name}.png`), join(before, `${s.name}.png`));
-  const after = join(dir, "after");
   const shot = await capture(repo, cfg, task.worktree, task.id, screens, after);
   return { files: shot.files, errors: [...errors, ...shot.errors.map((e) => `after: ${e}`)], before, after };
 }

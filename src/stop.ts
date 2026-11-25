@@ -1,18 +1,22 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { budgetLeft, loadSessions, sessionsFile } from "./cost.ts";
+import { budgetLeft } from "./cost.ts";
+import { loadSessions, sessionsFile } from "./transcripts.ts";
 import type { Repo } from "./paths.ts";
 import type { Terminal } from "./terminal.ts";
-import { checkModel, tabLabel, workerCommand } from "./spawn.ts";
+import { checkModel } from "./brief.ts";
+import { onModel, tabLabel, workerCommand } from "./spawn.ts";
 import { stopWorkerProcesses, workerTree } from "./procs.ts";
-import { findTask, loadTasks, updateTask, type Task } from "./state.ts";
+import { findTask, loadTasks, type Task } from "./state.ts";
 import { activeLimit, limitLine } from "./limits.ts";
+import { transition, type PauseWhy } from "./lifecycle.ts";
+import { missedNotes } from "./notes.ts";
 
 // Closing the tab kills the worker's Claude process, so it stops spending even if it would ignore a message.
-export function stopWorker(repo: Repo, task: Task, term: Terminal): boolean {
+export function stopWorker(repo: Repo, task: Task, term: Terminal, why: Exclude<PauseWhy, "limit"> = "user", note?: string): boolean {
   if (!task.tab || !term.alive(task.tab)) return false;
   closeWorker(task, term);
-  if (task.status !== "over-budget") updateTask(repo, task.id, { status: "over-budget", pausedFrom: task.status });
+  transition(repo, task.id, { type: "paused", why, note });
   return true;
 }
 
@@ -24,18 +28,27 @@ function closeWorker(task: Task, term: Terminal): void {
 }
 
 // The worker's uncommitted changes stay in its worktree, and resume carries on its last session.
-export function pauseForLimit(repo: Repo, task: Task, term: Terminal): void {
+export function pauseForLimit(repo: Repo, task: Task, term: Terminal, note?: string): void {
   closeWorker(task, term);
-  updateTask(repo, task.id, { status: "limited", pausedFrom: task.status });
+  transition(repo, task.id, { type: "paused", why: "limit", note });
 }
 
-export function restartWorker(repo: Repo, task: Task, term: Terminal, session: string, model?: string): Task {
-  if (model !== undefined) checkModel(model);
+export const resumedLine = (task: Task) => `resumed ${task.id}'s worker in a new tab${onModel(task)}`;
+export const restartedLine = (task: Task) => `restarted ${task.id}'s worker in a new tab, carrying on its last session${onModel(task)}`;
+
+export type Reopen = { model?: string; prompt?: string; note?: string };
+
+export function restartWorker(repo: Repo, task: Task, term: Terminal, session: string, opts: Omit<Reopen, "prompt"> = {}): Task {
+  if (opts.model !== undefined) checkModel(opts.model);
   closeWorker(task, term);
-  return resume(repo, task.id, term, session, model);
+  return reopen(repo, task.id, term, session, opts, true);
 }
 
-export function resume(repo: Repo, id: string, term: Terminal, session: string, model?: string, prompt?: string): Task {
+export function resume(repo: Repo, id: string, term: Terminal, session: string, opts: Reopen = {}): Task {
+  return reopen(repo, id, term, session, opts, false);
+}
+
+function reopen(repo: Repo, id: string, term: Terminal, session: string, { model, prompt, note }: Reopen, restarted: boolean): Task {
   if (model !== undefined) checkModel(model);
   const wait = activeLimit(repo);
   if (wait) throw new Error(`${limitLine(wait)}, and the watcher resumes ${id} then`);
@@ -45,9 +58,9 @@ export function resume(repo: Repo, id: string, term: Terminal, session: string, 
   const left = budgetLeft(repo, loadTasks(repo), id);
   if (left.reason) throw new Error(`${left.reason}, then resume`);
   const last = loadSessions(sessionsFile(repo, id)).at(-1);
-  prompt ??= `Foreman stopped you and has now restarted you. Run git status to see where you left off, then carry on with your brief at ${join(repo.foreman, "tasks", id, "brief.md")}.`;
+  const told = [prompt ?? `Foreman stopped you and has now restarted you. Run git status to see where you left off, then carry on with your brief at ${join(repo.foreman, "tasks", id, "brief.md")}.`, missedNotes(repo, task.pausedAt)];
   // The old worker is gone, and a test run it left holding the build folder's lock would hang the new worker's first build.
   closeWorker(task, term);
-  const tab = term.open(session, tabLabel(task), task.worktree, workerCommand(task, term, prompt, last));
-  return updateTask(repo, id, { tab, model: task.model, status: task.pausedFrom ?? "running", pausedFrom: undefined });
+  const tab = term.open(session, tabLabel(task), task.worktree, workerCommand(task, term, told.filter(Boolean).join("\n\n"), last));
+  return transition(repo, id, { type: "resumed", tab, model: task.model, restarted, note });
 }

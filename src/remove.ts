@@ -3,9 +3,10 @@ import { basename, join } from "node:path";
 import { run } from "./exec.ts";
 import { isInside, type Repo } from "./paths.ts";
 import type { Terminal } from "./terminal.ts";
-import { loadTasks, type Task } from "./state.ts";
+import { inFlight, loadTasks, type Task } from "./state.ts";
+import { isMerged } from "./lifecycle.ts";
 import { unmergedWork, type Unmerged } from "./teardown.ts";
-import { baseRef } from "./snapshot.ts";
+import { baseRef } from "./base.ts";
 import { stopProcessesIn } from "./procs.ts";
 import { setTrust } from "./trust.ts";
 
@@ -18,7 +19,7 @@ export function orchestratorSessionName(repo: Repo): string {
 // Uncommitted files are never in a merge, so they still count when the task is marked merged.
 function lostWork(repo: Repo, task: Task): Unmerged {
   const work = unmergedWork(repo, task.branch, baseRef(repo, task.base), task.worktree);
-  return task.mergedAt ? { commits: 0, dirty: work.dirty } : work;
+  return isMerged(task) ? { commits: 0, dirty: work.dirty } : work;
 }
 
 function foremanWorktrees(repo: Repo): string[] {
@@ -52,7 +53,7 @@ export function removeForeman(repo: Repo, discard: boolean, term: Terminal, opts
     return { removed: false, message: `The orchestrator is still running in ${term.name} session ${name}. Close that session, then run foreman remove again. Nothing was removed.` };
   }
 
-  const tasks = loadTasks(repo).filter((t) => t.status !== "torn-down");
+  const tasks = inFlight(loadTasks(repo));
   const unmerged = tasks.map((t) => ({ id: t.id, lost: lostWork(repo, t) })).filter((t) => t.lost.commits || t.lost.dirty);
   if (unmerged.length && !discard) {
     const lines = unmerged.map((t) => `- ${t.id}: ${plural(t.lost.commits, "unmerged commit")} and ${plural(t.lost.dirty, "uncommitted file")}`);

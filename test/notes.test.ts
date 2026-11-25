@@ -2,9 +2,10 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { addNote, briefNotes, listNotes, loadNotes, newNoteMessage, notesDoc, removeNote, shareNote } from "../src/notes.ts";
+import { addNote, briefNotes, changeNotes, listNotes, loadNotes, newNoteMessage, notesDoc, removeNote, shareNote } from "../src/notes.ts";
 import { spawn } from "../src/spawn.ts";
-import { withTasks, type Task } from "../src/state.ts";
+import { findTask, withTasks, type Task } from "../src/state.ts";
+import { pauseForLimit, resume } from "../src/stop.ts";
 import { fakeTerminal, tempRepo } from "./helpers.ts";
 
 process.env.CLAUDE_CONFIG_DIR = mkdtempSync(join(tmpdir(), "foreman-claude-"));
@@ -33,7 +34,7 @@ test("notes are numbered, kept in a readable file, and removed by number", () =>
 
 test("a new note reaches every running worker except the one that added it", () => {
   const repo = tempRepo();
-  withTasks(repo, (tasks) => tasks.push(task("T1"), task("T2", "done"), task("T3"), task("T4", "exited"), task("T5", "torn-down"), task("T6", "over-budget")));
+  withTasks(repo, (tasks) => tasks.push(task("T1"), task("T2", "done"), task("T3"), task("T4", "exited"), task("T5", "torn-down"), task("T6", "over-budget"), task("T7", "limited"), task("T8", "merged")));
   const term = fakeTerminal();
   const note = addNote(repo, "port 3000 is taken on this machine", "T3")!;
   expect(shareNote(repo, newNoteMessage(repo, note), "T3", term)).toEqual({ sent: ["T1", "T2"], failed: [] });
@@ -55,4 +56,35 @@ test("a new brief lists short notes inline and links the file", () => {
 
   addNote(repo, "x".repeat(700), "T2");
   expect(briefNotes(repo)).toHaveLength(1);
+});
+
+test("a worker paused for the usage limit hears the notes it missed when it resumes", () => {
+  const repo = tempRepo();
+  const brief = join(repo.root, "..", `brief-${Date.now()}.md`);
+  writeFileSync(brief, "## Intent\n\nHi.\n\n## Spec\n\nHi.\n");
+  const opened: string[][] = [];
+  const term = { ...fakeTerminal(), open: (session: string, _label: string, _cwd: string, cmd: string[]) => (opened.push(cmd), { session, window: "w", pane: "p" }) };
+  spawn(repo, { id: "T1", brief, owns: ["x"], base: "main", session: "s" }, term);
+  addNote(repo, "the build cache is shared", "T2");
+  pauseForLimit(repo, findTask(repo, "T1"), term);
+  const note = addNote(repo, "port 3000 is taken on this machine", "T2")!;
+  expect(shareNote(repo, newNoteMessage(repo, note), "T2", term).sent).toEqual([]);
+
+  term.alive = () => false;
+  resume(repo, "T1", term, "s", { prompt: "Carry on." });
+  const prompt = opened.at(-1)!.at(-1)!;
+  expect(prompt).toStartWith("Carry on.\n\nWhile you were paused, this note about the setup was added.");
+  expect(prompt).toContain("- port 3000 is taken on this machine");
+  expect(prompt).not.toContain("build cache");
+  expect(findTask(repo, "T1").pausedAt).toBeUndefined();
+});
+
+test("changeNotes adds or removes a note, tells the workers and returns the line to show", () => {
+  const repo = tempRepo();
+  withTasks(repo, (tasks) => tasks.push(task("T1"), { ...task("T2"), socket: "/nonexistent/T2.sock", tab: undefined }));
+  const term = { ...fakeTerminal(), send: () => { throw new Error("gone"); } };
+  expect(changeNotes(repo, { add: "port 3000 is taken" }, "orchestrator", term)).toBe("added note 1. Told: nobody. Couldn't reach: T1");
+  expect(changeNotes(repo, { add: "port 3000 is taken" }, "T2", fakeTerminal())).toBe("that note is already there");
+  expect(changeNotes(repo, { remove: 1 }, "orchestrator", fakeTerminal())).toBe("removed note 1: port 3000 is taken. Told: T1");
+  expect(readFileSync(join(repo.root, ".git", "info", "exclude"), "utf8")).toContain(".foreman/");
 });

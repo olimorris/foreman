@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { MAX_REVISIONS, parseVerdict, renderFeedback, reviewerCommand, roundDir, runReview, sendFeedback, startReview, VERDICT_SCHEMA, verdictLine, type Verdict } from "../src/review.ts";
+import { MAX_REVISIONS, parseVerdict, renderFeedback, reviewerCommand, runReview, sendFeedback, startReview, VERDICT_SCHEMA, verdictLine, type Verdict } from "../src/review.ts";
+import { roundDir, roundFiles } from "../src/rounds.ts";
 import { globalSkillsDir, skillsDir } from "../src/skills.ts";
 import { saveConfig } from "../src/config.ts";
 import { saveLimit } from "../src/limits.ts";
@@ -10,7 +11,7 @@ import { parsePlan, savePlan } from "../src/plan.ts";
 import { readEvents } from "../src/events.ts";
 import { fill, parseScreens, splitArgs } from "../src/shots.ts";
 import { findTask, withTasks, type Task } from "../src/state.ts";
-import { fakeTerminal, tempRepo } from "./helpers.ts";
+import { fakeTerminal, tempRepo, writeRound } from "./helpers.ts";
 
 const changes: Verdict = {
   verdict: "changes",
@@ -93,9 +94,7 @@ describe("sendFeedback", () => {
       id: "T1", status: "done", branch: "foreman/T1", base: "main", worktree: "/w/T1", owns: ["src/"], socket: "/nonexistent.sock",
       tab: { session: "s", window: "w", pane: "b" }, createdAt: "", reviews: 1, ...extra,
     }));
-    const dir = roundDir(repo, "T1", extra.reviews ?? 1);
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "verdict.json"), JSON.stringify(verdict));
+    writeRound(repo, "T1", extra.reviews ?? 1, { verdict });
     return repo;
   }
 
@@ -125,7 +124,7 @@ describe("the never list", () => {
     saveConfig(repo, { budget: {}, ...(never ? { never } : {}) });
     if (automerge) savePlan(repo, { ...parsePlan("# Plan\n"), automerge: true });
     expect(await runReview(repo, "T1", { reviewer: () => ({ code: 0, stdout: approve, stderr: "" }), say: () => {} })).toStartWith("approve");
-    return readFileSync(join(roundDir(repo, "T1", 1), "prompt.md"), "utf8");
+    return readFileSync(roundFiles(roundDir(repo, "T1", 1)).prompt, "utf8");
   }
 
   test("goes in the reviewer's prompt as things a change must not break", async () => {
@@ -217,7 +216,7 @@ describe("the user's skills", () => {
     const line = await runReview(repo, "T1", { reviewer: (cmd) => (commands.push(cmd), { code: 0, stdout: approve, stderr: "" }), say: () => {} });
     expect(line).toStartWith("approve");
     const schema = JSON.parse(commands[0]![commands[0]!.indexOf("--json-schema") + 1]!);
-    return { repo, command: commands[0]!, schema, prompt: readFileSync(join(roundDir(repo, "T1", 1), "prompt.md"), "utf8") };
+    return { repo, command: commands[0]!, schema, prompt: readFileSync(roundFiles(roundDir(repo, "T1", 1)).prompt, "utf8") };
   }
 
   test("a code-review skill reaches the reviewer's prompt as rules to check", async () => {

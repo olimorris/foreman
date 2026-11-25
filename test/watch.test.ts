@@ -3,7 +3,7 @@ import type { TaskEvent } from "../src/events.ts";
 import type { Question } from "../src/questions.ts";
 import type { Task } from "../src/state.ts";
 import type { Proc } from "../src/procs.ts";
-import { scan, type Cursor, type Probes } from "../src/watch.ts";
+import { applyPass, scan, type Cursor, type Effects, type Probes } from "../src/watch.ts";
 import type { PermissionBlock } from "../src/permissions.ts";
 
 process.env.TZ = "UTC";
@@ -293,5 +293,75 @@ describe("permission blocks", () => {
 
   test("never wakes the orchestrator for its own blocks", () => {
     expect(scan([], start, blocked([b("o1", { role: "orchestrator", task: undefined, worker: undefined })])).reasons).toEqual([]);
+  });
+});
+
+describe("a whole pass", () => {
+  const start: Cursor = { ...empty, main: "aaa" };
+  const cost = (id: string, total: number) => ({ id, worker: total, review: 0, total, unpriced: [] });
+
+  function recording(fail: Partial<Record<keyof Effects, string>> = {}, closed: string[] = []) {
+    const calls: string[] = [];
+    const act = (name: keyof Effects, what: string) => {
+      calls.push(`${name} ${what}`);
+      if (fail[name]) throw new Error(fail[name]);
+    };
+    const effects: Effects = {
+      pause: (t, note) => act("pause", `${t.id}: ${note}`),
+      resume: (t) => act("resume", t.id),
+      nudge: (t) => act("nudge", t.id),
+      restart: (t) => act("restart", t.id),
+      merge: (pr) => (calls.push(`merge #${pr.number}`), fail.merge),
+      stop: (t, note) => (calls.push(`stop ${t.id}: ${note}`), !closed.includes(t.id)),
+    };
+    return { calls, effects };
+  }
+
+  test("a task over its limit is stopped, and the orchestrator hears about it once", () => {
+    const tasks = [task("T1"), task("T2")];
+    const p: Probes = { ...probes({}), spend: () => ({ costs: [cost("T1", 6.5), cost("T2", 1)], plan: 7.5, budget: { perTask: 5, plan: 40 } }) };
+    const { calls, effects } = recording();
+    const first = scan(tasks, start, p);
+    applyPass(first, tasks, effects, 0);
+    expect(first.reasons).toEqual(["over-budget T1: $6.50 of $5.00", "stopped T1"]);
+    expect(calls).toEqual(["stop T1: over budget, $6.50 of $5.00"]);
+
+    const second = scan(tasks, first.cursor, p);
+    applyPass(second, tasks, effects, 0);
+    expect(second.reasons).toEqual(["stopped T1"]);
+    const third = scan([task("T1", { status: "over-budget" }), task("T2")], second.cursor, p);
+    applyPass(third, tasks, recording({}, ["T1"]).effects, 0);
+    expect(third.reasons).toEqual([]);
+  });
+
+  test("a plan over its limit stops every task, naming why", () => {
+    const tasks = [task("T1")];
+    const p: Probes = { ...probes({}), spend: () => ({ costs: [cost("T1", 2)], plan: 41, budget: { perTask: 5, plan: 40 } }) };
+    const { calls, effects } = recording();
+    const r = scan(tasks, start, p);
+    applyPass(r, tasks, effects, 0);
+    expect(r.reasons).toEqual(["over-budget plan: $41.00 of $40.00", "stopped T1"]);
+    expect(calls).toEqual(["stop T1: the plan is over budget"]);
+  });
+
+  test("a failed restart, resume or merge reaches the orchestrator, and a refused merge isn't tried again on the same head", () => {
+    const tasks = [task("T1"), task("T2", { status: "pr-open", pr: 9 })];
+    const { calls, effects } = recording({ restart: "the tab won't open", merge: "Pull request is not mergeable" });
+    const r = { ...scan(tasks, start, probes({})), restart: ["T1"], resume: [], merge: [{ id: "T2", number: 9, sha: "abc" }] };
+    expect(applyPass(r, tasks, effects, 0)).toBe(0);
+    expect(calls).toEqual(["restart T1", "merge #9"]);
+    expect(r.reasons).toEqual(["stuck T1: restarting its hung worker failed: the tab won't open", "not-merged T2 #9: Pull request is not mergeable"]);
+    expect(r.cursor.unmergeable).toEqual({ "9": "abc" });
+    const merged = { ...scan(tasks, start, probes({})), merge: [{ id: "T2", number: 9, sha: "def" }] };
+    expect(applyPass(merged, tasks, recording().effects, 0)).toBe(1);
+  });
+
+  test("a worker at the usage limit is paused with the time it resets in the log", () => {
+    const tasks = [task("T1")];
+    const p: Probes = { ...probes({}), limit: () => ({ at: Date.parse("2026-11-25T14:00:00Z"), resetsAt: Date.parse("2026-11-25T15:45:00Z"), guessed: false }) };
+    const { calls, effects } = recording();
+    const r = scan(tasks, start, p, [], { now: Date.parse("2026-11-25T14:01:00Z"), stallMs: 20 * 60_000 });
+    applyPass(r, tasks, effects, Date.parse("2026-11-25T14:01:00Z"));
+    expect(calls).toEqual(["pause T1: usage limit, resets 15:45"]);
   });
 });

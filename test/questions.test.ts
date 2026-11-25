@@ -122,7 +122,7 @@ test("status says when Foreman goes ahead with each open question", () => {
 test("only the orchestrator records questions, and foreman status lists them", async () => {
   const repo = tempRepo();
   const call = async (role: Role, name: string, args: object) => {
-    const server: Server = { name: "foreman", version: "0", tools: TOOLS, session: { role, repo } };
+    const server: Server = { name: "foreman", version: "0", tools: TOOLS, session: { role, repo, term: () => fakeTerminal() } };
     const r = (await respond({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }, server)) as { result?: { content: { text: string }[] }; error?: { message: string } };
     return r.result?.content[0]!.text ?? r.error!.message;
   };

@@ -1,13 +1,15 @@
-import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { loadConfig } from "./config.ts";
 import { run } from "./exec.ts";
 import type { Repo } from "./paths.ts";
-import { baseRef } from "./snapshot.ts";
-import { writeJson, type Task } from "./state.ts";
+import { baseRef } from "./base.ts";
+import type { Task } from "./state.ts";
+import { writeJson } from "./store.ts";
 import { pidAlive } from "./procs.ts";
 import { readPid } from "./watch.ts";
+import { andList } from "./text.ts";
+import { runTests, TEST_MINUTES } from "./testrun.ts";
 
 export type Tested = { id: string; pr: number; branch: string; sha: string };
 export type Conflict = { id: string; with: string[]; files: string[] };
@@ -15,7 +17,6 @@ export type TestRun = { status: "pass" | "fail" | "timeout" | "not-run"; reason?
 export type Together = { at: string; base: string; baseSha: string; tested: Tested[]; merged: string[]; conflicts: Conflict[]; tests: TestRun };
 export type Runner = (cmd: string, cwd: string, minutes: number, signal?: AbortSignal) => Promise<{ status: "pass" | "fail" | "timeout"; output: string }>;
 
-export const TEST_MINUTES = 15;
 const TAIL_LINES = 40;
 
 export const togetherDir = (repo: Repo) => join(repo.foreman, "together");
@@ -26,15 +27,14 @@ export function loadTogether(repo: Repo): Together | undefined {
   return existsSync(resultPath(repo)) ? JSON.parse(readFileSync(resultPath(repo), "utf8")) : undefined;
 }
 
-export const list = (items: string[]) => (items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
-const files = (paths: string[]) => list(paths.length > 3 ? [...paths.slice(0, 3).map((p) => basename(p)), `${paths.length - 3} more`] : paths.map((p) => basename(p)));
+const files = (paths: string[]) => andList(paths.length > 3 ? [...paths.slice(0, 3).map((p) => basename(p)), `${paths.length - 3} more`] : paths.map((p) => basename(p)));
 
 export function togetherLine(t: Together): string {
   const pr = (id: string) => `#${t.tested.find((x) => x.id === id)?.pr ?? id}`;
-  const merged = list(t.merged.map(pr));
+  const merged = andList(t.merged.map(pr));
   const parts = t.conflicts.map((c) =>
     !c.files.length ? `${pr(c.id)} doesn't merge`
-    : c.with.length ? `${list([...c.with, c.id].map(pr))} conflict in ${files(c.files)}`
+    : c.with.length ? `${andList([...c.with, c.id].map(pr))} conflict in ${files(c.files)}`
     : `${pr(c.id)} conflicts with ${t.base} in ${files(c.files)}`);
   const clean = !t.conflicts.length;
   const { tests } = t;
@@ -66,32 +66,10 @@ export function failureHint(output: string): string | undefined {
   return line && (line.length > 100 ? line.slice(0, 97) + "..." : line);
 }
 
-// A hung test leaves its children running, so the whole process group is killed, not just the shell.
-export const runTests: Runner = (cmd, cwd, minutes, signal) => new Promise((resolve) => {
-  const child = spawn("sh", ["-c", cmd], { cwd, detached: true, stdio: ["ignore", "pipe", "pipe"] });
-  let output = "";
-  let timedOut = false;
-  const keep = (d: Buffer) => void (output = (output + d).slice(-64_000));
-  const kill = (signal: NodeJS.Signals) => {
-    try {
-      process.kill(-child.pid!, signal);
-    } catch {}
-  };
-  child.stdout!.on("data", keep);
-  child.stderr!.on("data", keep);
-  const timer = setTimeout(() => {
-    timedOut = true;
-    kill("SIGTERM");
-    setTimeout(() => kill("SIGKILL"), 5_000).unref();
-  }, minutes * 60_000);
-  const stop = () => kill("SIGKILL");
-  signal?.addEventListener("abort", stop, { once: true });
-  const done = () => (clearTimeout(timer), signal?.removeEventListener("abort", stop));
-  // A test that starts a server keeps the pipes open after the shell exits, so its group goes too.
-  child.on("exit", () => kill("SIGKILL"));
-  child.on("close", (code) => (done(), resolve({ status: timedOut ? "timeout" : code === 0 ? "pass" : "fail", output })));
-  child.on("error", (err) => (done(), resolve({ status: "fail", output: String(err) })));
-});
+const runShared: Runner = async (cmd, cwd, minutes, signal) => {
+  const r = await runTests(cmd, cwd, { minutes, signal });
+  return { status: r.timedOut ? "timeout" : r.code === 0 ? "pass" : "fail", output: r.output };
+};
 
 export type TogetherOptions = { runner?: Runner; fetch?: boolean; signal?: AbortSignal };
 
@@ -173,7 +151,7 @@ async function check(repo: Repo, base: string, prs: Task[], opts: TogetherOption
     }
 
     const { test, testMinutes = TEST_MINUTES } = loadConfig(repo);
-    const runner = opts.runner ?? runTests;
+    const runner = opts.runner ?? runShared;
     rmSync(outputPath(repo), { force: true });
     let tests: TestRun;
     if (!test) tests = { status: "not-run", reason: "no-command" };
@@ -219,11 +197,11 @@ export function staleness(t: Together, open: Tested[]): string[] {
 export function renderTogether(t: Together, stale: string[]): string[] {
   const pr = (id: string) => `#${t.tested.find((x) => x.id === id)?.pr ?? id}`;
   const paths = (fs: string[]) => fs.map((f) => `\`${f}\``).join(", ");
-  const merged = list(t.merged.map(pr));
+  const merged = andList(t.merged.map(pr));
   const { tests } = t;
   const lines = t.conflicts.map((c) =>
     !c.files.length ? `- ${pr(c.id)} doesn't merge onto the others. Its worker needs to look at why.`
-    : c.with.length ? `- ${pr(c.id)} conflicts with ${list(c.with.map(pr))} in ${paths(c.files)}. Merge ${list(c.with.map(pr))} first, and Foreman then asks ${pr(c.id)}'s worker to rebase.`
+    : c.with.length ? `- ${pr(c.id)} conflicts with ${andList(c.with.map(pr))} in ${paths(c.files)}. Merge ${andList(c.with.map(pr))} first, and Foreman then asks ${pr(c.id)}'s worker to rebase.`
     : `- ${pr(c.id)} conflicts with ${t.base} in ${paths(c.files)}. Its worker needs to rebase before it can merge.`);
   if (tests.status === "pass") lines.push(t.conflicts.length ? `- With ${merged} merged together, the tests pass.` : `- All ${t.merged.length} open PRs merge cleanly together and the tests pass, so merge them in any order.`);
   if (tests.status === "fail" && tests.onBase) lines.push(`- The tests fail on ${t.base} too${tests.failure ? `: \`${tests.failure}\`` : ""}, so they say nothing about these PRs. Fix ${t.base}'s tests, then ask the orchestrator to run the together check again.`);
@@ -233,7 +211,7 @@ export function renderTogether(t: Together, stale: string[]): string[] {
   return [
     "## Open PRs together",
     "",
-    ...(stale.length ? [`Out of date: ${list(stale)} since this was checked. Ask the orchestrator to run the together check again.`, ""] : []),
+    ...(stale.length ? [`Out of date: ${andList(stale)} since this was checked. Ask the orchestrator to run the together check again.`, ""] : []),
     ...lines,
     "",
   ];

@@ -1,15 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { deliver, modelName, renderPacket, section } from "../src/deliver.ts";
 import { appendEvent, readEvents } from "../src/events.ts";
 import { must } from "../src/exec.ts";
-import { roundDir, type Verdict } from "../src/review.ts";
+import type { Verdict } from "../src/rounds.ts";
 import { spawn } from "../src/spawn.ts";
 import { findTask, updateTask } from "../src/state.ts";
 import { sync } from "../src/sync.ts";
 import { teardown } from "../src/teardown.ts";
-import { fakeTerminal, tempRepo } from "./helpers.ts";
+import { fakeTerminal, tempRepo, writeRound } from "./helpers.ts";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 
@@ -69,11 +69,10 @@ test("deliver refuses until the latest review approves, then writes the packet",
   const { repo, commit } = setup(["T1"]);
   commit("T1");
   expect(() => deliver(repo, "T1", { dryRun: true })).toThrow("no finished review");
-  mkdirSync(roundDir(repo, "T1", 1), { recursive: true });
-  writeFileSync(join(roundDir(repo, "T1", 1), "verdict.json"), JSON.stringify({ ...approve, verdict: "changes" }));
+  writeRound(repo, "T1", 1, { verdict: { ...approve, verdict: "changes" } });
   updateTask(repo, "T1", { reviews: 1 });
   expect(() => deliver(repo, "T1", { dryRun: true })).toThrow("asked for changes");
-  writeFileSync(join(roundDir(repo, "T1", 1), "verdict.json"), JSON.stringify(approve));
+  writeRound(repo, "T1", 1, { verdict: approve });
   appendEvent(repo, "T1", "done", "Greets in T1");
   expect(() => deliver(repo, "T1")).toThrow("conventional commits");
   const r = deliver(repo, "T1", { title: "feat: greet in T1" });
@@ -148,8 +147,7 @@ describe("a pull-request skill's draft", () => {
   function approved(verdict: Verdict) {
     const { repo, commit } = setup(["T1"]);
     commit("T1");
-    mkdirSync(roundDir(repo, "T1", 1), { recursive: true });
-    writeFileSync(join(roundDir(repo, "T1", 1), "verdict.json"), JSON.stringify(verdict));
+    writeRound(repo, "T1", 1, { verdict });
     updateTask(repo, "T1", { reviews: 1 });
     appendEvent(repo, "T1", "done", "Greets in T1", { test: ["Open T1.txt. It says hi."], assumptions: ["Hi, not hello."] });
     return repo;

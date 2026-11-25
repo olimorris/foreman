@@ -1,8 +1,6 @@
-import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { channelPlugin, loadConfig, telegramPlugins } from "./config.ts";
-import { loadSessions, sessionsFile, transcriptDir } from "./cost.ts";
-import { checkModel } from "./spawn.ts";
+import { loadSessions, sessionsFile, transcripts } from "./transcripts.ts";
+import { checkModel } from "./brief.ts";
 import { findRepo, pluginArgs, type Repo } from "./paths.ts";
 import { skillsPluginArgs } from "./skills.ts";
 import { SERVER_NAME } from "./mcp.ts";
@@ -42,7 +40,7 @@ export function orchestratorAllowedTools(tools: Tool[] = TOOLS): string[] {
 }
 
 // claude --resume with an id it has no transcript for exits at once, which would leave the user an empty tab.
-export function lastOrchestratorSession(repo: Repo, hasTranscript = (id: string) => existsSync(join(transcriptDir(repo.root), `${id}.jsonl`))): string | undefined {
+export function lastOrchestratorSession(repo: Repo, hasTranscript = (id: string) => transcripts(repo).exists(id)): string | undefined {
   return loadSessions(sessionsFile(repo)).findLast(hasTranscript);
 }
 

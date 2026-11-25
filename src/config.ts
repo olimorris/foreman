@@ -1,29 +1,23 @@
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { AdrConvention } from "./adr.ts";
 import type { Repo } from "./paths.ts";
 import type { ShotsConfig } from "./shots.ts";
 import type { Budget, Price } from "./cost.ts";
-import { writeJson } from "./state.ts";
+import { jsonStore } from "./store.ts";
 
 export type Config = { adr?: AdrConvention; context?: string; screenshots?: ShotsConfig; maxWorkers?: number; prScreenshots?: "branch" | "local"; budget?: Budget; prices?: Record<string, Price>; stallMinutes?: number; stackTasks?: boolean; test?: string; testMinutes?: number; answerMinutes?: number; workerModel?: string; reviewerModel?: string; orchestratorModel?: string; never?: string[]; telegram?: { when?: string } };
 
 // Blank entries would print as empty bullets under a heading that promises rules.
 export const neverRules = (config: Config): string[] => (config.never ?? []).map((r) => r.trim()).filter(Boolean);
 
-const configPath = (repo: Repo) => join(repo.foreman, "config.json");
+const configStore = (repo: Repo) => jsonStore<Config>(join(repo.foreman, "config.json"), () => ({}));
 
-export function loadConfig(repo: Repo): Config {
-  const path = configPath(repo);
-  return existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {};
-}
+export const loadConfig = (repo: Repo): Config => configStore(repo).read();
 
 export function saveConfig(repo: Repo, patch: Partial<Config>): Config {
-  mkdirSync(repo.foreman, { recursive: true });
-  const config = { ...loadConfig(repo), ...patch };
-  writeJson(configPath(repo), config);
-  return config;
+  return configStore(repo).update((config) => Object.assign(config, patch));
 }
 
 const DEFAULT_WHEN = "when a question needs the user's answer, or the run is finished";

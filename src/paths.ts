@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, realpathSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { run } from "./exec.ts";
@@ -10,6 +10,17 @@ export function findRepo(cwd = process.cwd()): Repo {
   if (r.code !== 0) throw new Error(`not inside a git repository: ${cwd}`);
   const root = dirname(realpathSync(r.stdout.trim()));
   return { root, foreman: join(root, ".foreman") };
+}
+
+// Foreman's own files stay out of the user's commits without touching their .gitignore.
+export function ensureForeman(repo: Repo): void {
+  mkdirSync(join(repo.foreman, "tasks"), { recursive: true });
+  const exclude = join(repo.root, ".git", "info", "exclude");
+  const current = existsSync(exclude) ? readFileSync(exclude, "utf8") : "";
+  if (!current.split("\n").includes(".foreman/")) {
+    mkdirSync(join(repo.root, ".git", "info"), { recursive: true });
+    appendFileSync(exclude, (current && !current.endsWith("\n") ? "\n" : "") + ".foreman/\n");
+  }
 }
 
 export function taskDir(repo: Repo, id: string): string {

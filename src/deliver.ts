@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "./config.ts";
@@ -6,12 +6,16 @@ import { lastDone, logRun } from "./events.ts";
 import { must, run } from "./exec.ts";
 import { loadDecisions } from "./ledger.ts";
 import { taskDir, type Repo } from "./paths.ts";
-import { CONVENTIONAL, loadPlan, stackable } from "./plan.ts";
-import { roundDir, type PrDraft, type Verdict } from "./review.ts";
-import { diffBase, findTask, loadTasks, updateTask, type Task } from "./state.ts";
-import { loadSessions, sessionsFile, taskCost, transcriptDir } from "./cost.ts";
+import { CONVENTIONAL } from "./brief.ts";
+import { loadPlan, stackable } from "./plan.ts";
+import { latest, rounds, type PrDraft, type Shot, type Verdict } from "./rounds.ts";
+import { findTask, inFlight, loadTasks, type Task } from "./state.ts";
+import { diffBase } from "./base.ts";
+import { transition } from "./lifecycle.ts";
+import { taskCost } from "./cost.ts";
+import { transcripts } from "./transcripts.ts";
 
-export type Shot = { name: string; before?: string; after?: string };
+export type { Shot } from "./rounds.ts";
 export type PacketInput = {
   task: Task; intent: string; doneNote?: string; test?: string[]; assumptions?: string[]; stat: string; verdict: Verdict; round: number;
   decisions: string[]; shots: Shot[]; shotsNote?: string; buildsOn?: Task; draft?: PrDraft; automerge?: boolean;
@@ -96,44 +100,11 @@ export function renderPacket(p: PacketInput & { models: Models; cost?: number })
   ].join("\n");
 }
 
-export function workerModels(repo: Repo, task: Task): string[] {
-  const sessions = loadSessions(sessionsFile(repo, task.id));
-  const dir = transcriptDir(task.worktree);
-  if (!existsSync(dir)) return [];
-  const ids = readdirSync(dir).filter((f) => f.endsWith(".jsonl") && sessions.some((s) => f.includes(s)))
-    .flatMap((f) => [...readFileSync(join(dir, f), "utf8").matchAll(/"model":"(claude-[^"]+)"/g)].map((m) => m[1]!));
-  return [...new Set(ids)];
-}
-
-export function reviewerModels(repo: Repo, task: Task): string[] {
-  const ids: string[] = [];
-  for (let r = 1; r <= (task.reviews ?? 0); r++) {
-    try {
-      ids.push(...Object.keys(JSON.parse(readFileSync(join(roundDir(repo, task.id, r), "reviewer.json"), "utf8")).modelUsage ?? {}));
-    } catch {}
-  }
-  return [...new Set(ids)];
-}
-
-function approvedRound(repo: Repo, task: Task): { verdict: Verdict; round: number } {
-  const round = task.reviews ?? 0;
-  const file = join(roundDir(repo, task.id, round), "verdict.json");
-  if (!round || !existsSync(file)) throw new Error(`${task.id} has no finished review. Call review for ${task.id} first`);
-  const verdict = JSON.parse(readFileSync(file, "utf8")) as Verdict;
-  if (verdict.verdict !== "approve") throw new Error(`${task.id}'s latest review (round ${round}) asked for changes, so there's nothing to deliver yet`);
-  return { verdict, round };
-}
-
-function localShots(dir: string): Shot[] {
-  const names = new Set<string>();
-  for (const side of ["before", "after"]) {
-    const d = join(dir, side);
-    if (existsSync(d)) for (const f of readdirSync(d)) if (f.endsWith(".png")) names.add(f.slice(0, -4));
-  }
-  return [...names].sort().map((name) => {
-    const at = (side: string) => (existsSync(join(dir, side, `${name}.png`)) ? join(dir, side, `${name}.png`) : undefined);
-    return { name, before: at("before"), after: at("after") };
-  });
+function approvedRound(repo: Repo, task: Task): { verdict: Verdict; round: number; dir: string; shots: Shot[] } {
+  const r = latest(repo, task);
+  if (!r?.verdict) throw new Error(`${task.id} has no finished review. Call review for ${task.id} first`);
+  if (r.verdict.verdict !== "approve") throw new Error(`${task.id}'s latest review (round ${r.n}) asked for changes, so there's nothing to deliver yet`);
+  return { verdict: r.verdict, round: r.n, dir: r.dir, shots: r.shots };
 }
 
 // GitHub has no API for PR image uploads, so screenshots go to a side branch and the packet links them by commit.
@@ -159,7 +130,7 @@ export type Delivery = { packet: string; title: string; pr?: number; url?: strin
 
 export function deliver(repo: Repo, id: string, opts: { dryRun?: boolean; title?: string } = {}): Delivery {
   const task = findTask(repo, id);
-  const { verdict, round } = approvedRound(repo, task);
+  const { verdict, round, dir, shots: local } = approvedRound(repo, task);
   const brief = readFileSync(join(taskDir(repo, id), "brief.md"), "utf8");
   const done = lastDone(repo, id);
   const doneNote = done?.note;
@@ -179,15 +150,14 @@ export function deliver(repo: Repo, id: string, opts: { dryRun?: boolean; title?
   const nwo = origin && !opts.dryRun ? run(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"], { cwd: repo.root }) : undefined;
   const github = nwo?.code === 0 ? nwo.stdout.trim() : undefined;
 
-  const dir = roundDir(repo, id, round);
-  let shots = localShots(dir);
+  let shots = local;
   let shotsNote: string | undefined = shots.length ? `Screenshots are on the machine that ran the review, in \`${dir}\`.` : undefined;
   if (shots.length && github && loadConfig(repo).prScreenshots === "branch") {
     shots = uploadShots(repo, shots, `${id}/round-${round}`, github);
     shotsNote = undefined;
   }
   const packet = join(taskDir(repo, id), "pr.md");
-  writeFileSync(packet, renderPacket({ task, intent: section(brief, "Intent"), doneNote, test: done?.test, assumptions: done?.assumptions, stat, verdict, round, decisions, shots, shotsNote, buildsOn, draft: verdict.pr?.description.trim() ? verdict.pr : undefined, automerge: loadPlan(repo)?.automerge === true, models: { worker: workerModels(repo, task), reviewer: reviewerModels(repo, task) }, cost: taskCost(repo, task).total }));
+  writeFileSync(packet, renderPacket({ task, intent: section(brief, "Intent"), doneNote, test: done?.test, assumptions: done?.assumptions, stat, verdict, round, decisions, shots, shotsNote, buildsOn, draft: verdict.pr?.description.trim() ? verdict.pr : undefined, automerge: loadPlan(repo)?.automerge === true, models: { worker: transcripts(repo, task).models(), reviewer: [...new Set(rounds(repo, task).flatMap((r) => r.models))] }, cost: taskCost(repo, task).total }));
 
   if (opts.dryRun) return { packet, title, note: `wrote the PR packet to ${packet}${titleNote}` };
   if (!origin) return { packet, title, note: `this repo has no origin remote, so nothing was pushed. The PR packet is at ${packet}${titleNote}` };
@@ -197,14 +167,13 @@ export function deliver(repo: Repo, id: string, opts: { dryRun?: boolean; title?
   if (task.pr) {
     must(["gh", "pr", "edit", String(task.pr), "--body-file", packet, ...(useDraft ? ["--title", title] : [])], { cwd: repo.root });
     logRun(repo, id, "pr-updated", `#${task.pr}`);
-    const stacked = loadTasks(repo).filter((t) => t.stackedOn === id && t.status !== "torn-down").map((t) => t.id);
+    const stacked = inFlight(loadTasks(repo)).filter((t) => t.stackedOn === id).map((t) => t.id);
     const restack = stacked.length ? `. ${stacked.join(", ")} ${stacked.length > 1 ? "build" : "builds"} on this branch, so call sync to ask ${stacked.length > 1 ? "their workers" : "its worker"} to rebase` : "";
     return { packet, title, pr: task.pr, note: `pushed ${task.branch} and refreshed PR #${task.pr}${restack}${titleNote}` };
   }
   const url = must(["gh", "pr", "create", "--base", buildsOn?.branch ?? task.base, "--head", task.branch, "--title", title, "--body-file", packet], { cwd: repo.root }).trim().split("\n").at(-1)!;
   const pr = Number(url.match(/\/pull\/(\d+)/)?.[1]);
-  updateTask(repo, id, { pr, status: "pr-open" });
-  logRun(repo, id, "pr-opened", `#${pr}`);
+  transition(repo, id, { type: "pr-opened", pr });
   const started = new Set(loadTasks(repo).map((t) => t.id));
   const next = stackable(repo) ? loadPlan(repo)?.tasks.filter((t) => t.deps.includes(id) && !started.has(t.id)).map((t) => t.id) ?? [] : [];
   return { packet, title, pr, url, note: `opened PR #${pr}: ${url}${next.length ? `. Call next, which can start ${next.join(", ")} on top of it` : ""}${titleNote}` };

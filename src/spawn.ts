@@ -1,47 +1,22 @@
-import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { must } from "./exec.ts";
-import { baseRef } from "./snapshot.ts";
+import { baseRef } from "./base.ts";
 import { loadConfig, neverRules, telegramPlugins, withoutTelegram } from "./config.ts";
 import { findContext, writeIndex } from "./decisions.ts";
-import { findRepo, pluginArgs, socketPath, taskDir, worktreeDir, type Repo } from "./paths.ts";
+import { ensureForeman, findRepo, pluginArgs, socketPath, taskDir, worktreeDir, type Repo } from "./paths.ts";
 import { skillsPluginArgs } from "./skills.ts";
 import type { Terminal } from "./terminal.ts";
-import { CONVENTIONAL } from "./plan.ts";
+import { checkBrief, checkModel, CONVENTIONAL, plainTitle } from "./brief.ts";
 import { briefNotes } from "./notes.ts";
 import { setTrust } from "./trust.ts";
-import { findTask, loadTasks, nextWorker, withTasks, type Task } from "./state.ts";
+import { findTask, loadTasks, withTasks, type Task } from "./state.ts";
+import { nextWorker } from "./lifecycle.ts";
 import { logRun } from "./events.ts";
 import { mcpArgs, SERVER_NAME } from "./mcp.ts";
 import { WORKER_TOOLS } from "./tools/worker.ts";
 
 export type SpawnOptions = { id: string; title?: string; model?: string; brief: string; owns: string[]; base: string; session: string; stackedOn?: string; claudeConfig?: string };
-
-export function ensureForeman(repo: Repo): void {
-  mkdirSync(join(repo.foreman, "tasks"), { recursive: true });
-  const exclude = join(repo.root, ".git", "info", "exclude");
-  const current = existsSync(exclude) ? readFileSync(exclude, "utf8") : "";
-  if (!current.split("\n").includes(".foreman/")) {
-    mkdirSync(join(repo.root, ".git", "info"), { recursive: true });
-    appendFileSync(exclude, (current && !current.endsWith("\n") ? "\n" : "") + ".foreman/\n");
-  }
-}
-
-export function checkBrief(text: string): void {
-  for (const heading of ["## Intent", "## Spec"]) {
-    if (!text.split("\n").some((l) => l.trim() === heading)) throw new Error(`brief is missing a "${heading}" section`);
-  }
-}
-
-const ALIASES = ["sonnet", "opus", "haiku", "fable", "opusplan", "default"];
-
-// Claude Code only checks the name once the worker starts, and a misspelt "sonet" saved on the task would break every resume and restart after that.
-export function checkModel(model: string): void {
-  if (!model) throw new Error("the model is empty. Name one, like sonnet, opus or haiku");
-  const alias = ALIASES.includes(model.replace(/\[1m\]$/, ""));
-  const id = /^[A-Za-z0-9][\w.:@\/[\]-]*$/.test(model) && /^claude-|anthropic|^arn:/.test(model);
-  if (!alias && !id) throw new Error(`"${model}" isn't a model name. Use sonnet, opus, haiku, fable, opusplan or default, or a full id like claude-sonnet-5-5`);
-}
 
 export function spawn(repo: Repo, opts: SpawnOptions, term: Terminal): Task {
   const { id, owns, base } = opts;
@@ -103,6 +78,8 @@ export function workerCommand(task: Task, term: Terminal, prompt: string, resume
   ];
 }
 
+export const onModel = (task: { model?: string }) => (task.model ? `, on ${task.model}` : ", on Claude Code's default model");
+
 // Claude Code names a server's tools mcp__<server>__<tool>.
 export const workerToolNames = () => WORKER_TOOLS.map((t) => `mcp__${SERVER_NAME}__${t.name}`);
 
@@ -115,8 +92,6 @@ export function taskLabel(task: Pick<Task, "id" | "title">): string {
 export function tabLabel(task: Pick<Task, "id" | "title" | "worker">): string {
   return `${task.worker ? `${task.worker} · ` : ""}${taskLabel(task)}`;
 }
-
-export const plainTitle = (title: string) => title.replace(/^\w+(\([\w./-]+\))?!?:\s*/, "").trim();
 
 type Header = { id: string; worktree: string; branch: string; from: string; owns: string[]; index: string; context?: string; notes: string[]; never: string[] };
 

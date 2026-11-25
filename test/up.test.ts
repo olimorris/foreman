@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { saveConfig, telegramPlugins, telegramSetup } from "../src/config.ts";
 import { telegramChecks } from "../src/doctor.ts";
 import { lastOrchestratorSession, orchestratorCommand, orchestratorModel, orchestratorTelegram } from "../src/up.ts";
-import { recordSession, sessionsFile, transcriptDir } from "../src/cost.ts";
+import { recordSession, sessionsFile, transcriptDir } from "../src/transcripts.ts";
 import { stableRoot } from "../src/paths.ts";
 import { tempRepo } from "./helpers.ts";
 

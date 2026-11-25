@@ -1,9 +1,9 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfig } from "./config.ts";
 import { findDecision, updateDecision } from "./ledger.ts";
 import type { Repo } from "./paths.ts";
-import { withLock } from "./store.ts";
+import { locked } from "./store.ts";
 
 export type Question = {
   id: string;
@@ -42,8 +42,7 @@ export function loadQuestions(repo: Repo): Question[] {
 export const openQuestions = (repo: Repo) => loadQuestions(repo).filter((q) => !q.answeredAt);
 
 function withQuestions(repo: Repo, fn: (questions: Question[]) => Question): Question {
-  mkdirSync(repo.foreman, { recursive: true });
-  return withLock(join(repo.foreman, "questions.lock"), () => {
+  return locked(questionsPath(repo), () => {
     const q = fn(loadQuestions(repo));
     appendFileSync(questionsPath(repo), JSON.stringify(q) + "\n");
     return q;

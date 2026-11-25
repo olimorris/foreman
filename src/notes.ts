@@ -1,32 +1,28 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Repo } from "./paths.ts";
+import { ensureForeman, type Repo } from "./paths.ts";
 import type { Terminal } from "./terminal.ts";
 import { sendToTask } from "./send.ts";
-import { inFlight, loadTasks, type Task } from "./state.ts";
-import { withLock } from "./store.ts";
+import { loadTasks, type Task } from "./state.ts";
+import { canHear } from "./lifecycle.ts";
+import { fileStore } from "./store.ts";
 
 export type Note = { text: string; by: string; at: string };
 
 const notesFile = (repo: Repo) => join(repo.foreman, "notes.jsonl");
 export const notesDoc = (repo: Repo) => join(repo.foreman, "notes.md");
 
-export function loadNotes(repo: Repo): Note[] {
-  const path = notesFile(repo);
-  if (!existsSync(path)) return [];
-  return readFileSync(path, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as Note);
-}
+// notes.md is what workers read, so it's rewritten with every change.
+const notesStore = (repo: Repo) => fileStore<Note[]>(notesFile(repo), {
+  parse: (text) => text.split("\n").filter(Boolean).map((line) => JSON.parse(line) as Note),
+  format: (notes) => notes.map((n) => JSON.stringify(n) + "\n").join(""),
+  empty: () => [],
+  written: (notes) => writeFileSync(notesDoc(repo), renderNotes(notes)),
+});
 
-function withNotes<T>(repo: Repo, fn: (notes: Note[]) => T): T {
-  mkdirSync(repo.foreman, { recursive: true });
-  return withLock(join(repo.foreman, "notes.lock"), () => {
-    const notes = loadNotes(repo);
-    const result = fn(notes);
-    writeFileSync(notesFile(repo), notes.map((n) => JSON.stringify(n) + "\n").join(""));
-    writeFileSync(notesDoc(repo), renderNotes(notes));
-    return result;
-  });
-}
+export const loadNotes = (repo: Repo): Note[] => notesStore(repo).read();
+
+const withNotes = <T>(repo: Repo, fn: (notes: Note[]) => T): T => notesStore(repo).update(fn);
 
 // A second baseline run finds the same hang, and workers shouldn't hear about it twice.
 export function addNote(repo: Repo, text: string, by: string): Note | undefined {
@@ -64,9 +60,16 @@ function renderNotes(notes: Note[]): string {
   ].join("\n");
 }
 
-// Workers that are closed, stopped or finished have no session to read a message, and the one that found the fact already knows it.
+// Workers that are closed, paused or finished have no session to read a message, and the one that found the fact already knows it.
 export function noteAudience(tasks: Task[], by: string): Task[] {
-  return inFlight(tasks).filter((t) => t.id !== by && t.tab && !["exited", "over-budget", "merged"].includes(t.status));
+  return tasks.filter((t) => t.id !== by && canHear(t));
+}
+
+// A paused worker heard none of the notes added while its tab was closed, so its resume prompt carries them.
+export function missedNotes(repo: Repo, since: string | undefined): string | undefined {
+  const missed = since ? loadNotes(repo).filter((n) => n.at > since) : [];
+  if (!missed.length) return undefined;
+  return [`While you were paused, ${missed.length > 1 ? "these notes about the setup were" : "this note about the setup was"} added. Every note is in ${notesDoc(repo)}.`, ...missed.map((n) => `- ${n.text}`)].join("\n");
 }
 
 export type Shared = { sent: string[]; failed: string[] };
@@ -83,6 +86,22 @@ export function shareNote(repo: Repo, text: string, by: string, term: Terminal):
     }
   }
   return { sent, failed };
+}
+
+export const toldLine = (s: Shared) => `Told: ${s.sent.join(", ") || "nobody"}${s.failed.length ? `. Couldn't reach: ${s.failed.join(", ")}` : ""}`;
+
+export type NoteChange = { add: string } | { remove: number };
+
+// Adds or removes a note, tells every worker that can hear it, and returns the line to show whoever asked.
+export function changeNotes(repo: Repo, change: NoteChange, by: string, term: Terminal): string {
+  ensureForeman(repo);
+  if ("remove" in change) {
+    const note = removeNote(repo, change.remove);
+    return `removed note ${change.remove}: ${note.text}. ${toldLine(shareNote(repo, removedNoteMessage(note), by, term))}`;
+  }
+  const note = addNote(repo, change.add, by);
+  if (!note) return "that note is already there";
+  return `added note ${loadNotes(repo).length}. ${toldLine(shareNote(repo, newNoteMessage(repo, note), by, term))}`;
 }
 
 export const newNoteMessage = (repo: Repo, note: Note) => `${note.by} added a note about the setup. Every note is in ${notesDoc(repo)}.\n\n${note.text}`;

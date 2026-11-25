@@ -7,17 +7,20 @@ import { run } from "./exec.ts";
 import type { Repo } from "./paths.ts";
 import type { Terminal } from "./terminal.ts";
 import { sendToTask } from "./send.ts";
-import { baseRef } from "./snapshot.ts";
-import { budgetOf, lastActivity, overBudget, planSpend, taskCost, taskLimit, usd } from "./cost.ts";
+import { baseRef } from "./base.ts";
+import { budgetOf, overBudget, planSpend, taskCost, taskLimit, usd, type Budget, type TaskCost } from "./cost.ts";
+import { transcripts } from "./transcripts.ts";
 import { loadConfig } from "./config.ts";
 import { loadPlan, readyTasks, maxWorkers, stackable } from "./plan.ts";
 import { pauseForLimit, restartWorker, resume, stopWorker } from "./stop.ts";
-import { clockAt, loadLimit, resetPhrase, resumeDue, saveLimit, workerLimit, type LimitHit, type UsageLimit } from "./limits.ts";
+import { clockAt, loadLimit, resetPhrase, resumeDue, saveLimit, type LimitHit, type UsageLimit } from "./limits.ts";
 import { taskDir } from "./paths.ts";
 import { inFlight, loadTasks, updateTask, type Task } from "./state.ts";
+import { tabOpen } from "./lifecycle.ts";
 import { approved, automergeOn, checksOf, mergeCall, mergePr, repoMergeMethod, type Check, type Merge, type MergeMethod } from "./automerge.ts";
 import { blockLine, syncBlocks, type PermissionBlock } from "./permissions.ts";
 import { busy, commandName, isWorker, pidAlive, processesIn, sample, tidy, unstoppableLine, type CpuSample, type Proc } from "./procs.ts";
+import { andList, clip } from "./text.ts";
 
 export type PrState = { state: string; comments: number; base?: string; head?: string; sha?: string; draft?: boolean; checks?: Check[] };
 export type TrackedPr = { key: string; number: number; base?: string };
@@ -37,9 +40,13 @@ export type Probes = {
   automerge?(): boolean;
   approved?(task: Task): boolean;
   blocks?(): PermissionBlock[];
+  spend?(tasks: Task[]): Spend;
 };
 
-export type ScanResult = { reasons: string[]; cursor: Cursor; nudge: Nudge[]; restart: string[]; pause: string[]; resume: string[]; merge: Merge[]; notice?: string };
+export type Spend = { costs: TaskCost[]; plan: number; budget: Budget };
+export type Stop = { id: string; note: string };
+
+export type ScanResult = { reasons: string[]; cursor: Cursor; nudge: Nudge[]; restart: string[]; pause: string[]; resume: string[]; merge: Merge[]; stop: Stop[]; notice?: string };
 
 export type Clock = { now: number; stallMs: number; answerMs?: number; waiting?: (id: string) => string[] };
 
@@ -73,11 +80,11 @@ export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: Tracked
   for (const task of tasks) {
     const events = probes.events(task.id);
     for (const e of events.slice(next.events[task.id] ?? 0)) {
-      reasons.push(e.note ? `${e.type} ${task.id}: ${clip(e.note)}` : `${e.type} ${task.id}`);
+      reasons.push(e.note ? `${e.type} ${task.id}: ${clip(e.note, 100)}` : `${e.type} ${task.id}`);
     }
     next.events[task.id] = events.length;
 
-    if (!task.tab || task.status === "exited" || task.status === "over-budget" || task.status === "limited") continue;
+    if (!tabOpen(task)) continue;
     const alive = probes.alive(task);
     // A resumed worker can exit again, and that exit must be reported too.
     if (alive) next.exited = next.exited.filter((id) => id !== task.id);
@@ -121,7 +128,7 @@ export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: Tracked
   next.unanswered = next.unanswered!.filter((id) => open.some((q) => q.id === id));
   for (const q of open) {
     if (!clock?.answerMs || clock.now - Date.parse(q.askedAt) < clock.answerMs || next.unanswered.includes(q.id)) continue;
-    reasons.push(`unanswered ${q.id}${q.decision ? ` (${q.decision})` : ""}: ${clip(q.question)}`);
+    reasons.push(`unanswered ${q.id}${q.decision ? ` (${q.decision})` : ""}: ${clip(q.question, 100)}`);
     next.unanswered.push(q.id);
   }
 
@@ -129,8 +136,74 @@ export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: Tracked
   if (sha && next.main && sha !== next.main) reasons.push(`main-moved ${sha.slice(0, 8)}`);
   if (sha) next.main = sha;
 
+  const stop = checkBudget(probes.spend?.(tasks), next, reasons);
   const { pause, resume, notice } = waitOutLimit(tasks, next, working, reasons, clock?.now);
-  return { reasons, cursor: next, nudge, restart, pause, resume, merge, notice };
+  return { reasons, cursor: next, nudge, restart, pause, resume, merge, stop, notice };
+}
+
+function checkBudget(spend: Spend | undefined, cursor: Cursor, reasons: string[]): Stop[] {
+  if (!spend) return [];
+  const over = overBudget(spend.costs, spend.plan, spend.budget, cursor.budget ?? {});
+  reasons.push(...over.reasons);
+  cursor.budget = over.alerted;
+  return over.stop.map((id) => {
+    const spent = spend.costs.find((c) => c.id === id)!.total;
+    const limit = taskLimit(spend.budget, id);
+    return { id, note: limit !== undefined && spent > limit ? `over budget, ${usd(spent)} of ${usd(limit)}` : "the plan is over budget" };
+  });
+}
+
+// What a pass does to the workers and PRs. The watcher's own adapter acts for real, and tests record the calls.
+export type Effects = {
+  pause(task: Task, note: string): void;
+  resume(task: Task): void;
+  nudge(task: Task, text: string): void;
+  restart(task: Task): void;
+  // Returns why the merge failed, or undefined once it merged.
+  merge(pr: Merge): string | undefined;
+  // Returns false when the worker's tab was already closed.
+  stop(task: Task, note: string): boolean;
+};
+
+// Carries out what a pass found, adding what the orchestrator should hear about it to the pass's reasons. Returns how many PRs merged.
+export function applyPass(result: ScanResult, tasks: Task[], effects: Effects, now: number): number {
+  const task = (id: string) => tasks.find((t) => t.id === id)!;
+  const why = (err: unknown) => (err instanceof Error ? err.message : String(err));
+  let merged = 0;
+  for (const id of result.pause) {
+    try {
+      effects.pause(task(id), `usage limit, resets ${clockAt(result.cursor.limit!.resetsAt, now)}`);
+    } catch {}
+  }
+  for (const id of result.resume) {
+    try {
+      effects.resume(task(id));
+    } catch (err) {
+      result.reasons.push(`not-resumed ${id}: ${why(err)}`);
+    }
+  }
+  for (const { id, text } of result.nudge) {
+    try {
+      effects.nudge(task(id), text);
+    } catch {}
+  }
+  for (const id of result.restart) {
+    try {
+      effects.restart(task(id));
+    } catch (err) {
+      result.reasons.push(`stuck ${id}: restarting its hung worker failed: ${why(err)}`);
+    }
+  }
+  for (const pr of result.merge) {
+    const failed = effects.merge(pr);
+    if (!failed) merged++;
+    else {
+      result.reasons.push(`not-merged ${pr.id} #${pr.number}: ${clip(failed, 100)}`);
+      result.cursor.unmergeable = { ...result.cursor.unmergeable, [`${pr.number}`]: pr.sha };
+    }
+  }
+  for (const { id, note } of result.stop) if (effects.stop(task(id), note)) result.reasons.push(`stopped ${id}`);
+  return merged;
 }
 
 // Everything else the watcher finds during the wait is held for the resume line, since the orchestrator can't take a turn until the reset either.
@@ -139,7 +212,7 @@ function waitOutLimit(tasks: Task[], cursor: Cursor, working: string[], reasons:
   if (!limit) return { pause: [], resume: [] };
   if (now !== undefined && resumeDue(limit, now)) {
     const resume = limit.paused.filter((id) => tasks.some((t) => t.id === id && t.status === "limited"));
-    if (limit.announced) reasons.unshift(`usage-limit-reset: ${resume.length ? `resumed ${list(resume)}` : "no workers were paused"}`);
+    if (limit.announced) reasons.unshift(`usage-limit-reset: ${resume.length ? `resumed ${andList(resume)}` : "no workers were paused"}`);
     reasons.push(...(cursor.held ?? []));
     cursor.held = [];
     cursor.limit = undefined;
@@ -151,11 +224,9 @@ function waitOutLimit(tasks: Task[], cursor: Cursor, working: string[], reasons:
   cursor.held = [...(cursor.held ?? []), ...reasons.splice(0)];
   if (limit.announced) return { pause, resume: [] };
   limit.announced = true;
-  const paused = limit.paused.length ? `${list(limit.paused)} ${limit.paused.length > 1 ? "are" : "is"} paused` : "No workers were running";
+  const paused = limit.paused.length ? `${andList(limit.paused)} ${limit.paused.length > 1 ? "are" : "is"} paused` : "No workers were running";
   return { pause, resume: [], notice: `usage-limit: ${limit.by} hit the usage limit, which resets at ${resetPhrase(limit, now ?? limit.since)}. ${paused} and reviews wait until then` };
 }
-
-const list = (ids: string[]) => (ids.length > 1 ? `${ids.slice(0, -1).join(", ")} and ${ids.at(-1)}` : ids[0] ?? "");
 
 // A worker idling on a hung background command never wakes by itself, so it's nudged, then restarted, and only a worker that keeps hanging reaches the orchestrator.
 function checkStall(task: Task, probes: Probes, check: Clock, cursor: Cursor, reasons: string[], nudge: Nudge[], restart: string[]): void {
@@ -209,8 +280,6 @@ function stackedOnto(tasks: Task[], id: string): string {
   return ids.length ? `, which ${ids.join(" and ")} ${ids.length > 1 ? "build" : "builds"} on` : "";
 }
 
-const clip = (s: string) => (s.length > 100 ? s.slice(0, 97) + "..." : s);
-
 const POLL_MS = 30_000;
 // gh calls cost rate limit, and PR changes are rarely urgent.
 const GH_POLL_MS = 5 * 60_000;
@@ -243,13 +312,6 @@ export function prPatches(tasks: Task[], prs: TrackedPr[], seen: Record<string, 
   });
 }
 
-export async function watch(repo: Repo, base: string, term: Terminal): Promise<number> {
-  process.on("SIGTERM", () => (release(repo), process.exit(143)));
-  process.on("SIGINT", () => (release(repo), process.exit(130)));
-  console.log(await watchFor(repo, base, term, { notice: (notice) => console.log(notice) }));
-  return 0;
-}
-
 export type WaitForChange = (paths: string[], ms: number, signal?: AbortSignal) => Promise<void>;
 export type Watching = { signal?: AbortSignal; notice?: (notice: string) => void; wait?: WaitForChange };
 
@@ -267,11 +329,12 @@ export async function watchFor(repo: Repo, base: string, term: Terminal, { signa
     events: (id) => readEvents(repo, id),
     mainSha: () => run(["git", "-C", repo.root, "rev-parse", baseRef(repo, base)]).stdout.trim() || undefined,
     alive: (task) => (task.tab ? term.alive(task.tab) : true),
-    lastActivity: (task) => lastActivity(repo, task),
+    lastActivity: (task) => transcripts(repo, task).lastReply(),
     questions: () => loadQuestions(repo),
-    limit: (task) => workerLimit(repo, task),
+    limit: (task) => transcripts(repo, task).limit(),
     automerge: () => automergeOn(repo),
     approved: (task) => approved(repo, task),
+    spend: (tasks) => ({ costs: tasks.map((t) => taskCost(repo, t)), plan: planSpend(repo, loadTasks(repo)), budget: budgetOf(repo) }),
   };
   const stallMs = (loadConfig(repo).stallMinutes ?? STALL_MINUTES) * 60_000;
   const waiting = (id: string) => {
@@ -281,6 +344,17 @@ export async function watchFor(repo: Repo, base: string, term: Terminal, { signa
   };
   let lastGh = 0;
   let method: MergeMethod | undefined;
+  const effects: Effects = {
+    pause: (task, note) => pauseForLimit(repo, task, term, note),
+    resume: (task) => void resume(repo, task.id, term, task.tab!.session, { prompt: resumePrompt(repo, task.id), note: "the usage limit reset" }),
+    nudge: (task, text) => {
+      sendToTask(repo, task, text, term);
+      logRun(repo, task.id, "nudged", `no reply for ${stallMs / 60_000}m`);
+    },
+    restart: (task) => void restartWorker(repo, task, term, task.tab!.session, { note: `no reply for ${(2 * stallMs) / 60_000}m` }),
+    merge: (pr) => mergePr(repo.root, pr, (method ??= repoMergeMethod(repo.root))),
+    stop: (task, note) => stopWorker(repo, task, term, "budget", note),
+  };
   const watched = [join(repo.foreman, "tasks"), join(repo.root, ".git", "refs"), join(repo.root, ".git", "packed-refs")].filter(existsSync);
   const hasOrigin = run(["git", "-C", repo.root, "remote", "get-url", "origin"]).code === 0;
 
@@ -309,60 +383,8 @@ export async function watchFor(repo: Repo, base: string, term: Terminal, { signa
       for (const [id, patch] of prPatches(tasks, prs, cursor.prs ?? {})) updateTask(repo, id, patch);
       result.reasons.unshift(...untidy);
       saveLimit(repo, cursor.limit);
-      for (const id of result.pause) {
-        try {
-          pauseForLimit(repo, tasks.find((t) => t.id === id)!, term);
-          logRun(repo, id, "paused", `usage limit, resets ${clockAt(cursor.limit!.resetsAt, Date.now())}`);
-        } catch {}
-      }
-      for (const id of result.resume) {
-        const task = tasks.find((t) => t.id === id)!;
-        try {
-          resume(repo, id, term, task.tab!.session, undefined, resumePrompt(repo, id));
-          logRun(repo, id, "resumed", "the usage limit reset");
-        } catch (err) {
-          result.reasons.push(`not-resumed ${id}: ${err instanceof Error ? err.message : err}`);
-        }
-      }
-      for (const { id, text } of result.nudge) {
-        try {
-          sendToTask(repo, tasks.find((t) => t.id === id)!, text, term);
-          logRun(repo, id, "nudged", `no reply for ${stallMs / 60_000}m`);
-        } catch {}
-      }
-      for (const id of result.restart) {
-        const task = tasks.find((t) => t.id === id)!;
-        try {
-          restartWorker(repo, task, term, task.tab!.session);
-          logRun(repo, id, "restarted", `no reply for ${(2 * stallMs) / 60_000}m`);
-        } catch (err) {
-          result.reasons.push(`stuck ${id}: restarting its hung worker failed: ${err instanceof Error ? err.message : err}`);
-        }
-      }
-      for (const pr of result.merge) {
-        const failed = mergePr(repo.root, pr, (method ??= repoMergeMethod(repo.root)));
-        // The next pass polls GitHub straight away, so the usual merged line wakes the orchestrator.
-        if (!failed) lastGh = 0;
-        else {
-          result.reasons.push(`not-merged ${pr.id} #${pr.number}: ${clip(failed)}`);
-          cursor.unmergeable = { ...cursor.unmergeable, [`${pr.number}`]: pr.sha };
-        }
-      }
-      {
-        const budget = budgetOf(repo);
-        const costs = tasks.map((t) => taskCost(repo, t));
-        const over = overBudget(costs, planSpend(repo, loadTasks(repo)), budget, cursor.budget ?? {});
-        result.reasons.push(...over.reasons);
-        cursor.budget = over.alerted;
-        for (const id of over.stop) {
-          const task = tasks.find((t) => t.id === id)!;
-          if (!stopWorker(repo, task, term)) continue;
-          result.reasons.push(`stopped ${id}`);
-          const spent = costs.find((c) => c.id === id)!.total;
-          const limit = taskLimit(budget, id);
-          logRun(repo, id, "stopped", limit !== undefined && spent > limit ? `over budget, ${usd(spent)} of ${usd(limit)}` : "the plan is over budget");
-        }
-      }
+      // The next pass polls GitHub straight away, so the usual merged line wakes the orchestrator.
+      if (applyPass(result, tasks, effects, Date.now())) lastGh = 0;
       if (cursor.limit) cursor.held = [...(cursor.held ?? []), ...result.reasons.splice(0)];
       writeFileSync(cursorFile, JSON.stringify(cursor));
       if (result.notice) notice?.(result.notice);

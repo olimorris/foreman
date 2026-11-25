@@ -1,9 +1,7 @@
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, rmSync, statSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { jsonlFiles, loadSessions, sessionsFile, transcriptDir } from "./cost.ts";
 import type { Repo } from "./paths.ts";
-import type { Task } from "./state.ts";
-import { writeJson } from "./state.ts";
+import { writeJson } from "./store.ts";
 
 // The whole account shares one usage limit, so one wait covers every worker and reviewer.
 export type UsageLimit = {
@@ -94,55 +92,6 @@ export function limitHit(text: string, at: number): LimitHit | undefined {
   if (!isLimitText(text)) return undefined;
   const resetsAt = resetTime(text, at);
   return resetsAt !== undefined && resetsAt > at ? { at, resetsAt, guessed: false } : { at, resetsAt: at + RETRY_MS, guessed: true };
-}
-
-type Line = { type?: string; timestamp?: string; isApiErrorMessage?: boolean; error?: string; message?: { content?: { type?: string; text?: string }[] | string } };
-
-// Claude Code writes an API error as a synthetic assistant line, so the worker is at its limit only while that line is its last reply.
-export function transcriptLimit(lines: string[]): LimitHit | undefined {
-  for (const raw of [...lines].reverse()) {
-    if (!raw.includes('"type":"assistant"')) continue;
-    let line: Line;
-    try {
-      line = JSON.parse(raw);
-    } catch {
-      continue;
-    }
-    if (line.type !== "assistant") continue;
-    if (!line.isApiErrorMessage) return undefined;
-    const content = line.message?.content;
-    const text = typeof content === "string" ? content : (content ?? []).map((b) => b.text ?? "").join(" ");
-    const at = Date.parse(line.timestamp ?? "");
-    if (Number.isNaN(at) || (line.error && line.error !== "rate_limit" && line.error !== "billing_error")) return undefined;
-    return limitHit(text, at);
-  }
-  return undefined;
-}
-
-const TAIL_BYTES = 256 * 1024;
-
-export function tailLines(file: string, bytes = TAIL_BYTES): string[] {
-  const size = statSync(file).size;
-  const fd = openSync(file, "r");
-  const buf = Buffer.alloc(Math.min(size, bytes));
-  try {
-    readSync(fd, buf, 0, buf.length, size - buf.length);
-  } finally {
-    closeSync(fd);
-  }
-  // The first line of a tail usually starts mid-line.
-  return buf.toString("utf8").split("\n").slice(size > buf.length ? 1 : 0);
-}
-
-export function latestTranscript(repo: Repo, task: Task): string | undefined {
-  const sessions = loadSessions(sessionsFile(repo, task.id));
-  const files = jsonlFiles(transcriptDir(task.worktree)).filter((f) => sessions.some((s) => f.includes(s)));
-  return files.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
-}
-
-export function workerLimit(repo: Repo, task: Task): LimitHit | undefined {
-  const file = latestTranscript(repo, task);
-  return file && existsSync(file) ? transcriptLimit(tailLines(file, 64 * 1024)) : undefined;
 }
 
 // claude -p doesn't wait for the reset: it exits with the limit message as its result.

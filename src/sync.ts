@@ -2,9 +2,9 @@ import { run } from "./exec.ts";
 import type { Repo } from "./paths.ts";
 import type { Terminal } from "./terminal.ts";
 import { sendToTask } from "./send.ts";
-import { baseRef } from "./snapshot.ts";
-import { inFlight, loadTasks, updateTask, type Task } from "./state.ts";
-import { logRun } from "./events.ts";
+import { baseRef } from "./base.ts";
+import { loadTasks, updateTask, type Task } from "./state.ts";
+import { isFinished, isMerged as markedMerged, transition } from "./lifecycle.ts";
 
 export type SyncProbes = {
   fetch(base: string): void;
@@ -59,10 +59,9 @@ export function sync(repo: Repo, base: string, term: Terminal, probes: SyncProbe
   const ref = baseRef(repo, base);
   const head = run(["git", "-C", repo.root, "rev-parse", ref]).stdout.trim();
   const result: SyncResult = { head, merged: [], mergedEarly: [], asked: [], failed: [], retargeted: [] };
-  const open = inFlight(loadTasks(repo)).filter((t) => !t.mergedAt);
+  const open = loadTasks(repo).filter((t) => !isFinished(t));
   const markMerged = (task: Task) => {
-    updateTask(repo, task.id, { mergedAt: new Date().toISOString(), status: "merged" });
-    logRun(repo, task.id, "merged", task.pr ? `#${task.pr}` : undefined);
+    transition(repo, task.id, { type: "merged" });
     result.merged.push(task.id);
   };
 
@@ -76,8 +75,8 @@ export function sync(repo: Repo, base: string, term: Terminal, probes: SyncProbe
       result.mergedEarly.push(task.id);
     } else if (isMerged(repo, task, ref, state)) markMerged(task);
   }
-  for (const task of loadTasks(repo).filter((t) => t.mergedInto && !t.mergedAt && t.status !== "torn-down")) {
-    if (loadTasks(repo).some((t) => t.branch === task.mergedInto && t.mergedAt)) markMerged(task);
+  for (const task of loadTasks(repo).filter((t) => t.mergedInto && !isFinished(t))) {
+    if (loadTasks(repo).some((t) => t.branch === task.mergedInto && markedMerged(t))) markMerged(task);
   }
 
   const ask = (task: Task, text: string, patch: Partial<Task>) => {
@@ -101,7 +100,7 @@ export function sync(repo: Repo, base: string, term: Terminal, probes: SyncProbe
   for (const task of open) {
     if (result.merged.includes(task.id) || result.mergedEarly.includes(task.id) || task.mergedInto || task.status === "exited") continue;
     const parent = tasks.find((t) => t.id === task.stackedOn);
-    if (parent?.mergedAt) {
+    if (parent && markedMerged(parent)) {
       if (!moveOff(repo, base, ref, head, task, parent, ask, retarget)) continue;
     } else if (parent && parent.status !== "torn-down") {
       follow(repo, task, parent, ask);

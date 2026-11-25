@@ -9,7 +9,7 @@ import { findTask, loadTasks, updateTask } from "../src/state.ts";
 import { gather, openPrs, renderSummary } from "../src/summary.ts";
 import { loadPlan } from "../src/plan.ts";
 import { mkdirSync } from "node:fs";
-import { failureHint, outputPath, runTests, staleness, together, togetherDir, togetherLine, type Together } from "../src/together.ts";
+import { failureHint, outputPath, staleness, together, togetherDir, togetherLine, type Together } from "../src/together.ts";
 import { fakeTerminal, tempRepo } from "./helpers.ts";
 
 process.env.CLAUDE_CONFIG_DIR = mkdtempSync(join(tmpdir(), "foreman-claude-"));
@@ -78,16 +78,6 @@ test("fewer than two open PRs does nothing", async () => {
   updateTask(repo, "T1", { status: "pr-open", pr: 1 });
   expect((await together(repo, "main", () => openPrs(repo))).line).toBe("together: only #1 is open, so there's nothing to test together");
   expect(existsSync(join(repo.foreman, "together.json"))).toBe(false);
-});
-
-test("a test run past its limit is stopped along with everything it started", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "foreman-run-"));
-  const marker = `foreman-hang-${Date.now()}`;
-  const started = Date.now();
-  const r = await runTests(`sh -c 'sleep 30; echo ${marker}' & sleep 30`, dir, 0.005);
-  expect(r.status).toBe("timeout");
-  expect(Date.now() - started).toBeLessThan(5_000);
-  expect(run(["pgrep", "-f", marker]).stdout.trim()).toBe("");
 });
 
 test("the failing test's name comes from each runner's own output", () => {

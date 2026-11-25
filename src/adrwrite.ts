@@ -7,7 +7,8 @@ import { must, run } from "./exec.ts";
 import { loadDecisions, updateDecision, type Decision } from "./ledger.ts";
 import { worktreeDir, type Repo } from "./paths.ts";
 import { adrLayout, loadSkills } from "./skills.ts";
-import { baseRef, snapshot } from "./snapshot.ts";
+import { baseRef } from "./base.ts";
+import { snapshot } from "./snapshot.ts";
 
 export type PlannedFile = { file: string; content: string; from?: string };
 export type Recorded = Record<string, { number: number; file: string }>;
@@ -80,7 +81,7 @@ export function writeAdrs(repo: Repo, opts: WriteOptions): AdrBatch {
   if (opts.dryRun) {
     const snap = snapshot(repo, ref, configured ? [configured.dir] : ["docs", "doc", "adr", "decisions", ".adr-dir"]);
     const chosen = chooseConvention(snap, configured, layout);
-    if (!chosen) throw new Error("this repo has no ADR folder. Run foreman adr init first");
+    if (!chosen) throw new Error("this repo has no ADR folder. Call adr with action init first");
     return { branch, ...planAdrs(snap, chosen.conv, decisions, opts.reserved ?? numbersInOpenPrs(repo.root, chosen.conv), chosen.readme) };
   }
 
@@ -88,7 +89,7 @@ export function writeAdrs(repo: Repo, opts: WriteOptions): AdrBatch {
   must(["git", "-C", repo.root, "worktree", "add", "-q", "-b", branch, wt, ref]);
   try {
     const chosen = chooseConvention(wt, configured, layout);
-    if (!chosen) throw new Error("this repo has no ADR folder. Run foreman adr init first");
+    if (!chosen) throw new Error("this repo has no ADR folder. Call adr with action init first");
     const reserved = opts.reserved ?? (opts.push ? numbersInOpenPrs(repo.root, chosen.conv) : []);
     const { files, recorded } = planAdrs(wt, chosen.conv, decisions, reserved, chosen.readme);
     for (const f of files) {

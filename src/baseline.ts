@@ -1,17 +1,16 @@
-import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { must, run } from "./exec.ts";
 import { loadConfig, saveConfig } from "./config.ts";
 import { addNote, newNoteMessage, shareNote } from "./notes.ts";
-import type { Repo } from "./paths.ts";
-import { baseRef } from "./snapshot.ts";
-import { ensureForeman } from "./spawn.ts";
+import { ensureForeman, type Repo } from "./paths.ts";
+import { baseRef } from "./base.ts";
 import type { Terminal } from "./terminal.ts";
-import { writeJson } from "./state.ts";
+import { writeJson } from "./store.ts";
 import { pidAlive } from "./procs.ts";
 import { readPid } from "./watch.ts";
+import { killGroup, runTests, TEST_MINUTES } from "./testrun.ts";
 
-export const TEST_MINUTES = 15;
 export const BASELINE_RUNS = 2;
 const TAIL_LINES = 40;
 const MAX_NAMES = 10;
@@ -77,21 +76,6 @@ export function failureNotes(base: string, command: string, runs: TestRun[], dir
   ];
 }
 
-export async function runTests(command: string, cwd: string, ms: number, log: string, onStart?: (pid: number) => void): Promise<{ code: number | null; signal?: string; timedOut: boolean; output: string }> {
-  const fd = openSync(log, "w");
-  // Its own process group lets Foreman kill the builds and simulators a hung test run started, not just the shell that started them.
-  const proc = Bun.spawn(["sh", "-c", command], { cwd, detached: true, stdin: "ignore", stdout: fd, stderr: fd });
-  closeSync(fd);
-  onStart?.(proc.pid);
-  let timer: Timer | undefined;
-  const timedOut = await Promise.race([proc.exited.then(() => false), new Promise<boolean>((r) => (timer = setTimeout(() => r(true), ms)))]);
-  clearTimeout(timer);
-  killGroup(proc.pid);
-  await proc.exited;
-  const signal = timedOut || proc.signalCode == null ? undefined : String(proc.signalCode);
-  return { code: timedOut ? null : proc.exitCode, ...(signal ? { signal } : {}), timedOut, output: readFileSync(log, "utf8") };
-}
-
 const SIGNALS = { SIGHUP: 129, SIGINT: 130, SIGTERM: 143 } as const;
 
 export async function baseline(repo: Repo, opts: BaselineOptions): Promise<{ result: BaselineResult; line: string }> {
@@ -112,9 +96,6 @@ export async function baseline(repo: Repo, opts: BaselineOptions): Promise<{ res
   // Closing the orchestrator or stopping its background task signals this process, and without this the hung test it started would run on for hours.
   const onSignal = (signal: keyof typeof SIGNALS) => (cleanUp(), process.exit(SIGNALS[signal]));
   for (const s of Object.keys(SIGNALS) as (keyof typeof SIGNALS)[]) process.on(s, onSignal);
-  // Ending the session or cancelling the task would otherwise leave the test run going until its time limit.
-  const onAbort = () => group && killGroup(group);
-  opts.signal?.addEventListener("abort", onAbort, { once: true });
   const stopped = () => {
     if (opts.signal?.aborted) throw new Error("baseline: stopped before it finished");
   };
@@ -138,7 +119,7 @@ export async function baseline(repo: Repo, opts: BaselineOptions): Promise<{ res
     for (let i = 1; i <= opts.runs; i++) {
       stopped();
       const log = join(dir, `run-${i}.log`);
-      const r = await runTests(opts.command, worktree, opts.minutes * 60_000, log, (pid) => (group = pid));
+      const r = await runTests(opts.command, worktree, { minutes: opts.minutes, log, signal: opts.signal, onStart: (pid) => (group = pid) });
       group = undefined;
       // A run killed because the task was cancelled says nothing about the base branch.
       stopped();
@@ -158,7 +139,6 @@ export async function baseline(repo: Repo, opts: BaselineOptions): Promise<{ res
   } finally {
     cleanUp();
     for (const s of Object.keys(SIGNALS) as (keyof typeof SIGNALS)[]) process.off(s, onSignal);
-    opts.signal?.removeEventListener("abort", onAbort);
   }
 
   return { result, line: baselineLine(result, [...told]) };
@@ -176,12 +156,6 @@ export async function runBaseline(repo: Repo, req: BaselineRequest): Promise<str
   if (!config.test) throw new Error("there's no test command in .foreman/config.json. Call baseline again with test set to the command that runs the repo's tests");
   const r = await baseline(repo, { base: req.base, command: config.test, minutes: config.testMinutes ?? TEST_MINUTES, runs, term: req.term, signal: req.signal });
   return r.line;
-}
-
-function killGroup(pid: number): void {
-  try {
-    process.kill(-pid, "SIGKILL");
-  } catch {}
 }
 
 function removeWorktree(repo: Repo, worktree: string): void {

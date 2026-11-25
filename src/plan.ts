@@ -1,11 +1,13 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfig } from "./config.ts";
 import { overlaps } from "./decisions.ts";
 import type { Repo } from "./paths.ts";
-import { latestVerdict } from "./review.ts";
-import { checkBrief, checkModel } from "./spawn.ts";
-import { loadTasks, writeJson, type Task } from "./state.ts";
+import { latest } from "./rounds.ts";
+import { holdsSlot, isFinished, isMerged } from "./lifecycle.ts";
+import { checkBrief, checkModel, CONVENTIONAL } from "./brief.ts";
+import { loadTasks, type Task } from "./state.ts";
+import { fileStore } from "./store.ts";
 import { usageError } from "./help.ts";
 
 export type PlanTask = { id: string; title: string; owns: string[]; deps: string[]; contract: boolean; model?: string; brief: string };
@@ -43,8 +45,6 @@ export function parsePlan(md: string): Plan {
   });
   return { title, ...(deadline ? { deadline } : {}), ...(calls.length ? { calls } : {}), ...(cut.length ? { cut } : {}), tasks };
 }
-
-export const CONVENTIONAL = /^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([\w./-]+\))?!?: \S/;
 
 export function validatePlan(plan: Plan): string[] {
   const errors: string[] = [];
@@ -105,8 +105,6 @@ export function sharedPaths(plan: Plan): string[] {
   return notes;
 }
 
-export const merged = (t: Task) => !!t.mergedAt;
-export const active = (tasks: Task[]) => tasks.filter((t) => t.status !== "torn-down" && !merged(t));
 
 export type Waiting = { id: string; reason: string };
 export type Starting = PlanTask & { stackedOn?: string };
@@ -115,17 +113,17 @@ export type CanStackOn = (dep: Task) => boolean;
 // Nothing merges while the user sleeps, so a task whose last unmerged dependency is approved starts on that dependency's branch.
 export function stackable(repo: Repo): CanStackOn | undefined {
   if (loadConfig(repo).stackTasks === false) return undefined;
-  return (dep) => dep.status === "pr-open" && !dep.prClosed && !dep.mergedInto && latestVerdict(repo, dep)?.verdict === "approve";
+  return (dep) => dep.status === "pr-open" && !dep.prClosed && !dep.mergedInto && latest(repo, dep)?.verdict?.verdict === "approve";
 }
 
 export function readyTasks(plan: Plan, tasks: Task[], max: number, canStackOn?: CanStackOn): { start: Starting[]; waiting: Waiting[] } {
   const byId = new Map(tasks.map((t) => [t.id, t]));
-  const busy = active(tasks);
+  const busy = tasks.filter(holdsSlot);
   const start: Starting[] = [];
   const waiting: Waiting[] = [];
   for (const t of [...plan.tasks].sort(byPriority(plan))) {
     if (byId.has(t.id)) continue;
-    const blockers = t.deps.filter((d) => !byId.get(d) || !merged(byId.get(d)!));
+    const blockers = t.deps.filter((d) => !byId.get(d) || !isMerged(byId.get(d)!));
     // Only one level deep, because every rebase down a chain of unmerged branches can conflict.
     const parent = blockers.length === 1 && canStackOn ? byId.get(blockers[0]!) : undefined;
     const stackedOn = parent && !parent.stackedOn && canStackOn!(parent) ? parent.id : undefined;
@@ -164,13 +162,13 @@ export function workers(repo: Repo, args: string[]): string[] {
   }
   const n = Number(args[0]);
   if (args.length > 1 || !/^\d+$/.test(args[0]!) || n <= 0) throw usageError("workers");
-  const p = loadPlan(repo);
-  if (!p) throw new Error("no plan. This sets the limit for the current plan, and the orchestrator stores one with the plan tool");
   // Stored on the plan, not in config.json, so the next plan goes back to the default.
-  const plan = { ...p, maxWorkers: n };
-  writeJson(planPath(repo), plan);
+  const plan = updatePlan(repo, (p) => {
+    if (!p) throw new Error("no plan. This sets the limit for the current plan, and the orchestrator stores one with the plan tool");
+    return { ...p, maxWorkers: n };
+  });
   const tasks = loadTasks(repo);
-  const holding = active(tasks).length;
+  const holding = tasks.filter(holdsSlot).length;
   return [
     `${atOnce(n)} until this plan finishes`,
     ...(holding > n ? [`${holding} tasks already hold a slot. None of them stops, and new tasks wait until fewer than ${n} do`] : []),
@@ -180,23 +178,31 @@ export function workers(repo: Repo, args: string[]): string[] {
 
 export const planPath = (repo: Repo) => join(repo.foreman, "plan.json");
 
-export function loadPlan(repo: Repo): Plan | undefined {
-  return existsSync(planPath(repo)) ? JSON.parse(readFileSync(planPath(repo), "utf8")) : undefined;
+// plan.json holds the plan itself, so the store keeps it in a box that can start out empty.
+const planStore = (repo: Repo) => fileStore<{ plan?: Plan }>(planPath(repo), {
+  parse: (text) => ({ plan: JSON.parse(text) }),
+  format: ({ plan }) => JSON.stringify(plan, null, 2) + "\n",
+  empty: () => ({}),
+});
+
+export const loadPlan = (repo: Repo): Plan | undefined => planStore(repo).read().plan;
+
+// Replaces the stored plan with what fn makes of it, under the plan's lock. fn gets undefined when no plan is stored.
+export function updatePlan(repo: Repo, fn: (plan: Plan | undefined) => Plan): Plan {
+  return planStore(repo).update((box) => (box.plan = fn(box.plan)));
 }
 
 const runningPlan = (repo: Repo, stored: Plan): boolean => {
   const tasks = loadTasks(repo);
-  const done = (id: string) => tasks.some((t) => t.id === id && (t.status === "merged" || t.status === "torn-down"));
+  const done = (id: string) => tasks.some((t) => t.id === id && isFinished(t));
   return !stored.tasks.every((t) => done(t.id));
 };
 
 export function savePlan(repo: Repo, plan: Plan): void {
   mkdirSync(join(repo.foreman, "plan"), { recursive: true });
   for (const t of plan.tasks) writeFileSync(planBrief(repo, t.id), `# ${t.id}: ${t.title}\n\n${t.brief}`);
-  const before = loadPlan(repo);
   // Re-storing an edited plan mid-run would otherwise switch automerge off and leave approved PRs unmerged.
-  const keepAutomerge = plan.automerge === undefined && before?.automerge && runningPlan(repo, before);
-  writeJson(planPath(repo), keepAutomerge ? { ...plan, automerge: true } : plan);
+  updatePlan(repo, (before) => (plan.automerge === undefined && before?.automerge && runningPlan(repo, before) ? { ...plan, automerge: true } : plan));
 }
 
 export const planBrief = (repo: Repo, id: string) => join(repo.foreman, "plan", `${id}.md`);

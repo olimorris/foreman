@@ -1,12 +1,9 @@
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
-import { StringDecoder } from "node:string_decoder";
-import { loadConfig } from "./config.ts";
+import { loadConfig, saveConfig } from "./config.ts";
 import type { Repo } from "./paths.ts";
-import { loadPlan, planPath, type Plan } from "./plan.ts";
-import { roundDir } from "./review.ts";
-import { loadTasks, writeJson, type Task } from "./state.ts";
+import { loadPlan, updatePlan, type Plan } from "./plan.ts";
+import { rounds } from "./rounds.ts";
+import { transcripts, type Reply, type Usage } from "./transcripts.ts";
+import { loadTasks, type Task } from "./state.ts";
 
 // Dollars per million tokens at list price; other models go in config.json's "prices". Cache writes cost 1.25x input for 5 minutes and 2x for an hour.
 export type Price = { input: number; output: number; cacheRead: number };
@@ -15,11 +12,6 @@ export const PRICES: Record<string, Price> = {
   "claude-opus-5-5": { input: 4, output: 20, cacheRead: 0.2 },
   "claude-sonnet-5-5": { input: 2, output: 10, cacheRead: 0.1 },
   "claude-haiku-5-5": { input: 0.1, output: 0.5, cacheRead: 0.01 },
-};
-
-export type Usage = {
-  input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number;
-  cache_creation?: { ephemeral_5m_input_tokens?: number; ephemeral_1h_input_tokens?: number };
 };
 
 export function priceFor(model: string, overrides: Record<string, Price> = {}): Price | undefined {
@@ -35,46 +27,12 @@ export function usageCost(u: Usage, p: Price): number {
   return tokens / 1_000_000;
 }
 
-const projectsDir = () => join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"), "projects");
-export const transcriptDir = (cwd: string) => join(projectsDir(), cwd.replace(/[^A-Za-z0-9-]/g, "-"));
-
-export function jsonlFiles(dir: string): string[] {
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir).flatMap((f) => {
-    const path = join(dir, f);
-    return statSync(path).isDirectory() ? jsonlFiles(path) : f.endsWith(".jsonl") ? [path] : [];
-  });
-}
-
 export type Spend = { usd: number; unpriced: string[] };
 
-// Reviewers share the worker's folder and the user's own sessions share the repo's, so only recorded sessions count.
-export const sessionsFile = (repo: Repo, taskId?: string) => (taskId ? join(repo.foreman, "tasks", taskId, "sessions") : join(repo.foreman, "orchestrator-sessions"));
-
-export function recordSession(file: string, id: string): void {
-  if (loadSessions(file).includes(id)) return;
-  mkdirSync(dirname(file), { recursive: true });
-  appendFileSync(file, id + "\n");
-}
-
-export const loadSessions = (file: string) => (existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean) : []);
-
-// Claude Code writes one line per content block, each repeating the reply's usage, so replies are counted once by id.
-export function transcriptSpend(dir: string, sessions: string[], overrides: Record<string, Price> = {}, since?: number): Spend {
-  const replies = new Map<string, { model: string; usage: Usage }>();
-  for (const file of jsonlFiles(dir).filter((f) => sessions.some((s) => f.includes(s)))) {
-    for (const line of readFileSync(file, "utf8").split("\n")) {
-      if (!line.includes('"usage"')) continue;
-      try {
-        const entry = JSON.parse(line);
-        if (since !== undefined && !(Date.parse(entry.timestamp) >= since)) continue;
-        const m = entry.message;
-        if (m?.id && m.usage && m.model) replies.set(m.id, { model: m.model, usage: m.usage });
-      } catch {}
-    }
-  }
+// Unpriced models are named rather than counted as free, and Claude Code's own synthetic replies, like "<synthetic>", cost nothing.
+export function spendOf(replies: Reply[], overrides: Record<string, Price> = {}): Spend {
   const spend: Spend = { usd: 0, unpriced: [] };
-  for (const { model, usage } of replies.values()) {
+  for (const { model, usage } of replies) {
     const p = priceFor(model, overrides);
     if (p) spend.usd += usageCost(usage, p);
     else if (!model.startsWith("<") && !spend.unpriced.includes(model)) spend.unpriced.push(model);
@@ -82,93 +40,20 @@ export function transcriptSpend(dir: string, sessions: string[], overrides: Reco
   return spend;
 }
 
-// The reviewer writes reviewer.json once it finishes, so its time is when the round's spend landed.
 export function reviewSpend(repo: Repo, task: Task, since?: number): number {
-  let usd = 0;
-  for (let r = 1; r <= (task.reviews ?? 0); r++) {
-    try {
-      const file = join(roundDir(repo, task.id, r), "reviewer.json");
-      if (since !== undefined && statSync(file).mtimeMs < since) continue;
-      usd += JSON.parse(readFileSync(file, "utf8")).total_cost_usd ?? 0;
-    } catch {}
-  }
-  return usd;
+  return rounds(repo, task).filter((r) => since === undefined || (r.finishedAt ?? -Infinity) >= since).reduce((sum, r) => sum + r.costUsd, 0);
 }
 
 export type TaskCost = { id: string; worker: number; review: number; total: number; unpriced: string[] };
 
 export function taskCost(repo: Repo, task: Task, since?: number): TaskCost {
-  const worker = transcriptSpend(transcriptDir(task.worktree), loadSessions(sessionsFile(repo, task.id)), loadConfig(repo).prices, since);
+  const worker = spendOf(transcripts(repo, task).replies(since), loadConfig(repo).prices);
   const review = reviewSpend(repo, task, since);
   return { id: task.id, worker: worker.usd, review, total: worker.usd + review, unpriced: worker.unpriced };
 }
 
-function workerTranscripts(repo: Repo, task: Task): string[] {
-  const sessions = loadSessions(sessionsFile(repo, task.id));
-  return jsonlFiles(transcriptDir(task.worktree)).filter((f) => sessions.some((s) => f.includes(s)));
-}
-
-// Only the model's own replies count, since a nudge queued into an idle session also writes to its transcript.
-export function lastActivity(repo: Repo, task: Task): number | undefined {
-  const known = workerTranscripts(repo, task).map(lastReplyAt).filter((t): t is number => t !== undefined);
-  return known.length ? Math.max(...known) : undefined;
-}
-
-export const workerReplies = (repo: Repo, task: Task): number[] => workerTranscripts(repo, task).flatMap((f) => replyTimes(f));
-
-// Claude Code writes the line's own timestamp after its message, so the last one is the reply's even when a tool input carries its own.
-function replyAt(line: string): number | undefined {
-  if (!line.includes('"type":"assistant"')) return undefined;
-  const start = line.lastIndexOf('"timestamp":"');
-  if (start < 0) return undefined;
-  const at = Date.parse(line.slice(start + 13, line.indexOf('"', start + 13)));
-  return Number.isNaN(at) ? undefined : at;
-}
-
-// Read in chunks, because a transcript can run to hundreds of megabytes and only its reply timestamps are needed.
-export function replyTimes(file: string, chunk = 1 << 20): number[] {
-  const times: number[] = [];
-  const decoder = new StringDecoder("utf8");
-  const buf = Buffer.alloc(chunk);
-  const fd = openSync(file, "r");
-  let rest = "";
-  const take = (line: string) => {
-    const at = replyAt(line);
-    if (at !== undefined) times.push(at);
-  };
-  try {
-    for (let n; (n = readSync(fd, buf, 0, chunk, null)) > 0; ) {
-      const lines = (rest + decoder.write(buf.subarray(0, n))).split("\n");
-      rest = lines.pop()!;
-      lines.forEach(take);
-    }
-  } finally {
-    closeSync(fd);
-  }
-  take(rest + decoder.end());
-  return times;
-}
-
-const TAIL_BYTES = 512 * 1024;
-
-export function lastReplyAt(file: string): number | undefined {
-  const size = statSync(file).size;
-  const fd = openSync(file, "r");
-  const buf = Buffer.alloc(Math.min(size, TAIL_BYTES));
-  try {
-    readSync(fd, buf, 0, buf.length, size - buf.length);
-  } finally {
-    closeSync(fd);
-  }
-  for (const line of buf.toString("utf8").split("\n").reverse()) {
-    const at = replyAt(line);
-    if (at !== undefined) return at;
-  }
-  return undefined;
-}
-
 export function orchestratorCost(repo: Repo, since?: number): Spend {
-  return transcriptSpend(transcriptDir(repo.root), loadSessions(sessionsFile(repo)), loadConfig(repo).prices, since);
+  return spendOf(transcripts(repo).replies(since), loadConfig(repo).prices);
 }
 
 export const usd = (n: number) => `$${n.toFixed(2)}`;
@@ -179,6 +64,22 @@ export const DEFAULT_BUDGET: Budget = { perTask: 5, plan: 40 };
 export const budgetOf = (repo: Repo): Budget => ({ ...DEFAULT_BUDGET, ...loadConfig(repo).budget });
 
 export const taskLimit = (b: Budget | undefined, id: string) => b?.tasks?.[id] ?? b?.perTask;
+
+// No task and no plan sets the limit for every task.
+export type BudgetChange = { usd: number; task?: string; plan?: boolean };
+
+export function setBudget(repo: Repo, change: BudgetChange): Budget {
+  if (!Number.isFinite(change.usd) || change.usd <= 0) throw new Error("usd must be a number of dollars above 0");
+  const budget = { ...budgetOf(repo) };
+  if (change.plan) budget.plan = change.usd;
+  else if (change.task) budget.tasks = { ...budget.tasks, [change.task]: change.usd };
+  else budget.perTask = change.usd;
+  saveConfig(repo, { budget });
+  return budget;
+}
+
+export const budgetLine = (b: Budget) =>
+  `budget: ${b.perTask !== undefined ? `${usd(b.perTask)} per task` : "no per-task limit"}, ${b.plan !== undefined ? `${usd(b.plan)} for the plan` : "no plan limit"}${Object.entries(b.tasks ?? {}).map(([id, n]) => `, ${id} ${usd(n)}`).join("")}`;
 
 // Alerts fire once per limit, so a raised limit can alert again, and so can a plan that a reset brought back under its limit. Stop lists every task over its limit on every pass.
 export function overBudget(costs: TaskCost[], planTotal: number, budget: Budget | undefined, alerted: Record<string, number>): { reasons: string[]; alerted: Record<string, number>; stop: string[] } {
@@ -230,9 +131,10 @@ export const planSpend = (repo: Repo, tasks: Task[]): number => planSpending(rep
 
 // Stored on the plan, so the next plan starts its own count without one.
 export function resetBudget(repo: Repo, now = new Date()): string[] {
-  const plan = loadPlan(repo);
-  if (!plan) throw new Error("no plan. foreman budget reset starts the current plan's count again, and the orchestrator stores a plan with the plan tool");
-  writeJson(planPath(repo), { ...plan, budgetResetAt: now.toISOString() });
+  updatePlan(repo, (plan) => {
+    if (!plan) throw new Error("no plan. foreman budget reset starts the current plan's count again, and the orchestrator stores a plan with the plan tool");
+    return { ...plan, budgetResetAt: now.toISOString() };
+  });
   const budget = budgetOf(repo);
   const tasks = loadTasks(repo);
   const resumable = tasks.filter((t) => t.status === "over-budget" && !budgetLeft(repo, tasks, t.id).reason).map((t) => t.id);

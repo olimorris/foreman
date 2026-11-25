@@ -1,87 +1,25 @@
-import { existsSync, readFileSync } from "node:fs";
-import { basename, join, relative } from "node:path";
+import { readFileSync } from "node:fs";
+import { basename, join } from "node:path";
 import { loadConfig } from "./config.ts";
 import { budgetOf, orchestratorCost, planSpend, taskCost, usd } from "./cost.ts";
-import { activeLimit, latestTranscript, resetPhrase, tailLines, type UsageLimit } from "./limits.ts";
+import { activeLimit, resetPhrase, type UsageLimit } from "./limits.ts";
+import { transcripts, type Activity } from "./transcripts.ts";
 import { readEvents } from "./events.ts";
 import { loadDecisions } from "./ledger.ts";
 import { statusLabel } from "./overview.ts";
-import { plainTitle } from "./spawn.ts";
+import { plainTitle } from "./brief.ts";
 import type { Repo } from "./paths.ts";
 import { loadPlan, maxWorkers, readyTasks, type Waiting } from "./plan.ts";
-import { roundDir, type Verdict } from "./review.ts";
+import { latest, type Verdict } from "./rounds.ts";
 import { loadTasks, type Task } from "./state.ts";
+import { isFinished, isMerged, needsUser } from "./lifecycle.ts";
 import type { Tab, Terminal } from "./terminal.ts";
 import { pluginRoot } from "./paths.ts";
-import { writeJson } from "./state.ts";
+import { writeJson } from "./store.ts";
 import { STALL_MINUTES, watcherArmed } from "./watch.ts";
 import { blockParts, openBlocks, type PermissionBlock } from "./permissions.ts";
 import { permissionLabel } from "./status.ts";
-
-export type Activity = { what: string; since: number; idle: boolean };
-
-type Block = { type: string; id?: string; name?: string; input?: Record<string, unknown>; tool_use_id?: string };
-
-// Each content block is its own transcript line, so a tool call still waiting for its result is what the worker is doing now.
-export function readActivity(lines: string[], cwd: string): Activity | undefined {
-  const pending = new Map<string, Activity>();
-  let last: Activity | undefined;
-  for (const line of lines) {
-    if (!line.includes('"type":"assistant"') && !line.includes('"tool_result"')) continue;
-    let entry: { type?: string; timestamp?: string; message?: { content?: Block[] | string; stop_reason?: string } };
-    try {
-      entry = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    const at = Date.parse(entry.timestamp ?? "");
-    const blocks = Array.isArray(entry.message?.content) ? entry.message!.content : [];
-    if (Number.isNaN(at)) continue;
-    if (entry.type === "assistant") {
-      for (const b of blocks) if (b.type === "tool_use" && b.id) pending.set(b.id, { what: describeTool(b, cwd), since: at, idle: false });
-      last = entry.message?.stop_reason === "end_turn" ? { what: "waiting", since: at, idle: true } : { what: "thinking", since: at, idle: false };
-    } else if (entry.type === "user") {
-      for (const b of blocks) if (b.type === "tool_result" && b.tool_use_id) pending.delete(b.tool_use_id);
-      last = { what: "thinking", since: at, idle: false };
-    }
-  }
-  return [...pending.values()].at(-1) ?? last;
-}
-
-function describeTool(b: Block, cwd: string): string {
-  const input = b.input ?? {};
-  const path = (p: unknown) => (typeof p === "string" ? (p.startsWith(cwd) ? relative(cwd, p) : basename(p)) : "");
-  switch (b.name) {
-    case "Bash": {
-      const first = String(input.command ?? "").split("\n")[0]!;
-      // Workers often start a command by changing into their own worktree, which says nothing.
-      return `$ ${first.replace(/^cd\s+\S+\s*(;|&&)\s*/, "")}`;
-    }
-    case "Edit":
-    case "MultiEdit":
-    case "Write":
-      return `editing ${path(input.file_path)}`;
-    case "Read":
-      return `reading ${path(input.file_path)}`;
-    case "Grep":
-    case "Glob":
-      return `searching for ${input.pattern ?? "files"}`;
-    case "Agent":
-    case "Task":
-      return "running a subagent";
-    case "TodoWrite":
-      return "planning";
-    default:
-      return `using ${b.name}`;
-  }
-}
-
-const clip = (s: string, width: number) => (s.length > width ? s.slice(0, width - 3).trimEnd() + "..." : s);
-
-export function workerActivity(repo: Repo, task: Task): Activity | undefined {
-  const latest = latestTranscript(repo, task);
-  return latest ? readActivity(tailLines(latest), task.worktree) : undefined;
-}
+import { clip } from "./text.ts";
 
 export type PaneTask = { task: Task; title: string; spent: number; risk?: Verdict["risk"]; note?: string; activity?: Activity; closed?: boolean };
 export type OpenDecision = { id: string; title: string; by: string };
@@ -106,8 +44,6 @@ export function duration(ms: number): string {
 
 const clock = (at: number) => new Date(at).toTimeString().slice(0, 5);
 
-const NEEDS_YOU: Task["status"][] = ["needs-decision", "blocked", "exited", "over-budget"];
-const merged = (t: Task) => !!t.mergedAt || t.status === "merged";
 
 // Columns are fitted to the pane's width: a line is cut before it's coloured, so colour codes never count towards the width.
 export function renderPane(p: PaneInput, width: number, colour = false): string[] {
@@ -123,13 +59,14 @@ export function renderPane(p: PaneInput, width: number, colour = false): string[
   if (p.plan) out.push(c("bold", fit(p.plan + (p.approved ? "" : "  (not approved yet)"))));
   if (p.deadline) out.push(c("dim", fit(`Due ${p.deadline}`)));
   const spend = p.limit !== undefined ? `${usd(p.spent)} of ${usd(p.limit)} spent` : `${usd(p.spent)} spent`;
-  const active = p.tasks.filter((t) => !merged(t.task) && t.task.status !== "torn-down");
+  const active = p.tasks.filter((t) => !isFinished(t.task));
   const watcher = p.armed ? "watcher on" : "watcher off";
   const facts = fit(`${spend} · ${active.length} of ${p.maxWorkers} slots · ${watcher}`);
   out.push(facts.endsWith(watcher) ? c("dim", facts.slice(0, -watcher.length)) + c(p.armed ? "green" : "red", watcher) : c("dim", facts));
   if (p.usageLimit) out.push(c("yellow", fit(`Usage limit reached · work resumes at ${resetPhrase(p.usageLimit, p.now)}`)));
   const blocksOf = (t: PaneTask) => (t.task.status === "pr-open" ? [] : (p.blocks ?? []).filter((b) => b.task === t.task.id));
-  const needsYou = (t: PaneTask) => NEEDS_YOU.includes(t.task.status) || !!t.closed || blocksOf(t).length > 0;
+  // An open PR has its own section below, so it isn't listed twice.
+  const needsYou = (t: PaneTask) => (needsUser(t.task) && t.task.status !== "pr-open") || !!t.closed || blocksOf(t).length > 0;
   const own = (p.blocks ?? []).filter((b) => b.role === "orchestrator");
   const section = (title: string, rows: string[]) => rows.length && out.push("", c("heading", title.toUpperCase()), ...rows);
 
@@ -183,7 +120,7 @@ export function renderPane(p: PaneInput, width: number, colour = false): string[
 
   section("Waiting", p.waiting.map((w) => ` ${c("bold", w.id.padEnd(4))}${c("dim", fit(w.reason, width - 5))}`));
 
-  const done = p.tasks.filter((t) => merged(t.task));
+  const done = p.tasks.filter((t) => isMerged(t.task));
   if (done.length) out.push("", c("dim", fit(`Merged: ${done.map((t) => t.task.id + (t.task.pr ? ` #${t.task.pr}` : "")).join(", ")}`)));
 
   if (p.recent.length) section("Recent", p.recent.map((r) => ` ${c("dim", clock(r.at))}  ${fit(r.text, width - 8)}`));
@@ -192,15 +129,6 @@ export function renderPane(p: PaneInput, width: number, colour = false): string[
 }
 
 const RECENT = 6;
-
-function verdictOf(repo: Repo, task: Task): Verdict | undefined {
-  const file = join(roundDir(repo, task.id, task.reviews ?? 0), "verdict.json");
-  try {
-    return task.reviews && existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : undefined;
-  } catch {
-    return undefined;
-  }
-}
 
 const EVENT_WORDS: Record<string, string> = { done: "finished", blocked: "blocked", "needs-decision": "needs a decision", rebased: "rebased", exited: "worker closed", reviewed: "reviewed" };
 
@@ -220,9 +148,9 @@ export function gatherPane(repo: Repo, now = Date.now(), costs: Map<string, numb
       task,
       title: plainTitle(task.title ?? plan?.tasks.find((t) => t.id === task.id)?.title ?? ""),
       spent: costs.get(task.id) ?? 0,
-      risk: verdictOf(repo, task)?.risk,
+      risk: latest(repo, task)?.verdict?.risk,
       note: lastNote,
-      activity: task.status === "running" ? workerActivity(repo, task) : undefined,
+      activity: task.status === "running" ? transcripts(repo, task).activity() : undefined,
       closed: task.status === "running" && closed.has(task.id),
     };
   });

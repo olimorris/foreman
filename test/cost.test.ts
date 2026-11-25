@@ -1,15 +1,17 @@
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { saveConfig } from "../src/config.ts";
-import { budgetLeft, lastReplyAt, overBudget, planSpend, priceFor, recordSession, resetBudget, sessionsFile, taskCost, transcriptDir, transcriptSpend, usageCost } from "../src/cost.ts";
+import { budgetLeft, budgetLine, overBudget, planSpend, priceFor, resetBudget, setBudget, taskCost, usageCost } from "../src/cost.ts";
+import { loadConfig } from "../src/config.ts";
+import { recordSession, sessionsFile, transcriptDir } from "../src/transcripts.ts";
 import { budgetOverview } from "../src/overview.ts";
 import { loadPlan, planPath, type Plan } from "../src/plan.ts";
 import type { Repo } from "../src/paths.ts";
-import { roundDir } from "../src/review.ts";
-import { loadTasks, writeJson, type Task } from "../src/state.ts";
-import { tempRepo } from "./helpers.ts";
+import { loadTasks, type Task } from "../src/state.ts";
+import { writeJson } from "../src/store.ts";
+import { tempRepo, writeRound } from "./helpers.ts";
 
 process.env.CLAUDE_CONFIG_DIR = mkdtempSync(join(tmpdir(), "foreman-claude-"));
 
@@ -22,25 +24,6 @@ test("priceFor prefers the longest matching id and takes overrides", () => {
   expect(priceFor("claude-opus-5-5")!.input).toBe(4);
   expect(priceFor("claude-opus-4-8")).toBeUndefined();
   expect(priceFor("claude-opus-4-8", { "claude-opus-4-8": { input: 5, output: 25, cacheRead: 0.5 } })!.input).toBe(5);
-});
-
-test("transcriptSpend counts each reply once and only recorded sessions", () => {
-  const dir = mkdtempSync(join(tmpdir(), "foreman-cost-"));
-  const reply = (id: string, model = "claude-opus-5-5") => JSON.stringify({ message: { id, model, usage: { input_tokens: 1_000_000 } } });
-  writeFileSync(join(dir, "worker-1.jsonl"), [reply("a"), reply("a"), reply("b"), reply("c", "claude-mystery-1")].join("\n"));
-  writeFileSync(join(dir, "reviewer-9.jsonl"), reply("z"));
-  mkdirSync(join(dir, "worker-1", "subagents"), { recursive: true });
-  writeFileSync(join(dir, "worker-1", "subagents", "agent.jsonl"), reply("s"));
-  const spend = transcriptSpend(dir, ["worker-1"]);
-  expect(spend.usd).toBeCloseTo(12, 6);
-  expect(spend.unpriced).toEqual(["claude-mystery-1"]);
-});
-
-test("lastReplyAt skips messages queued into an idle session", () => {
-  const file = join(mkdtempSync(join(tmpdir(), "foreman-idle-")), "s.jsonl");
-  const line = (type: string, timestamp: string) => JSON.stringify({ type, timestamp });
-  writeFileSync(file, [line("assistant", "2026-11-25T00:24:24Z"), line("system", "2026-11-25T01:19:26Z"), line("queue-operation", "2026-11-25T07:17:49Z")].join("\n") + "\n");
-  expect(lastReplyAt(file)).toBe(Date.parse("2026-11-25T00:24:24Z"));
 });
 
 test("overBudget alerts once per limit, and again after the limit is raised", () => {
@@ -107,10 +90,7 @@ test("foreman budget reset puts the plan's count to $0, and the budget, the over
   expect(before.reasons).toEqual(["over-budget plan: $12.00 of $10.00"]);
   const t2 = loadTasks(repo)[1]!;
   writeJson(join(repo.foreman, "tasks.json"), { tasks: loadTasks(repo).map((t) => (t.id === "T2" ? { ...t, status: "over-budget", pausedFrom: "running", reviews: 1 } : t)) });
-  mkdirSync(roundDir(repo, "T2", 1), { recursive: true });
-  const review = join(roundDir(repo, "T2", 1), "reviewer.json");
-  writeFileSync(review, JSON.stringify({ total_cost_usd: 0.5 }));
-  utimesSync(review, new Date("2026-11-20T11:30:00Z"), new Date("2026-11-20T11:30:00Z"));
+  writeRound(repo, "T2", 1, { reviewer: { total_cost_usd: 0.5 }, at: new Date("2026-11-20T11:30:00Z") });
   const planBefore = loadPlan(repo)!;
 
   expect(resetBudget(repo, new Date("2026-11-20T12:00:00Z"))).toEqual([
@@ -141,4 +121,15 @@ test("foreman budget reset puts the plan's count to $0, and the budget, the over
 
 test("foreman budget reset needs a plan", () => {
   expect(() => resetBudget(tempRepo())).toThrow("no plan.");
+});
+
+test("setBudget sets each kind of limit, and budgetLine says what they all are", () => {
+  const repo = tempRepo();
+  setBudget(repo, { usd: 6 });
+  setBudget(repo, { usd: 8, task: "T1" });
+  const budget = setBudget(repo, { usd: 50, plan: true });
+  expect(loadConfig(repo).budget).toEqual({ perTask: 6, plan: 50, tasks: { T1: 8 } });
+  expect(budgetLine(budget)).toBe("budget: $6.00 per task, $50.00 for the plan, T1 $8.00");
+  expect(budgetLine({})).toBe("budget: no per-task limit, no plan limit");
+  expect(() => setBudget(repo, { usd: 0 })).toThrow("usd must be a number of dollars above 0");
 });
