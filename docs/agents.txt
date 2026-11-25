@@ -247,6 +247,6 @@ mkdir -p .foreman/skills/pull-request && curl -fsSL https://raw.githubuserconten
 - A task stopped over budget: `foreman budget <task> <usd>`, then `foreman resume <task>`.
 - The orchestrator sits idle with tasks in flight: tell it to call `watch`.
 - The orchestrator's turn hangs on `watch`: unset `CLAUDE_CODE_DISABLE_MCP_TASK_BACKGROUND`, `CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS`, `MCP_SDK_GENERATION` and `MCP_PROTOCOL_NEGOTIATION`. Each one stops MCP tasks running in the background.
-- A worker seems stuck:`foreman timeline <task>` shows when it went quiet. Foreman restarts hung workers itself, and `foreman restart <task>` does it by hand.
+- A worker seems stuck: `foreman timeline <task>` shows when it went quiet. Foreman restarts hung workers itself, and `foreman restart <task>` does it by hand.
 - Tests hang or fail on the base branch: `foreman note "<what happens and how to avoid it>"` tells every worker. `foreman baseline` checks the base branch again.
 - The `together` check says tests ran too long: raise `testMinutes`.
