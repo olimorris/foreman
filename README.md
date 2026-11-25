@@ -103,9 +103,9 @@ foreman status
 foreman budget
 ```
 
-Each task has a $5 limit and the plan has $40. When a task goes over, Foreman stops its worker and asks whether to raise the limit.
-
 <img alt="foreman budget" src="assets/README/foreman-budget.png">
+
+By default, each task can spend $5 and the plan $40, which you can change in [Settings](#gear-settings). When a task goes over, Foreman stops its worker and asks whether to raise the limit.
 
 ### The PRs to review
 
@@ -113,9 +113,9 @@ Each task has a $5 limit and the plan has $40. When a task goes over, Foreman st
 foreman summary
 ```
 
-The PRs in the order to review them, how to test each one, and the assumptions to check.
-
 <img alt="foreman summary" src="assets/README/foreman-summary.png">
+
+What got done, the order to review the PRs in and how to test each one, what didn't get finished, and the calls Foreman made for you.
 
 ### How the run went
 
@@ -123,17 +123,17 @@ The PRs in the order to review them, how to test each one, and the assumptions t
 foreman timeline
 ```
 
-When each task started, when its worker went quiet, and which tasks waited on it.
-
 <img alt="foreman timeline" src="assets/README/foreman-timeline.png">
 
-Run `foreman help` to see every command. Foreman keeps its state in `.foreman/` in your repo, out of git, and picks up from there if the orchestrator restarts.
+When each task started, when its worker went quiet, and which tasks waited on it.
 
 ### Status pane
 
 ```sh
 foreman pane
 ```
+
+<img alt="foreman pane" src="assets/README/foreman-pane.png">
 
 `foreman up` opens a status pane beside the orchestrator, so you can see the run at a glance:
 
@@ -145,7 +145,7 @@ foreman pane
 
 A worker that goes quiet turns yellow, then red. Run `foreman pane` if you close it.
 
-<img alt="foreman pane" src="assets/README/foreman-pane.png">
+Run `foreman help` to see every command. Foreman keeps its state in `.foreman/` in your repo, out of git, and picks up from there if the orchestrator restarts.
 
 ## :gear: Settings
 
