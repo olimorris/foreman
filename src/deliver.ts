@@ -14,7 +14,7 @@ import { loadSessions, sessionsFile, taskCost, transcriptDir } from "./cost.ts";
 export type Shot = { name: string; before?: string; after?: string };
 export type PacketInput = {
   task: Task; intent: string; doneNote?: string; test?: string[]; assumptions?: string[]; stat: string; verdict: Verdict; round: number;
-  decisions: string[]; shots: Shot[]; shotsNote?: string; buildsOn?: Task; draft?: PrDraft;
+  decisions: string[]; shots: Shot[]; shotsNote?: string; buildsOn?: Task; draft?: PrDraft; automerge?: boolean;
 };
 
 export function section(md: string, heading: string): string {
@@ -76,7 +76,7 @@ export function renderPacket(p: PacketInput & { models: Models; cost?: number })
     "",
     "## AI Usage",
     "",
-    "AI wrote this change. A person set its scope and merges it.",
+    p.automerge ? "AI wrote this change. A person set its scope, and Foreman merges it once its checks pass." : "AI wrote this change. A person set its scope and merges it.",
     "",
     `**Tools and models used:** Claude Code with Foreman. Worker: ${names(p.models.worker)}. Reviewer: ${names(p.models.reviewer)}.${p.cost ? ` Cost: about $${p.cost.toFixed(2)} at list prices.` : ""}`,
     "",
@@ -187,7 +187,7 @@ export function deliver(repo: Repo, id: string, opts: { dryRun?: boolean; title?
     shotsNote = undefined;
   }
   const packet = join(taskDir(repo, id), "pr.md");
-  writeFileSync(packet, renderPacket({ task, intent: section(brief, "Intent"), doneNote, test: done?.test, assumptions: done?.assumptions, stat, verdict, round, decisions, shots, shotsNote, buildsOn, draft: verdict.pr?.description.trim() ? verdict.pr : undefined, models: { worker: workerModels(repo, task), reviewer: reviewerModels(repo, task) }, cost: taskCost(repo, task).total }));
+  writeFileSync(packet, renderPacket({ task, intent: section(brief, "Intent"), doneNote, test: done?.test, assumptions: done?.assumptions, stat, verdict, round, decisions, shots, shotsNote, buildsOn, draft: verdict.pr?.description.trim() ? verdict.pr : undefined, automerge: loadPlan(repo)?.automerge === true, models: { worker: workerModels(repo, task), reviewer: reviewerModels(repo, task) }, cost: taskCost(repo, task).total }));
 
   if (opts.dryRun) return { packet, title, note: `wrote the PR packet to ${packet}${titleNote}` };
   if (!origin) return { packet, title, note: `this repo has no origin remote, so nothing was pushed. The PR packet is at ${packet}${titleNote}` };

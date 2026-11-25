@@ -15,6 +15,7 @@ test("a usage error lists only that command's forms, with their full flags", () 
     "       foreman budget --plan <usd>",
   ]);
   expect(usageError("workers").message.split("\n").slice(0, 2)).toEqual(["usage: foreman workers", "       foreman workers <n>"]);
+  expect(usageError("automerge").message.split("\n").slice(0, 2)).toEqual(["usage: foreman automerge", "       foreman automerge on|off"]);
   expect(usageError("deliver").message).toStartWith('usage: foreman deliver <task> [--title "<type>: <summary>"] [--dry-run]');
 });
 

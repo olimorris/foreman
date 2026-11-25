@@ -52,6 +52,7 @@ export function statusView(repo: Repo, style: Style, armed: boolean, now = Date.
     [
       armed ? style.green("Watcher on") : style.red("Watcher off, so nothing will wake the orchestrator"),
       budget.plan !== undefined ? `${usd(spent)} of ${usd(budget.plan)} spent` : `${usd(spent)} spent`,
+      ...(plan?.automerge ? [style.yellow("Automerge on")] : []),
     ].join(style.dim("  ·  ")),
     ...(limit ? [style.yellow(`Waiting for the usage limit to reset at ${resetPhrase(limit, now)}. Workers are paused, and no task or review starts until then.`)] : []),
   ];

@@ -15,12 +15,13 @@ import { pauseForLimit, restartWorker, resume, stopWorker } from "./stop.ts";
 import { clockAt, loadLimit, resetPhrase, resumeDue, saveLimit, workerLimit, type LimitHit, type UsageLimit } from "./limits.ts";
 import { taskDir } from "./paths.ts";
 import { inFlight, loadTasks, updateTask, type Task } from "./state.ts";
+import { approved, automergeOn, checksOf, mergeCall, mergePr, repoMergeMethod, type Check, type Merge, type MergeMethod } from "./automerge.ts";
 import { busy, commandName, isWorker, pidAlive, processesIn, sample, tidy, unstoppableLine, type CpuSample, type Proc } from "./procs.ts";
 
-export type PrState = { state: string; comments: number; base?: string };
+export type PrState = { state: string; comments: number; base?: string; head?: string; sha?: string; draft?: boolean; checks?: Check[] };
 export type TrackedPr = { key: string; number: number; base?: string };
 export type Stall = { since: number; nudged: boolean; escalated: boolean; cpu?: CpuSample; measuredAt?: number; busyAt?: number };
-export type Cursor = { events: Record<string, number>; main?: string; exited: string[]; prs?: Record<string, PrState>; budget?: Record<string, number>; stalls?: Record<string, Stall>; restarts?: Record<string, number>; unanswered?: string[]; unstoppable?: number[]; limit?: UsageLimit; limitEnded?: number; held?: string[] };
+export type Cursor = { events: Record<string, number>; main?: string; exited: string[]; prs?: Record<string, PrState>; budget?: Record<string, number>; stalls?: Record<string, Stall>; restarts?: Record<string, number>; unanswered?: string[]; unstoppable?: number[]; limit?: UsageLimit; limitEnded?: number; held?: string[]; unmergeable?: Record<string, string> };
 export type Nudge = { id: string; text: string };
 
 export type Probes = {
@@ -32,9 +33,11 @@ export type Probes = {
   questions?(): Question[];
   processes?(task: Task): Proc[];
   limit?(task: Task): LimitHit | undefined;
+  automerge?(): boolean;
+  approved?(task: Task): boolean;
 };
 
-export type ScanResult = { reasons: string[]; cursor: Cursor; nudge: Nudge[]; restart: string[]; pause: string[]; resume: string[]; notice?: string };
+export type ScanResult = { reasons: string[]; cursor: Cursor; nudge: Nudge[]; restart: string[]; pause: string[]; resume: string[]; merge: Merge[]; notice?: string };
 
 export type Clock = { now: number; stallMs: number; answerMs?: number; waiting?: (id: string) => string[] };
 
@@ -46,11 +49,12 @@ export const BUSY_STALLS = 4;
 const MIN_SAMPLE_MS = 10_000;
 
 export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: TrackedPr[] = [], clock?: Clock): ScanResult {
-  const next: Cursor = { ...cursor, events: { ...cursor.events }, exited: [...cursor.exited], prs: { ...cursor.prs }, stalls: { ...cursor.stalls }, restarts: { ...cursor.restarts }, unanswered: [...(cursor.unanswered ?? [])], ...(cursor.limit ? { limit: { ...cursor.limit, paused: [...cursor.limit.paused] } } : {}) };
+  const next: Cursor = { ...cursor, events: { ...cursor.events }, exited: [...cursor.exited], prs: { ...cursor.prs }, stalls: { ...cursor.stalls }, restarts: { ...cursor.restarts }, unanswered: [...(cursor.unanswered ?? [])], unmergeable: { ...cursor.unmergeable }, ...(cursor.limit ? { limit: { ...cursor.limit, paused: [...cursor.limit.paused] } } : {}) };
   const reasons: string[] = [];
   const nudge: Nudge[] = [];
   const restart: string[] = [];
   const working: string[] = [];
+  const merge: Merge[] = [];
 
   // A worker at the usage limit replies to nothing until the reset, so it must not look hung.
   for (const task of next.limit ? [] : tasks.filter((t) => t.tab && t.status === "running")) {
@@ -91,6 +95,15 @@ export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: Tracked
     if (now.state === "MERGED" && seen?.state !== "MERGED") reasons.push(base && now.base && now.base !== base ? `merged-early ${key} #${number} into ${now.base}` : `merged ${key} #${number}`);
     if (now.state === "CLOSED" && seen?.state !== "CLOSED") reasons.push(`closed ${key} #${number}${stackedOnto(tasks, key)}`);
     next.prs![`${number}`] = now;
+    const task = tasks.find((t) => t.id === key);
+    // A head whose failing check or refused merge was already reported is skipped, or the orchestrator would hear about it every poll.
+    if (!task || !probes.automerge?.() || !now.sha || next.unmergeable![`${number}`] === now.sha) continue;
+    const call = mergeCall(task, now, probes.approved?.(task) ?? false);
+    if (call === "merge") merge.push({ id: key, number, sha: now.sha });
+    else if (call !== "wait") {
+      reasons.push(`check-failed ${key} #${number}: ${call.failing.join(", ")}`);
+      next.unmergeable![`${number}`] = now.sha;
+    }
   }
 
   const open = (probes.questions?.() ?? []).filter((q) => !q.answeredAt);
@@ -106,7 +119,7 @@ export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: Tracked
   if (sha) next.main = sha;
 
   const { pause, resume, notice } = waitOutLimit(tasks, next, working, reasons, clock?.now);
-  return { reasons, cursor: next, nudge, restart, pause, resume, notice };
+  return { reasons, cursor: next, nudge, restart, pause, resume, merge, notice };
 }
 
 // Everything else the watcher finds during the wait is held for the resume line, since the orchestrator can't take a turn until the reset either.
@@ -198,10 +211,13 @@ export function trackedPrs(tasks: Task[], decisions: Decision[]): TrackedPr[] {
 }
 
 function ghPr(root: string, number: number): PrState | undefined {
-  const r = run(["gh", "pr", "view", String(number), "--json", "state,comments,reviews,baseRefName"], { cwd: root });
+  const r = run(["gh", "pr", "view", String(number), "--json", "state,comments,reviews,baseRefName,headRefName,headRefOid,isDraft,statusCheckRollup"], { cwd: root });
   if (r.code !== 0) return undefined;
   const pr = JSON.parse(r.stdout);
-  return { state: pr.state, comments: pr.comments.length + pr.reviews.filter((x: { body: string }) => x.body).length, base: pr.baseRefName };
+  return {
+    state: pr.state, comments: pr.comments.length + pr.reviews.filter((x: { body: string }) => x.body).length, base: pr.baseRefName,
+    head: pr.headRefName, sha: pr.headRefOid, draft: pr.isDraft, checks: checksOf(pr.statusCheckRollup ?? []),
+  };
 }
 
 // A closed or early-merged PR stays "pr-open" in the task's status, and foreman next must not start new work on its branch.
@@ -238,6 +254,8 @@ export async function watch(repo: Repo, base: string, term: Terminal): Promise<n
     lastActivity: (task) => lastActivity(repo, task),
     questions: () => loadQuestions(repo),
     limit: (task) => workerLimit(repo, task),
+    automerge: () => automergeOn(repo),
+    approved: (task) => approved(repo, task),
   };
   const stallMs = (loadConfig(repo).stallMinutes ?? STALL_MINUTES) * 60_000;
   const waiting = (id: string) => {
@@ -246,6 +264,7 @@ export async function watch(repo: Repo, base: string, term: Terminal): Promise<n
     return readyTasks(plan, loadTasks(repo), maxWorkers(repo), stackable(repo)).waiting.filter((w) => new RegExp(`\\b${id}\\b`).test(w.reason)).map((w) => w.id);
   };
   let lastGh = 0;
+  let method: MergeMethod | undefined;
   const watched = [join(repo.foreman, "tasks"), join(repo.root, ".git", "refs"), join(repo.root, ".git", "packed-refs")].filter(existsSync);
   const hasOrigin = run(["git", "-C", repo.root, "remote", "get-url", "origin"]).code === 0;
 
@@ -299,6 +318,15 @@ export async function watch(repo: Repo, base: string, term: Terminal): Promise<n
           result.reasons.push(`stuck ${id}: restarting its hung worker failed: ${err instanceof Error ? err.message : err}`);
         }
       }
+      for (const pr of result.merge) {
+        const failed = mergePr(repo.root, pr, (method ??= repoMergeMethod(repo.root)));
+        // The next pass polls GitHub straight away, so the usual merged line wakes the orchestrator.
+        if (!failed) lastGh = 0;
+        else {
+          result.reasons.push(`not-merged ${pr.id} #${pr.number}: ${clip(failed)}`);
+          cursor.unmergeable = { ...cursor.unmergeable, [`${pr.number}`]: pr.sha };
+        }
+      }
       {
         const budget = budgetOf(repo);
         const costs = tasks.map((t) => taskCost(repo, t));
@@ -326,7 +354,7 @@ export async function watch(repo: Repo, base: string, term: Terminal): Promise<n
         notifyOrchestrator(repo, `[foreman watcher] ${line}. Handle it, then re-arm with \`foreman watch\` in the background.`);
         return 0;
       }
-      await waitForChange(watched, POLL_MS);
+      if (lastGh) await waitForChange(watched, POLL_MS);
     }
   } finally {
     release();

@@ -23,6 +23,8 @@ export const GROUPS: Group[] = [
       { usage: "next [--max <n>]", about: "Start every task that's ready" },
       { usage: "workers", about: "How many workers run at once, and why" },
       { usage: "workers <n>", about: "Change how many run at once for this plan" },
+      { usage: "automerge", about: "Whether Foreman merges approved PRs itself" },
+      { usage: "automerge on|off", about: "Let Foreman merge approved PRs for this plan" },
       { usage: "status [--json]", about: "What each task is doing" },
       { usage: "pane", about: "Open the status pane beside this tab" },
       { usage: "summary", about: "Write the run summary of PRs to review and show it" },
