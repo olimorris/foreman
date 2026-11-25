@@ -7,24 +7,25 @@
 
 ## :sparkles: Features
 
-- :robot: Run Claude Code agents in parallel, as part of a team, reporting to the Foreman
-- :camera: Takes before and after screenshots of web and macOS apps
-- :books: Reads your repo's ADRs and keeps every worker to them
-- :link: Tests the open PRs merged together, to catch ones that pass alone but break together
+- :robot: Spin up multiple Claude Code agents in parallel, reporting to the Foreman orchestrator
+- :zap: Blazingly fast, because each worker runs in its own worktree and tab
+- :policeman: Keeps every worker to your rules and puts you in ultimate control
 - :money_with_wings: Runs simple tasks on cheaper models
+- :zzz: Keeps working while you're away, and logs every call it makes
+- :books: Reads your repo's ADRs and keeps every worker to them
+- :camera: Takes before and after screenshots of web and macOS apps
+- :link: Tests the open PRs merged together, to catch ones that pass alone but break together
 - :memo: Runs your tests on the base branch first, and warns every worker about what already fails
 - :hammer_and_wrench: Builds, reviews and opens PRs by your own skills
-- :zzz: Keeps working while you're away, and logs every call it makes
-- :iphone: Pings you on Telegram, and takes your answers from there
 - :clipboard: Writes a summary of the PRs to review, in order
 
 ## :firecracker: The problem
 
-You've got a backlog and a deadline. One Claude Code session works through it one task at a time, and every task waits on you to review the last.
+You've got a backlog and a deadline. One Claude Code session processes one task at a time, and every task waits on you to review the last.
 
-You could open five sessions yourself. Then you're the one splitting up the work, keeping sessions out of each other's way, checking every result and untangling the merge conflicts. You've become the bottleneck.
+_Sure_, you could open five Claude Code sessions. But, then you're the one splitting up and assigning the work. Trying to ensure each session keeps out of the way of the other. Sharing "gotchas" and decisions between sessions. Checking every result and untangling the merge conflicts. **Congratulations - you've become the bottleneck**.
 
-Foreman brings in a team, and a manager to run it. You set the direction and approve the PRs.
+Foreman brings in the team and the manager to run it. You bring the direction and the control.
 
 ## :construction_worker: What is Foreman?
 
@@ -43,24 +44,25 @@ Foreman is a CLI and a Claude Code plugin. `foreman up` starts Claude Code with 
     </picture>
 </p>
 
-1. **Give it a backlog.** Foreman talks it through with you, then turns each item into a brief with clear boundaries
-2. **It schedules the crew.** Foreman decides what runs in parallel and what goes first, based on dependencies and your deadline
-3. **Decisions are shared.** Workers propose decisions. Foreman accepts them and tells the crew, so conflicts surface before merge time
-4. **Work gets reviewed.** A separate reviewer checks each change against your intent, with screenshots for UI work, and sends it back until it's right
+1. **Give it a backlog.** Foreman talks it through with you, then turns each item into a brief with clear boundaries and finished criteria
+2. **It schedules the crew.** Foreman decides what work runs in parallel and what goes first, based on dependencies and your deadline
+3. **Decisions are shared.** Workers propose decisions. Foreman accepts them and tells the rest of the crew, so conflicts surface before merge time
+4. **Work gets reviewed.** A separate reviewer task checks each change against your intent, with screenshots for UI work, and sends it back to the workers until it's right
 5. **You approve the PR.** Each PR says what was asked, which decisions it touched, what changed on screen and how risky it is. Tasks that build on it start without waiting for the merge
 
 ### What it touches
 
 - Workers run in Claude Code's auto mode, each in a worktree under `.foreman/worktrees/`, and commit to their own `foreman/<task>` branch
-- The reviewer can only read files
-- The orchestrator and workers talk to Foreman through its MCP server, which never runs in your own Claude Code sessions
-- Foreman pushes each approved task's branch and opens its PR, plus a PR that adds accepted decisions to your ADR folder
-- Foreman never merges unless you turn on [automerge](#auto-merging-prs), and then only its own task PRs
+- The reviewer task can only read files
+- The orchestrator and workers talk to Foreman through its MCP server, which never runs in your Claude Code sessions
+- Foreman pushes each approved task's branch and opens its PR
+- Foreman also makes PRs that adds accepted decisions to your ADR folder
+- Foreman never merges unless you turn on [automerge](#auto-merging-prs) and merges its own PRs
 - It keeps its state in `.foreman/`, out of git, and picks up from there after a restart
 
 ### Why not Claude Code's agent teams?
 
-Agent teams are great for research and review inside one session. Foreman is built for unattended builds that end in PRs, so it needs things teams don't offer:
+Agent teams are great for research and review inside one session. Foreman is built for unattended builds that end in PRs, so it needs things teams doesn't offer:
 
 - Each worker gets its own worktree, so workers never share a checkout
 - Every task has its own budget, and a hung worker is spotted and restarted
@@ -71,22 +73,28 @@ Agent teams are great for research and review inside one session. Foreman is bui
 brew install olimorris/tap/foreman
 ```
 
-This installs the `foreman` command along with [Bun](https://bun.sh), `jq`, `fswatch` and `gh`. `foreman up` loads the Claude Code plugin from the same install, so the command and the plugin are always the same version. `brew upgrade foreman` updates both, and sessions that are already running keep working.
+and upgrade with:
 
-Foreman runs on macOS inside a terminal app it can drive. It detects which one you're in, so you only need `FOREMAN_TERMINAL=<name>` to override that and pick another from `src/integrations/`. [Rex](https://www.superlogical.com) is the default when it can't tell. You also need:
+```sh
+brew upgrade foreman
+```
 
-- Claude Code 2.1.224 or later (`brew install --cask claude-code`)
-- `gh` signed in with `gh auth login`
+Foreman runs on macOS inside a terminal app. You also need:
+
+- Claude Code 2.1.332 or later
+- [GitHub CLI](https://cli.github.com/) signed in with `gh auth login`
 - For web screenshots: Playwright's Chromium (`bunx playwright install chromium`)
-- For macOS app screenshots: Xcode, and Screen Recording permission for your terminal in System Settings > Privacy & Security > Screen & System Audio Recording
+- For macOS screenshots: Xcode, and Screen Recording permission for your terminal in System Settings > Privacy & Security > Screen & System Audio Recording
 
 `foreman doctor` checks that all dependencies are installed and can be accessed.
 
 ### Uninstall
 
-`brew uninstall foreman` removes the command and the plugin, but not what Foreman made in your repos.
+```sh
+brew uninstall foreman
+```
 
-For every repo it ran in:
+To remove the command and the plugin. However, traces of Foreman remain in your repo which can be removed with:
 
 ```sh
 git worktree remove --force .foreman/worktrees/<task>   # once per leftover worktree
@@ -107,7 +115,7 @@ Read https://raw.githubusercontent.com/olimorris/foreman/main/docs/agents.txt an
 
 ## :rocket: Usage
 
-In your repo, start Foreman:
+In your repo, start Foreman with:
 
 ```sh
 foreman up
