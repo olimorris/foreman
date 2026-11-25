@@ -1,8 +1,9 @@
-import { describe, expect, test } from "bun:test";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MAX_REVISIONS, parseVerdict, renderFeedback, reviewerCommand, roundDir, runReview, sendFeedback, startReview, VERDICT_SCHEMA, verdictLine, type Verdict } from "../src/review.ts";
-import { skillsDir } from "../src/skills.ts";
+import { globalSkillsDir, skillsDir } from "../src/skills.ts";
 import { saveConfig } from "../src/config.ts";
 import { saveLimit } from "../src/limits.ts";
 import { parsePlan, savePlan } from "../src/plan.ts";
@@ -189,6 +190,16 @@ describe("the usage limit", () => {
 });
 
 describe("the user's skills", () => {
+  // Without this, a skill in the user's real ~/.config/foreman/skills would reach every test.
+  const savedConfigHome = process.env.XDG_CONFIG_HOME;
+  beforeEach(() => {
+    process.env.XDG_CONFIG_HOME = realpathSync(mkdtempSync(join(tmpdir(), "foreman-config-")));
+  });
+  afterEach(() => {
+    if (savedConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = savedConfigHome;
+  });
+
   const approve = JSON.stringify({ structured_output: { ...changes, verdict: "approve", issues: [] } });
   const skill = (repo: ReturnType<typeof tempRepo>, name: string, description: string, body: string) => {
     mkdirSync(join(skillsDir(repo), name), { recursive: true });
@@ -226,6 +237,16 @@ describe("the user's skills", () => {
     expect(prompt).toContain("Sections: Summary, Why, How to test.");
     expect(schema.properties.pr.required).toEqual(["title", "description"]);
     expect(schema.required).not.toContain("pr");
+  });
+
+  test("a skill only in the global folder reaches the prompt and the reviewer's folders", async () => {
+    const { repo, prompt, command } = await review(() => {
+      mkdirSync(join(globalSkillsDir(), "house-style"), { recursive: true });
+      writeFileSync(join(globalSkillsDir(), "house-style", "SKILL.md"), "---\nname: house-style\ndescription: Style rules.\n---\n\nUse plain words.\n");
+    });
+    expect(prompt).toContain(`### house-style\n\nStyle rules. From ${join(globalSkillsDir(), "house-style", "SKILL.md")}.\n\nUse plain words.`);
+    expect(command).toContain(globalSkillsDir());
+    expect(command).not.toContain(skillsDir(repo));
   });
 
   test("nothing changes without a .foreman/skills folder", async () => {

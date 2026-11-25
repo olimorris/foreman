@@ -13,7 +13,7 @@ import { capture, parseScreens, type Capture } from "./shots.ts";
 import { checkModel, taskLabel } from "./spawn.ts";
 import { diffBase, findTask, loadTasks, updateTask, type Task } from "./state.ts";
 import { budgetLeft } from "./cost.ts";
-import { loadSkills, prSkill, PR_SKILL, skillsDir, type Skill } from "./skills.ts";
+import { loadSkills, prSkill, PR_SKILL, skillFolders, type Skill } from "./skills.ts";
 
 export const MAX_REVISIONS = 2;
 
@@ -139,7 +139,7 @@ export function reviewerCommand(repo: Repo, id: string, budget?: number, model?:
     ...(budget !== undefined ? ["--max-budget-usd", budget.toFixed(2)] : []),
     "--append-system-prompt-file", join(pluginRoot, "prompts", "reviewer.md"),
     "--tools", "Read,Grep,Glob", "--allowedTools", "Read,Grep,Glob", "--add-dir", taskDir(repo, id), join(repo.foreman, "decisions"),
-    ...(skills.length ? [skillsDir(repo)] : []),
+    ...skillFolders(repo),
     ...(telegram.length ? ["--settings", JSON.stringify(withoutTelegram(telegram))] : []),
   ];
 }
