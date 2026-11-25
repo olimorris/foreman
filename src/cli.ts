@@ -15,7 +15,8 @@ import { areaLock, sessionStartContext, stopHook, type HookInput, type LockConte
 import { defaultBase, findRepo, pluginArgs, socketPath, type Repo } from "./paths.ts";
 import { rex } from "./rex.ts";
 import { sendToTask } from "./send.ts";
-import { ensureForeman, spawn } from "./spawn.ts";
+import { ensureForeman, plainTitle, spawn } from "./spawn.ts";
+import { budgetOverview, byActivity, statusLabel, table, taskTitle } from "./overview.ts";
 import { findTask, inFlight, loadTasks, updateTask } from "./state.ts";
 import { teardown } from "./teardown.ts";
 import { setTrust } from "./trust.ts";
@@ -44,6 +45,7 @@ const USAGE = `usage:
   foreman sync
   foreman cost
   foreman summary
+  foreman budget                       (what each task has spent against its limit)
   foreman budget [<id>] <usd> | budget --plan <usd>
   foreman pause <id>
   foreman resume <id>
@@ -255,6 +257,7 @@ async function main(argv: string[]): Promise<number> {
     }
     case "budget": {
       const repo = findRepo();
+      if (!positional.length && !opts.plan) return console.log(budgetOverview(repo)), 0;
       const budget = { ...budgetOf(repo) };
       const amount = Number(opts.plan?.[0] ?? positional.at(-1));
       if (!Number.isFinite(amount) || amount <= 0) throw new Error(USAGE);
@@ -304,8 +307,13 @@ async function main(argv: string[]): Promise<number> {
       if (opts.json) return console.log(JSON.stringify(tasks, null, 2)), 0;
       const p = loadPlan(repo);
       if (p) console.log(`plan: ${p.title}${p.deadline ? `, deadline ${p.deadline}` : ""}${p.approvedAt ? "" : " (not approved yet)"}`);
-      for (const t of tasks) console.log(`${t.id.padEnd(12)} ${t.status.padEnd(15)} ${usd(taskCost(repo, t).total).padStart(7)}  ${t.branch}${t.pr ? ` #${t.pr}` : ""}`);
-      if (p?.approvedAt) for (const w of readyTasks(p, tasks, maxWorkers(repo)).waiting) console.log(`${w.id.padEnd(12)} ${"planned".padEnd(15)} ${w.reason}`);
+      const waiting = p?.approvedAt ? readyTasks(p, tasks, maxWorkers(repo)).waiting : [];
+      const rows = [
+        ["Task", "What it builds", "Status", "Spent", "PR"],
+        ...byActivity(tasks).map((t) => [t.id, taskTitle(repo, t), statusLabel(t), usd(taskCost(repo, t).total), t.pr ? `#${t.pr}` : ""]),
+        ...waiting.map((w) => [w.id, plainTitle(p!.tasks.find((t) => t.id === w.id)!.title), `planned, ${w.reason}`, "", ""]),
+      ];
+      if (rows.length > 1) console.log(table(rows, [3]).join("\n"));
       console.log(`watcher: ${watcherArmed(repo) ? "armed" : "not armed"}`);
       return 0;
     }
