@@ -1,7 +1,7 @@
 import { budgetOf, orchestratorCost, taskCost, usd } from "./cost.ts";
 import { byActivity, clip, statusLabel, taskTitle } from "./overview.ts";
 import type { Repo } from "./paths.ts";
-import { loadPlan, maxWorkers, readyTasks } from "./plan.ts";
+import { loadPlan, maxWorkers, readyTasks, stackable } from "./plan.ts";
 import { plainTitle } from "./spawn.ts";
 import { loadTasks, type Task } from "./state.ts";
 import type { Style } from "./style.ts";
@@ -27,7 +27,7 @@ export function statusView(repo: Repo, style: Style, armed: boolean): string {
     tone: tone(t),
     dim: finished(t),
   });
-  const waiting = plan?.approvedAt ? readyTasks(plan, tasks, maxWorkers(repo)).waiting : [];
+  const waiting = plan?.approvedAt ? readyTasks(plan, tasks, maxWorkers(repo), stackable(repo)).waiting : [];
   const sections: Section[] = [
     { title: "Needs you", rows: tasks.filter((t) => NEEDS_YOU.includes(t.status)).map(row) },
     { title: "In progress", rows: tasks.filter((t) => !finished(t) && !NEEDS_YOU.includes(t.status)).map(row) },

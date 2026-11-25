@@ -9,8 +9,7 @@ import type { Terminal } from "./terminal.ts";
 import { sendToTask } from "./send.ts";
 import { capture, parseScreens, type Capture } from "./shots.ts";
 import { taskLabel } from "./spawn.ts";
-import { baseRef } from "./snapshot.ts";
-import { findTask, loadTasks, updateTask, type Task } from "./state.ts";
+import { diffBase, findTask, loadTasks, updateTask, type Task } from "./state.ts";
 import { budgetLeft } from "./cost.ts";
 
 export const MAX_REVISIONS = 2;
@@ -64,12 +63,12 @@ export async function runReview(repo: Repo, id: string): Promise<string> {
     if (left.reason) throw new Error(left.reason);
     const shots = await screenshots(repo, task, dir);
     // The user's local base branch lags behind merged PRs, which would put other tasks' work in this diff.
-    const base = baseRef(repo, task.base);
+    const base = diffBase(repo, task);
     const diff = join(dir, "diff.patch");
     writeFileSync(diff, must(["git", "-C", task.worktree, "diff", `${base}...HEAD`]));
     const stat = must(["git", "-C", task.worktree, "diff", "--shortstat", `${base}...HEAD`]).trim();
     const dirty = must(["git", "-C", task.worktree, "status", "--porcelain"]).trim();
-    const prompt = reviewPrompt({ task, round, diff, stat, dirty, shots, index: writeIndex(repo, task.base), previous: lastVerdict(repo, id, round), done: lastDone(repo, id), brief: join(taskDir(repo, id), "brief.md") });
+    const prompt = reviewPrompt({ task, against: against(task), round, diff, stat, dirty, shots, index: writeIndex(repo, task.base), previous: lastVerdict(repo, id, round), done: lastDone(repo, id), brief: join(taskDir(repo, id), "brief.md") });
     writeFileSync(join(dir, "prompt.md"), prompt);
 
     const r = run(
@@ -113,6 +112,11 @@ export function parseVerdict(stdout: string): Verdict | undefined {
     } catch {}
   }
   return undefined;
+}
+
+export function latestVerdict(repo: Repo, task: Task): Verdict | undefined {
+  const file = join(roundDir(repo, task.id, task.reviews ?? 0), "verdict.json");
+  return task.reviews && existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : undefined;
 }
 
 function lastVerdict(repo: Repo, id: string, before: number): string | undefined {
@@ -167,7 +171,7 @@ async function screenshots(repo: Repo, task: Task, dir: string): Promise<Capture
   if (!screens.length) return { files: [], errors: [], note: "the brief names no screens" };
   if (!cfg) return { files: [], errors: [], note: "screenshots aren't configured for this repo" };
 
-  const sha = must(["git", "-C", repo.root, "rev-parse", "--short=10", baseRef(repo, task.base)]).trim();
+  const sha = must(["git", "-C", repo.root, "rev-parse", "--short=10", diffBase(repo, task)]).trim();
   const cache = join(repo.foreman, "cache", "shots", sha);
   const missing = screens.filter((s) => !existsSync(join(cache, `${s.name}.png`)));
   const errors: string[] = [];
@@ -195,13 +199,15 @@ const handover = (id: string, done?: { test?: string[]; assumptions?: string[] }
 
 type PromptInput = {
   done?: { test?: string[]; assumptions?: string[] };
-  task: Task; round: number; diff: string; stat: string; dirty: string; index: string; brief: string; previous?: string;
+  task: Task; against: string; round: number; diff: string; stat: string; dirty: string; index: string; brief: string; previous?: string;
   shots: Capture & { before?: string; after?: string; note?: string };
 };
 
+const against = (task: Task) => (task.stackedOn ? `${task.stackedOn}'s branch, which this task builds on` : task.base);
+
 function reviewPrompt(p: PromptInput): string {
   const shots = p.shots.before
-    ? [`- Screenshots: before (${p.task.base}) in ${p.shots.before}, after (this branch) in ${p.shots.after}, one PNG per screen named in the brief.`,
+    ? [`- Screenshots: before (${p.against}) in ${p.shots.before}, after (this branch) in ${p.shots.after}, one PNG per screen named in the brief.`,
        ...p.shots.errors.map((e) => `  - Capture problem: ${e}`)]
     : [`- Screenshots: none, because ${p.shots.note}.`];
   return [
@@ -209,7 +215,7 @@ function reviewPrompt(p: PromptInput): string {
     "",
     `- Brief: ${p.brief}. Its Intent section is the acceptance criteria.`,
     `- Decisions index: ${p.index}. Open a record only when the diff touches it.`,
-    `- Diff against ${p.task.base}: ${p.diff} (${p.stat || "no committed changes"}).`,
+    `- Diff against ${p.against}: ${p.diff} (${p.stat || "no committed changes"}).`,
     `- Uncommitted changes in the worktree: ${p.dirty ? `\n${p.dirty}` : "none"}`,
     ...shots,
     ...(p.previous ? [`- Previous review: ${p.previous}. Check each of its issues was fixed.`] : []),

@@ -6,16 +6,15 @@ import { lastDone } from "./events.ts";
 import { must, run } from "./exec.ts";
 import { loadDecisions } from "./ledger.ts";
 import { taskDir, type Repo } from "./paths.ts";
-import { CONVENTIONAL, loadPlan } from "./plan.ts";
+import { CONVENTIONAL, loadPlan, stackable } from "./plan.ts";
 import { roundDir, type Verdict } from "./review.ts";
-import { findTask, updateTask, type Task } from "./state.ts";
-import { baseRef } from "./snapshot.ts";
+import { diffBase, findTask, loadTasks, updateTask, type Task } from "./state.ts";
 import { loadSessions, sessionsFile, taskCost, transcriptDir } from "./cost.ts";
 
 export type Shot = { name: string; before?: string; after?: string };
 export type PacketInput = {
   task: Task; intent: string; doneNote?: string; test?: string[]; assumptions?: string[]; stat: string; verdict: Verdict; round: number;
-  decisions: string[]; shots: Shot[]; shotsNote?: string;
+  decisions: string[]; shots: Shot[]; shotsNote?: string; buildsOn?: Task;
 };
 
 export function section(md: string, heading: string): string {
@@ -36,11 +35,18 @@ export function modelName(id: string): string {
 
 const names = (ids: string[]) => [...new Set(ids.map(modelName))].join(" and ") || "an unrecorded model";
 
+function buildsOnNote(parent: Task, base: string): string {
+  const name = parent.pr ? `#${parent.pr}` : parent.branch;
+  const target = parent.pr ? `${name}'s branch` : parent.branch;
+  return `This builds on ${name} and should merge after it. It targets ${target}, so the diff shows only this change. Foreman moves it to ${base} once ${name} merges.`;
+}
+
 export function renderPacket(p: PacketInput & { models: Models; cost?: number }): string {
   const revisions = p.task.revisions ?? 0;
   return [
     "## Description",
     "",
+    ...(p.buildsOn ? [buildsOnNote(p.buildsOn, p.task.base), ""] : []),
     p.intent || "(the brief has no Intent section)",
     "",
     ...(p.doneNote ? [p.doneNote, ""] : []),
@@ -147,7 +153,8 @@ export function deliver(repo: Repo, id: string, opts: { dryRun?: boolean; title?
   const brief = readFileSync(join(taskDir(repo, id), "brief.md"), "utf8");
   const done = lastDone(repo, id);
   const doneNote = done?.note;
-  const stat = run(["git", "-C", repo.root, "diff", "--stat", `${baseRef(repo, task.base)}...${task.branch}`]).stdout.trimEnd();
+  const buildsOn = task.stackedOn ? findTask(repo, task.stackedOn) : undefined;
+  const stat = run(["git", "-C", repo.root, "diff", "--stat", `${diffBase(repo, task)}...${task.branch}`]).stdout.trimEnd();
   const decisions = loadDecisions(repo)
     .filter((d) => d.by === id || verdict.decisions_touched.some((t) => t.includes(d.id)))
     .map((d) => `${d.id} ${d.title} (${d.status}${d.adr ? `, ADR ${d.adr.number}` : ""})`);
@@ -166,7 +173,7 @@ export function deliver(repo: Repo, id: string, opts: { dryRun?: boolean; title?
     shotsNote = undefined;
   }
   const packet = join(taskDir(repo, id), "pr.md");
-  writeFileSync(packet, renderPacket({ task, intent: section(brief, "Intent"), doneNote, test: done?.test, assumptions: done?.assumptions, stat, verdict, round, decisions, shots, shotsNote, models: { worker: workerModels(repo, task), reviewer: reviewerModels(repo, task) }, cost: taskCost(repo, task).total }));
+  writeFileSync(packet, renderPacket({ task, intent: section(brief, "Intent"), doneNote, test: done?.test, assumptions: done?.assumptions, stat, verdict, round, decisions, shots, shotsNote, buildsOn, models: { worker: workerModels(repo, task), reviewer: reviewerModels(repo, task) }, cost: taskCost(repo, task).total }));
 
   if (opts.dryRun) return { packet, note: `wrote the PR packet to ${packet}` };
   if (!origin) return { packet, note: `this repo has no origin remote, so nothing was pushed. The PR packet is at ${packet}` };
@@ -175,10 +182,14 @@ export function deliver(repo: Repo, id: string, opts: { dryRun?: boolean; title?
 
   if (task.pr) {
     must(["gh", "pr", "edit", String(task.pr), "--body-file", packet], { cwd: repo.root });
-    return { packet, pr: task.pr, note: `pushed ${task.branch} and refreshed PR #${task.pr}` };
+    const stacked = loadTasks(repo).filter((t) => t.stackedOn === id && t.status !== "torn-down").map((t) => t.id);
+    const restack = stacked.length ? `. ${stacked.join(", ")} ${stacked.length > 1 ? "build" : "builds"} on this branch, so run foreman sync to ask ${stacked.length > 1 ? "their workers" : "its worker"} to rebase` : "";
+    return { packet, pr: task.pr, note: `pushed ${task.branch} and refreshed PR #${task.pr}${restack}` };
   }
-  const url = must(["gh", "pr", "create", "--base", task.base, "--head", task.branch, "--title", title, "--body-file", packet], { cwd: repo.root }).trim().split("\n").at(-1)!;
+  const url = must(["gh", "pr", "create", "--base", buildsOn?.branch ?? task.base, "--head", task.branch, "--title", title, "--body-file", packet], { cwd: repo.root }).trim().split("\n").at(-1)!;
   const pr = Number(url.match(/\/pull\/(\d+)/)?.[1]);
   updateTask(repo, id, { pr, status: "pr-open" });
-  return { packet, pr, url, note: `opened PR #${pr}: ${url}` };
+  const started = new Set(loadTasks(repo).map((t) => t.id));
+  const next = stackable(repo) ? loadPlan(repo)?.tasks.filter((t) => t.deps.includes(id) && !started.has(t.id)).map((t) => t.id) ?? [] : [];
+  return { packet, pr, url, note: `opened PR #${pr}: ${url}${next.length ? `. Run foreman next, which can start ${next.join(", ")} on top of it` : ""}` };
 }

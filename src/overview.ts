@@ -23,7 +23,7 @@ export function statusLabel(task: Task): string {
     case "done": return "finished, in review";
     case "needs-decision": return "needs a decision";
     case "exited": return "worker closed";
-    case "pr-open": return "PR open";
+    case "pr-open": return task.mergedInto ? `PR merged into ${task.mergedInto}` : task.prClosed ? "PR closed" : "PR open";
     case "torn-down": return task.mergedAt ? "merged" : "discarded";
     default: return task.status;
   }

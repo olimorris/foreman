@@ -17,7 +17,7 @@ process.env.CLAUDE_CONFIG_DIR = mkdtempSync(join(tmpdir(), "foreman-claude-"));
 writeFileSync(join(process.env.CLAUDE_CONFIG_DIR, ".claude.json"), "{}");
 
 const approve: Verdict = { verdict: "approve", summary: "Matches the intent.", issues: [], risk: "low", risk_note: "Copy change only.", decisions_touched: [] };
-const noProbes = { fetch: () => {}, prState: () => undefined };
+const noProbes = { fetch: () => {}, prState: () => undefined, prBase: () => undefined, setPrBase: () => false };
 
 function setup(ids: string[]) {
   const repo = tempRepo();
@@ -124,7 +124,7 @@ test("sync trusts a merged PR even when the branch was squashed", () => {
   const { repo, term, commit } = setup(["T1"]);
   commit("T1");
   updateTask(repo, "T1", { pr: 7 });
-  const r = sync(repo, "main", term, { fetch: () => {}, prState: (n) => (n === 7 ? "MERGED" : undefined) });
+  const r = sync(repo, "main", term, { ...noProbes, prState: (n) => (n === 7 ? "MERGED" : undefined) });
   expect(r.merged).toEqual(["T1"]);
   expect(readEvents(repo, "T1")).toEqual([]);
 });
