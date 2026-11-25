@@ -70,6 +70,7 @@ const PHRASE: Record<RunWhat, (note?: string) => string> = {
   resumed: (n) => `resumed${n ? `: ${n}` : ""}`,
   "pr-opened": (n) => `opened PR ${n ?? ""}`.trim(),
   "pr-updated": (n) => `updated PR ${n ?? ""}`.trim(),
+  "rebase-asked": (n) => `asked to rebase${n ? ` onto ${n}` : ""}`,
   merged: (n) => `merged${n ? ` PR ${n}` : ""}`,
   "torn-down": (n) => `torn down${n ? `, ${n}` : ""}`,
 };

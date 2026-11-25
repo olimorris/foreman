@@ -40,7 +40,7 @@ function readJsonl<T>(path: string): T[] {
 }
 
 // The watcher wakes the orchestrator for every new line in a task's events.jsonl, so what Foreman does to a task goes in this log instead.
-export type RunWhat = "started" | "nudged" | "restarted" | "stopped" | "paused" | "resumed" | "pr-opened" | "pr-updated" | "merged" | "torn-down";
+export type RunWhat = "started" | "nudged" | "restarted" | "stopped" | "paused" | "resumed" | "pr-opened" | "pr-updated" | "rebase-asked" | "merged" | "torn-down";
 export type RunEntry = { at: string; task: string; what: RunWhat; note?: string };
 
 const runLogPath = (repo: Repo) => join(repo.foreman, "log.jsonl");

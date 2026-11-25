@@ -92,6 +92,13 @@ function lock(repo: Repo): number | undefined {
   return readPid(lockFile(repo)) ?? -1;
 }
 
+export function togetherBusy(repo: Repo): string | undefined {
+  const other = readPid(lockFile(repo));
+  if (!other || !pidAlive(other)) return undefined;
+  writeFileSync(rerunFile(repo), "");
+  return `together: already running (pid ${other}), so it checks again with the latest PRs when it finishes`;
+}
+
 // A PR delivered while a check runs would otherwise never be checked, so the skipped call leaves a note and the running one goes again.
 export async function together(repo: Repo, base: string, prs: () => Task[], opts: TogetherOptions = {}): Promise<{ line: string; result?: Together }> {
   if (prs().length < 2) return check(repo, base, prs(), opts);

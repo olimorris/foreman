@@ -7,7 +7,7 @@ export type Server = { name: string; version: string; tools: Tool[]; session: Se
 
 // A task tool's handler can run for hours, so it gets a way to show progress in /tasks and hears when it's stopped.
 export type TaskContext = { signal: AbortSignal; status: (message: string) => void };
-export type TaskTool = Omit<Tool, "handler"> & { task: true; handler: (args: Args, session: Session, context?: TaskContext) => Promise<string> };
+export type TaskTool = Omit<Tool, "handler"> & { task: true; handler: (args: Args, session: Session, context?: TaskContext) => Promise<string>; now?: (args: Args, session: Session) => string | undefined };
 
 type Status = "working" | "completed" | "cancelled";
 export type RunningTask = { taskId: string; status: Status; statusMessage?: string; createdAt: string; lastUpdatedAt: string; result?: object; stop: AbortController };
@@ -63,7 +63,12 @@ async function call(method: string, params: Params, server: Server): Promise<unk
       if (!tool) throw invalidParams(`unknown tool: ${params.name}`);
       const args = (params.arguments ?? {}) as Args;
       checkArgs(tool.inputSchema, args);
-      if (isTaskTool(tool) && offersTasks(params)) return startTask(tool, args, server);
+      if (isTaskTool(tool)) {
+        // A call with nothing to wait for answers in the caller's own turn, since a finished task wakes the orchestrator.
+        const quick = tool.now?.(args, server.session);
+        if (quick !== undefined) return toolResult(() => quick);
+        if (offersTasks(params)) return startTask(tool, args, server);
+      }
       return toolResult(() => tool.handler(args, server.session));
     }
     case "tasks/get": {

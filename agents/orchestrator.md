@@ -89,7 +89,6 @@ Whenever any task is in flight, a `watch` task must be running before you end a 
    - `main-moved <sha>`: call `sync`. If it reports merged tasks, tear them down and call `next`. This line only comes with a `merged` line or after a usage limit resets, because when main moves otherwise the watcher calls `sync` itself.
    - `main-moved <sha>, and the watcher's sync found: …`: the watcher's own sync marked a task merged or couldn't reach a worker. Act on what follows the colon as you would on `sync`'s output.
    - `main-moved <sha>, and the watcher's sync failed, so call sync: …`: call `sync` yourself.
-   - `watcher: already running (pid 4321)`: another watch task is already running, so nothing to do.
    - `watcher: stopped`: the watch task was cancelled. Call `watch` again if anything is in flight.
 4. Handle every item in the line, then call `watch` again.
 
@@ -107,7 +106,6 @@ Each PR is reviewed on its own, so two can conflict, or pass alone and break tog
 - `together: #78 conflicts with main in …`: call `sync`, which asks #78's worker to rebase.
 - `together: #78 doesn't merge`: message #78's worker with `send` to find out why its branch won't merge.
 - `together: tests ran past 15 minutes …`: if the suite is known to be that slow, raise `testMinutes` in `.foreman/config.json` and call `together` again. Otherwise tell the user the tests hang with those PRs merged.
-- `together: … already running …`: nothing to do. The running check goes again with the latest PRs, and its own line wakes you when it's done.
 - `together: 2 PRs merge cleanly and the tests pass`: nothing to do.
 
 `summary` carries the latest result for the user, so don't repeat it there.
