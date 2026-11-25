@@ -7,6 +7,8 @@ import { accept, findContext, reject, writeIndex } from "./decisions.ts";
 import { doctor } from "./doctor.ts";
 import { printBanner } from "./banner.ts";
 import { helpText, usageError, UsageError } from "./help.ts";
+import { statusView } from "./status.ts";
+import { styleFor } from "./style.ts";
 import { loadDecisions, propose } from "./ledger.ts";
 import { baseRef, snapshot } from "./snapshot.ts";
 import { runReview, sendFeedback, startReview } from "./review.ts";
@@ -241,7 +243,7 @@ async function main(argv: string[]): Promise<number> {
     }
     case "budget": {
       const repo = findRepo();
-      if (!positional.length && !opts.plan) return console.log(budgetOverview(repo)), 0;
+      if (!positional.length && !opts.plan) return console.log(budgetOverview(repo, styleFor())), 0;
       const budget = { ...budgetOf(repo) };
       const amount = Number(opts.plan?.[0] ?? positional.at(-1));
       if (!Number.isFinite(amount) || amount <= 0) throw usageError("budget");
@@ -287,16 +289,7 @@ async function main(argv: string[]): Promise<number> {
       const repo = findRepo();
       const tasks = loadTasks(repo);
       if (opts.json) return console.log(JSON.stringify(tasks, null, 2)), 0;
-      const p = loadPlan(repo);
-      if (p) console.log(`plan: ${p.title}${p.deadline ? `, deadline ${p.deadline}` : ""}${p.approvedAt ? "" : " (not approved yet)"}`);
-      const waiting = p?.approvedAt ? readyTasks(p, tasks, maxWorkers(repo)).waiting : [];
-      const rows = [
-        ["Task", "Worker", "What it builds", "Status", "Spent", "PR"],
-        ...byActivity(tasks).map((t) => [t.id, t.worker ?? "", taskTitle(repo, t), statusLabel(t), usd(taskCost(repo, t).total), t.pr ? `#${t.pr}` : ""]),
-        ...waiting.map((w) => [w.id, "", plainTitle(p!.tasks.find((t) => t.id === w.id)!.title), `planned, ${w.reason}`, "", ""]),
-      ];
-      if (rows.length > 1) console.log(table(rows, [4]).join("\n"));
-      console.log(`watcher: ${watcherArmed(repo) ? "armed" : "not armed"}`);
+      console.log(statusView(repo, styleFor(), watcherArmed(repo)));
       return 0;
     }
     case "watch":
