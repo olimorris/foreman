@@ -6,6 +6,7 @@ import { findTask, updateTask } from "./state.ts";
 import { setTrust } from "./trust.ts";
 import { baseRef } from "./snapshot.ts";
 import { logRun } from "./events.ts";
+import { stopProcessesIn } from "./procs.ts";
 
 export type Unmerged = { commits: number; dirty: number };
 
@@ -17,23 +18,6 @@ export function unmergedWork(repo: Repo, branch: string, base: string, worktree:
     ? run(["git", "-C", worktree, "status", "--porcelain"]).stdout.split("\n").filter(Boolean).length
     : 0;
   return { commits, dirty };
-}
-
-// Workers start dev servers to check their work, and an orphaned one keeps its port after the tab closes.
-export function stopProcessesIn(dir: string): number[] {
-  const out = run(["lsof", "-d", "cwd", "-F", "pn"]).stdout.split("\n");
-  const pids: number[] = [];
-  let pid = 0;
-  for (const line of out) {
-    if (line.startsWith("p")) pid = Number(line.slice(1));
-    else if (line.startsWith("n") && (line.slice(1) === dir || line.slice(1).startsWith(dir + "/")) && pid !== process.pid) pids.push(pid);
-  }
-  for (const p of pids) {
-    try {
-      process.kill(p, "SIGTERM");
-    } catch {}
-  }
-  return pids;
 }
 
 export type TeardownResult = { removed: boolean; message: string };

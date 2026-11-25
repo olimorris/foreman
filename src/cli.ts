@@ -38,6 +38,7 @@ import { watch, watcherArmed } from "./watch.ts";
 import { gatherPane, livePane, openPane, renderPane, spendByTask } from "./pane.ts";
 import { addNote, listNotes, loadNotes, newNoteMessage, removedNoteMessage, removeNote, shareNote } from "./notes.ts";
 import { BASELINE_RUNS, baseline, baselineStatus, TEST_MINUTES } from "./baseline.ts";
+import { names, tidy, unstoppableLine } from "./procs.ts";
 
 
 function flags(args: string[]): { positional: string[]; opts: Record<string, string[]> } {
@@ -366,6 +367,16 @@ async function main(argv: string[]): Promise<number> {
     }
     case "watch":
       return watch(findRepo(), defaultBase(findRepo()), term);
+    case "tidy": {
+      const repo = findRepo();
+      const id = positional[0] ?? process.env.FOREMAN_TASK;
+      if (!id) throw usageError("tidy");
+      const r = tidy(findTask(repo, id));
+      if (r.stopped.length) console.log(`stopped what ${id}'s old runs left behind: ${names(r.stopped)}`);
+      if (r.failed.length) console.log(unstoppableLine(r.failed));
+      if (!r.stopped.length && !r.failed.length) console.log(`${id} has no processes left over from old runs`);
+      return r.failed.length ? 1 : 0;
+    }
     case "teardown": {
       const [id] = positional;
       if (!id) throw usageError("teardown");

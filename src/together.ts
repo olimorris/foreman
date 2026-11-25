@@ -6,7 +6,8 @@ import { run } from "./exec.ts";
 import type { Repo } from "./paths.ts";
 import { baseRef } from "./snapshot.ts";
 import { writeJson, type Task } from "./state.ts";
-import { pidAlive, readPid } from "./watch.ts";
+import { pidAlive } from "./procs.ts";
+import { readPid } from "./watch.ts";
 
 export type Tested = { id: string; pr: number; branch: string; sha: string };
 export type Conflict = { id: string; with: string[]; files: string[] };

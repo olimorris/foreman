@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +9,7 @@ import { saveConfig } from "../src/config.ts";
 import { findTask, loadTasks, nextWorker, updateTask, type Task } from "../src/state.ts";
 import { teardown } from "../src/teardown.ts";
 import { restartWorker, resume, stopWorker } from "../src/stop.ts";
+import { pidAlive, processesIn } from "../src/procs.ts";
 import { recordSession, sessionsFile } from "../src/cost.ts";
 import { fakeTerminal, tempRepo } from "./helpers.ts";
 
@@ -166,6 +167,38 @@ describe("stop and resume", () => {
     expect(term.opened[0]).toContain("sess-1");
     expect(findTask(repo, "T1")).toMatchObject({ status: "done", tab: { window: "window:2" } });
     expect(findTask(repo, "T1").pausedFrom).toBeUndefined();
+  });
+
+  const users: { kill(): void }[] = [];
+  afterAll(() => users.forEach((u) => u.kill()));
+
+  // The user's shell or editor open in the worktree, or a review running there, has a live parent outside the worker.
+  function crowded(task: Task) {
+    run(["sh", "-c", `sh -c "sleep 310; : ${task.socket}" >/dev/null 2>&1 & sleep 312 >/dev/null 2>&1 & exit 0`], { cwd: task.worktree });
+    const user = Bun.spawn(["sleep", "311"], { cwd: task.worktree, stdout: "ignore", stderr: "ignore" });
+    users.push(user);
+    const wanted = [`sh -c sleep 310; : ${task.socket}`, "sleep 310", "sleep 312"];
+    let before = processesIn([task.worktree])[0]!;
+    // The background commands may not have started their programs yet when the shell that launched them exits.
+    for (let i = 0; i < 20 && !wanted.every((c) => before.some((p) => p.command === c)); i++) Bun.sleepSync(100), (before = processesIn([task.worktree])[0]!);
+    const [worker, child, leftover] = wanted.map((c) => before.find((p) => p.command === c)!.pid);
+    return { user, worker: [worker!, child!], leftover: leftover! };
+  }
+
+  test("pausing stops the worker's processes and leftovers, but not other processes in its worktree", () => {
+    const { repo, task } = spawned();
+    const { user, worker, leftover } = crowded(task);
+    expect(stopWorker(repo, findTask(repo, "T1"), fakeTerminal())).toBe(true);
+    expect([...worker, leftover].filter(pidAlive)).toEqual([]);
+    expect(pidAlive(user.pid)).toBe(true);
+  });
+
+  test("resuming stops whatever the old worker left running, but not other processes in its worktree", () => {
+    const { repo, task } = spawned();
+    const { user, worker, leftover } = crowded(task);
+    resume(repo, "T1", fakeTerminal(false), "session:1");
+    expect([...worker, leftover].filter(pidAlive)).toEqual([]);
+    expect(pidAlive(user.pid)).toBe(true);
   });
 
   test("stopping a worker whose tab is already closed changes nothing", () => {

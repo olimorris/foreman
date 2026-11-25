@@ -55,6 +55,7 @@ export const GROUPS: Group[] = [
       { usage: "pause <task>", about: "Stop a task's worker" },
       { usage: "resume <task>", about: "Reopen a stopped worker's session", full: "resume <task> [--model <name>]" },
       { usage: "restart <task>", about: "Close a worker and reopen its session", full: "restart <task> [--model <name>]" },
+      { usage: "tidy <task>", about: "Stop processes a task's old runs left behind" },
       { usage: "deliver <task>", about: "Push the branch and open the PR", full: 'deliver <task> [--title "<type>: <summary>"] [--dry-run]' },
       { usage: "teardown <task>", about: "Remove a finished task's tab, worktree and branch", full: "teardown <task> [--discard]" },
     ],
