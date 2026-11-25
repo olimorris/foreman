@@ -169,3 +169,5 @@ export function writeSummary(repo: Repo): string {
   writeFileSync(path, renderSummary(gather(repo, loadPlan(repo))));
   return path;
 }
+
+export const summaryText = (repo: Repo) => `wrote ${writeSummary(repo)}`;
