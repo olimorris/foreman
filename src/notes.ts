@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Repo } from "./paths.ts";
+import { ensureForeman, type Repo } from "./paths.ts";
 import type { Terminal } from "./terminal.ts";
 import { sendToTask } from "./send.ts";
 import { loadTasks, type Task } from "./state.ts";
@@ -91,6 +91,22 @@ export function shareNote(repo: Repo, text: string, by: string, term: Terminal):
     }
   }
   return { sent, failed };
+}
+
+export const toldLine = (s: Shared) => `Told: ${s.sent.join(", ") || "nobody"}${s.failed.length ? `. Couldn't reach: ${s.failed.join(", ")}` : ""}`;
+
+export type NoteChange = { add: string } | { remove: number };
+
+// Adds or removes a note, tells every worker that can hear it, and returns the line to show whoever asked.
+export function changeNotes(repo: Repo, change: NoteChange, by: string, term: Terminal): string {
+  ensureForeman(repo);
+  if ("remove" in change) {
+    const note = removeNote(repo, change.remove);
+    return `removed note ${change.remove}: ${note.text}. ${toldLine(shareNote(repo, removedNoteMessage(note), by, term))}`;
+  }
+  const note = addNote(repo, change.add, by);
+  if (!note) return "that note is already there";
+  return `added note ${loadNotes(repo).length}. ${toldLine(shareNote(repo, newNoteMessage(repo, note), by, term))}`;
 }
 
 export const newNoteMessage = (repo: Repo, note: Note) => `${note.by} added a note about the setup. Every note is in ${notesDoc(repo)}.\n\n${note.text}`;

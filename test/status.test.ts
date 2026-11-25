@@ -9,7 +9,7 @@ import { gatherPane, spendByTask } from "../src/pane.ts";
 import { gather } from "../src/summary.ts";
 import { loadPlan, planPath } from "../src/plan.ts";
 import { loadTasks } from "../src/state.ts";
-import { ensureForeman } from "../src/spawn.ts";
+import { ensureForeman } from "../src/paths.ts";
 import { saveLimit } from "../src/limits.ts";
 import { statusView } from "../src/status.ts";
 import { PLAIN } from "../src/style.ts";

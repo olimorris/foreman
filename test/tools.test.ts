@@ -3,7 +3,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { respond, type Server } from "../src/mcp.ts";
 import { ask } from "../src/questions.ts";
-import { ensureForeman } from "../src/spawn.ts";
+import { ensureForeman } from "../src/paths.ts";
 import { TOOLS } from "../src/tools/index.ts";
 import type { Role } from "../src/tools/tool.ts";
 import { tempRepo } from "./helpers.ts";

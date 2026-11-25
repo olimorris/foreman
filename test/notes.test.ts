@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { addNote, briefNotes, listNotes, loadNotes, newNoteMessage, notesDoc, removeNote, shareNote } from "../src/notes.ts";
+import { addNote, briefNotes, changeNotes, listNotes, loadNotes, newNoteMessage, notesDoc, removeNote, shareNote } from "../src/notes.ts";
 import { spawn } from "../src/spawn.ts";
 import { findTask, withTasks, type Task } from "../src/state.ts";
 import { pauseForLimit, resume } from "../src/stop.ts";
@@ -77,4 +77,14 @@ test("a worker paused for the usage limit hears the notes it missed when it resu
   expect(prompt).toContain("- port 3000 is taken on this machine");
   expect(prompt).not.toContain("build cache");
   expect(findTask(repo, "T1").pausedAt).toBeUndefined();
+});
+
+test("changeNotes adds or removes a note, tells the workers and returns the line to show", () => {
+  const repo = tempRepo();
+  withTasks(repo, (tasks) => tasks.push(task("T1"), { ...task("T2"), socket: "/nonexistent/T2.sock", tab: undefined }));
+  const term = { ...fakeTerminal(), send: () => { throw new Error("gone"); } };
+  expect(changeNotes(repo, { add: "port 3000 is taken" }, "orchestrator", term)).toBe("added note 1. Told: nobody. Couldn't reach: T1");
+  expect(changeNotes(repo, { add: "port 3000 is taken" }, "T2", fakeTerminal())).toBe("that note is already there");
+  expect(changeNotes(repo, { remove: 1 }, "orchestrator", fakeTerminal())).toBe("removed note 1: port 3000 is taken. Told: T1");
+  expect(readFileSync(join(repo.root, ".git", "info", "exclude"), "utf8")).toContain(".foreman/");
 });

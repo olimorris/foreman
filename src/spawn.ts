@@ -1,10 +1,10 @@
-import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { must } from "./exec.ts";
 import { baseRef } from "./snapshot.ts";
 import { loadConfig, neverRules, telegramPlugins, withoutTelegram } from "./config.ts";
 import { findContext, writeIndex } from "./decisions.ts";
-import { findRepo, pluginArgs, socketPath, taskDir, worktreeDir, type Repo } from "./paths.ts";
+import { ensureForeman, findRepo, pluginArgs, socketPath, taskDir, worktreeDir, type Repo } from "./paths.ts";
 import { skillsPluginArgs } from "./skills.ts";
 import type { Terminal } from "./terminal.ts";
 import { CONVENTIONAL } from "./plan.ts";
@@ -17,16 +17,6 @@ import { mcpArgs, SERVER_NAME } from "./mcp.ts";
 import { WORKER_TOOLS } from "./tools/worker.ts";
 
 export type SpawnOptions = { id: string; title?: string; model?: string; brief: string; owns: string[]; base: string; session: string; stackedOn?: string; claudeConfig?: string };
-
-export function ensureForeman(repo: Repo): void {
-  mkdirSync(join(repo.foreman, "tasks"), { recursive: true });
-  const exclude = join(repo.root, ".git", "info", "exclude");
-  const current = existsSync(exclude) ? readFileSync(exclude, "utf8") : "";
-  if (!current.split("\n").includes(".foreman/")) {
-    mkdirSync(join(repo.root, ".git", "info"), { recursive: true });
-    appendFileSync(exclude, (current && !current.endsWith("\n") ? "\n" : "") + ".foreman/\n");
-  }
-}
 
 export function checkBrief(text: string): void {
   for (const heading of ["## Intent", "## Spec"]) {
@@ -103,6 +93,8 @@ export function workerCommand(task: Task, term: Terminal, prompt: string, resume
     prompt,
   ];
 }
+
+export const onModel = (task: { model?: string }) => (task.model ? `, on ${task.model}` : ", on Claude Code's default model");
 
 // Claude Code names a server's tools mcp__<server>__<tool>.
 export const workerToolNames = () => WORKER_TOOLS.map((t) => `mcp__${SERVER_NAME}__${t.name}`);

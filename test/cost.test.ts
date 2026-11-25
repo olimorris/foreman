@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { saveConfig } from "../src/config.ts";
-import { budgetLeft, overBudget, planSpend, priceFor, resetBudget, taskCost, usageCost } from "../src/cost.ts";
+import { budgetLeft, budgetLine, overBudget, planSpend, priceFor, resetBudget, setBudget, taskCost, usageCost } from "../src/cost.ts";
+import { loadConfig } from "../src/config.ts";
 import { recordSession, sessionsFile, transcriptDir } from "../src/transcripts.ts";
 import { budgetOverview } from "../src/overview.ts";
 import { loadPlan, planPath, type Plan } from "../src/plan.ts";
@@ -119,4 +120,15 @@ test("foreman budget reset puts the plan's count to $0, and the budget, the over
 
 test("foreman budget reset needs a plan", () => {
   expect(() => resetBudget(tempRepo())).toThrow("no plan.");
+});
+
+test("setBudget sets each kind of limit, and budgetLine says what they all are", () => {
+  const repo = tempRepo();
+  setBudget(repo, { usd: 6 });
+  setBudget(repo, { usd: 8, task: "T1" });
+  const budget = setBudget(repo, { usd: 50, plan: true });
+  expect(loadConfig(repo).budget).toEqual({ perTask: 6, plan: 50, tasks: { T1: 8 } });
+  expect(budgetLine(budget)).toBe("budget: $6.00 per task, $50.00 for the plan, T1 $8.00");
+  expect(budgetLine({})).toBe("budget: no per-task limit, no plan limit");
+  expect(() => setBudget(repo, { usd: 0 })).toThrow("usd must be a number of dollars above 0");
 });

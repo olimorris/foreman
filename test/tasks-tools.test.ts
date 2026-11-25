@@ -7,7 +7,7 @@ import { must, run } from "../src/exec.ts";
 import { loadNotes } from "../src/notes.ts";
 import { respond, TASKS, type Server } from "../src/mcp.ts";
 import type { Repo } from "../src/paths.ts";
-import { ensureForeman } from "../src/spawn.ts";
+import { ensureForeman } from "../src/paths.ts";
 import { taskTools } from "../src/tools/tasks.ts";
 import type { WaitForChange } from "../src/watch.ts";
 import { tempRepo } from "./helpers.ts";

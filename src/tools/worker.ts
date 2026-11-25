@@ -1,9 +1,8 @@
 import { appendEvent, REPORT_TYPES, type ReportType } from "../events.ts";
 import { terminal } from "../integrations/index.ts";
 import { propose } from "../ledger.ts";
-import { addNote, loadNotes, newNoteMessage, shareNote } from "../notes.ts";
+import { changeNotes } from "../notes.ts";
 import { names, tidy, unstoppableLine } from "../procs.ts";
-import { ensureForeman } from "../spawn.ts";
 import { findTask } from "../state.ts";
 import { transition } from "../lifecycle.ts";
 import type { Terminal } from "../terminal.ts";
@@ -81,13 +80,7 @@ export function workerTools(term: () => Terminal = terminal): Tool[] {
       },
       roles: ["worker"],
       handler: (args, s) => {
-        const by = taskOf(s);
-        ensureForeman(s.repo);
-        const note = addNote(s.repo, String(args.fact), by);
-        if (!note) return "that note is already there";
-        const shared = shareNote(s.repo, newNoteMessage(s.repo, note), by, term());
-        const told = `Told: ${shared.sent.join(", ") || "nobody"}${shared.failed.length ? `. Couldn't reach: ${shared.failed.join(", ")}` : ""}`;
-        return `added note ${loadNotes(s.repo).length}. ${told}`;
+        return changeNotes(s.repo, { add: String(args.fact) }, taskOf(s), term());
       },
     },
     {

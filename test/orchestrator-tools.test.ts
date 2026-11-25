@@ -2,13 +2,12 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadConfig } from "../src/config.ts";
 import { findDecision, propose } from "../src/ledger.ts";
 import { respond, type Server } from "../src/mcp.ts";
 import type { Repo } from "../src/paths.ts";
 import { loadPlan, planPath } from "../src/plan.ts";
 import { loadQuestions } from "../src/questions.ts";
-import { ensureForeman } from "../src/spawn.ts";
+import { ensureForeman } from "../src/paths.ts";
 import { findTask } from "../src/state.ts";
 import { orchestratorTools } from "../src/tools/orchestrator.ts";
 import type { Role } from "../src/tools/tool.ts";
@@ -140,14 +139,12 @@ test("note sends the fact to running workers, and notes lists it", async () => {
   expect(await ok("notes")).toBe("no notes yet. Add one with the note tool");
 });
 
-test("set_budget sets each kind of limit", async () => {
+test("set_budget refuses a task that doesn't exist, or a task and the plan at once", async () => {
   const repo = crew();
   const { ok, call } = server(repo);
-  await ok("set_budget", { usd: 5 });
-  await ok("set_budget", { usd: 8, task: "T1" });
-  expect(await ok("set_budget", { usd: 40, plan: true })).toBe("budget: $5.00 per task, $40.00 for the plan, T1 $8.00");
-  expect(loadConfig(repo).budget).toMatchObject({ perTask: 5, plan: 40, tasks: { T1: 8 } });
-  expect((await call("set_budget", { usd: 0 })).isError).toBe(true);
+  expect(await ok("set_budget", { usd: 8, task: "T1" })).toBe("budget: $5.00 per task, $40.00 for the plan, T1 $8.00");
+  expect((await call("set_budget", { usd: 8, task: "T9" })).isError).toBe(true);
+  expect((await call("set_budget", { usd: 8, task: "T1", plan: true })).isError).toBe(true);
 });
 
 test("spawn takes the brief as text and starts the worker with it", async () => {

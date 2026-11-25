@@ -4,14 +4,14 @@ import { defaultConvention, detectAdr } from "../adr.ts";
 import { writeAdrs } from "../adrwrite.ts";
 import { automerge } from "../automerge.ts";
 import { loadConfig, saveConfig } from "../config.ts";
-import { budgetLeft, budgetOf, usd } from "../cost.ts";
+import { budgetLeft, budgetLine, setBudget } from "../cost.ts";
 import { accept, findContext, reject, writeIndex } from "../decisions.ts";
 import { deliver } from "../deliver.ts";
 import { terminal } from "../integrations/index.ts";
 import { findDecision, loadDecisions, propose } from "../ledger.ts";
 import { activeLimit, limitLine } from "../limits.ts";
-import { addNote, listNotes, loadNotes, newNoteMessage, removedNoteMessage, removeNote, shareNote, type Shared } from "../notes.ts";
-import { defaultBase, taskDir, type Repo } from "../paths.ts";
+import { changeNotes, listNotes, loadNotes, toldLine } from "../notes.ts";
+import { defaultBase, ensureForeman, taskDir, type Repo } from "../paths.ts";
 import { blockSummary, unblock } from "../permissions.ts";
 import { describePlan, loadPlan, maxWorkers, parsePlan, planBrief, readyTasks, savePlan, stackable, validatePlan, workers } from "../plan.ts";
 import { names, tidy, unstoppableLine } from "../procs.ts";
@@ -21,10 +21,10 @@ import { sendToTask } from "../send.ts";
 import { capture, parseScreens } from "../shots.ts";
 import { adrLayout, loadSkills } from "../skills.ts";
 import { baseRef, snapshot } from "../snapshot.ts";
-import { ensureForeman, spawn } from "../spawn.ts";
+import { onModel, spawn } from "../spawn.ts";
 import { findTask, loadTasks } from "../state.ts";
 import { transition } from "../lifecycle.ts";
-import { restartWorker, resume, stopWorker } from "../stop.ts";
+import { restartedLine, restartWorker, resume, resumedLine, stopWorker } from "../stop.ts";
 import { sync } from "../sync.ts";
 import { teardown } from "../teardown.ts";
 import type { Terminal } from "../terminal.ts";
@@ -47,8 +47,6 @@ const numbers = (args: Args, key: string) => list(args, key).map((n) => {
   return Number(n);
 });
 const lines = (ls: string[]) => ls.join("\n");
-const onModel = (task: { model?: string }) => (task.model ? `, on ${task.model}` : ", on Claude Code's default model");
-const told = (s: Shared) => `Told: ${s.sent.join(", ") || "nobody"}${s.failed.length ? `. Couldn't reach: ${s.failed.join(", ")}` : ""}`;
 
 // The server runs inside the orchestrator's own session, so a tab opens beside it only when the terminal can name that session.
 function sessionOf(term: Terminal, tool: string): string {
@@ -152,18 +150,11 @@ function spawnTool(repo: Repo, args: Args, term: Terminal): string {
   return `spawned ${task.id}: ${task.worktree} on ${task.branch}, ${term.name} tab ${task.tab?.window}${onModel(task)}`;
 }
 
-function setBudget(repo: Repo, args: Args): string {
-  const amount = args.usd as number;
-  if (!Number.isFinite(amount) || amount <= 0) throw new Error("usd must be a number of dollars above 0");
+function budgetTool(repo: Repo, args: Args): string {
   const task = text(args, "task");
   if (task && args.plan) throw new Error("give either task or plan, not both");
   if (task) findTask(repo, task);
-  const budget = { ...budgetOf(repo) };
-  if (args.plan) budget.plan = amount;
-  else if (task) budget.tasks = { ...budget.tasks, [task]: amount };
-  else budget.perTask = amount;
-  saveConfig(repo, { budget });
-  return `budget: ${budget.perTask !== undefined ? `${usd(budget.perTask)} per task` : "no per-task limit"}, ${budget.plan !== undefined ? `${usd(budget.plan)} for the plan` : "no plan limit"}${Object.entries(budget.tasks ?? {}).map(([id, n]) => `, ${id} ${usd(n)}`).join("")}`;
+  return budgetLine(setBudget(repo, { usd: args.usd as number, task, plan: !!args.plan }));
 }
 
 function askTool(repo: Repo, args: Args): string {
@@ -186,16 +177,10 @@ function answerTool(repo: Repo, args: Args): string {
 }
 
 function noteTool(repo: Repo, args: Args, term: Terminal): string {
-  ensureForeman(repo);
-  if (args.remove !== undefined) {
-    const note = removeNote(repo, args.remove as number);
-    return `removed note ${args.remove}: ${note.text}. ${told(shareNote(repo, removedNoteMessage(note), "orchestrator", term))}`;
-  }
+  if (args.remove !== undefined) return changeNotes(repo, { remove: args.remove as number }, "orchestrator", term);
   const fact = text(args, "text")?.trim();
   if (!fact) throw new Error("give the note's text, or remove with the number of a note to take out");
-  const note = addNote(repo, fact, "orchestrator");
-  if (!note) return "that note is already there";
-  return `added note ${loadNotes(repo).length}. ${told(shareNote(repo, newNoteMessage(repo, note), "orchestrator", term))}`;
+  return changeNotes(repo, { add: fact }, "orchestrator", term);
 }
 
 async function shots(repo: Repo, id: string): Promise<string> {
@@ -329,16 +314,14 @@ export function orchestratorTools(term: () => Terminal = terminal): Tool[] {
       (args, repo) => {
         const id = args.task as string;
         const t = term();
-        const task = resume(repo, id, t, sessionOf(t, "resume"), { model: text(args, "model") });
-        return `resumed ${id}'s worker in a new tab${onModel(task)}`;
+        return resumedLine(resume(repo, id, t, sessionOf(t, "resume"), { model: text(args, "model") }));
       }),
     tool("restart", "Close a task's worker and reopen its session in a new tab, carrying on where it was.",
       schema({ task: TASK, model: MODEL }, ["task"]),
       (args, repo) => {
         const id = args.task as string;
         const t = term();
-        const task = restartWorker(repo, findTask(repo, id), t, sessionOf(t, "restart"), { model: text(args, "model") });
-        return `restarted ${id}'s worker in a new tab, carrying on its last session${onModel(task)}`;
+        return restartedLine(restartWorker(repo, findTask(repo, id), t, sessionOf(t, "restart"), { model: text(args, "model") }));
       }),
     tool("tidy", "Stop processes a task's old runs left behind, such as a test run that outlived its time limit. The watcher already does this on every pass, so call it only when a worker says a leftover process is in its way.",
       schema({ task: TASK }, ["task"]),
@@ -371,7 +354,7 @@ export function orchestratorTools(term: () => Terminal = terminal): Tool[] {
       (args, repo) => lines(automerge(repo, args.on === undefined ? [] : [args.on ? "on" : "off"]))),
     tool("set_budget", "Set a spending limit in dollars: for every task, for one task, or for the whole plan. Raise a limit only when the user says so.",
       schema({ usd: { type: "number", description: "The limit in US dollars" }, task: str("Set the limit for this task only"), plan: bool("Set the limit for the whole plan") }, ["usd"]),
-      (args, repo) => setBudget(repo, args)),
+      (args, repo) => budgetTool(repo, args)),
     tool("decisions", "List proposed decisions and accepted ones that aren't in the repo yet.",
       schema({ all: bool("List every decision, including rejected ones and ones already recorded as ADRs") }),
       (args, repo) => {
@@ -392,13 +375,13 @@ export function orchestratorTools(term: () => Terminal = terminal): Tool[] {
         const paths = text(args, "paths") === undefined ? undefined : list(args, "paths");
         const supersedes = text(args, "supersedes") === undefined ? undefined : numbers(args, "supersedes");
         const r = accept(repo, id, { title: text(args, "title"), body: text(args, "body"), paths, slug: text(args, "slug"), supersedes }, term());
-        return `accepted ${id}. ${told(r)}`;
+        return `accepted ${id}. ${toldLine(r)}`;
       }),
     tool("reject", "Reject a proposed decision, or overrule one Foreman accepted. It messages the proposer, and for an accepted one every worker the acceptance reached.",
       schema({ decision: str("The decision's id, such as D-4"), reason: str("Why, pointing at the record that settles it when there is one") }, ["decision", "reason"]),
       (args, repo) => {
         const r = reject(repo, args.decision as string, args.reason as string, term());
-        return `rejected ${args.decision}. Told: ${r.sent.join(", ") || "nobody"}`;
+        return `rejected ${args.decision}. ${toldLine(r)}`;
       }),
     tool("propose", "Propose a decision for the user to settle, such as a draft decision from planning or a rule a PR comment states.",
       schema({

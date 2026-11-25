@@ -4,7 +4,7 @@ import { budgetLeft } from "./cost.ts";
 import { loadSessions, sessionsFile } from "./transcripts.ts";
 import type { Repo } from "./paths.ts";
 import type { Terminal } from "./terminal.ts";
-import { checkModel, tabLabel, workerCommand } from "./spawn.ts";
+import { checkModel, onModel, tabLabel, workerCommand } from "./spawn.ts";
 import { stopWorkerProcesses, workerTree } from "./procs.ts";
 import { findTask, loadTasks, type Task } from "./state.ts";
 import { activeLimit, limitLine } from "./limits.ts";
@@ -31,6 +31,9 @@ export function pauseForLimit(repo: Repo, task: Task, term: Terminal, note?: str
   closeWorker(task, term);
   transition(repo, task.id, { type: "paused", why: "limit", note });
 }
+
+export const resumedLine = (task: Task) => `resumed ${task.id}'s worker in a new tab${onModel(task)}`;
+export const restartedLine = (task: Task) => `restarted ${task.id}'s worker in a new tab, carrying on its last session${onModel(task)}`;
 
 export type Reopen = { model?: string; prompt?: string; note?: string };
 

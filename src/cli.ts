@@ -1,5 +1,4 @@
 import { readFileSync, realpathSync } from "node:fs";
-import { saveConfig } from "./config.ts";
 import { doctor } from "./doctor.ts";
 import { printBanner } from "./banner.ts";
 import { goneText, helpText, usageError, UsageError } from "./help.ts";
@@ -11,10 +10,9 @@ import { styleFor } from "./style.ts";
 import { runReview } from "./review.ts";
 import { join } from "node:path";
 import { areaLock, hookWho, recordHookBlock, sessionStartContext, stopHook, type HookInput, type LockContext } from "./hooks.ts";
-import { findRepo, pluginRoot, socketPath, type Repo } from "./paths.ts";
+import { ensureForeman, findRepo, pluginRoot, socketPath, type Repo } from "./paths.ts";
 import { terminal } from "./integrations/index.ts";
 import { requireSession } from "./terminal.ts";
-import { ensureForeman } from "./spawn.ts";
 import { budgetOverview } from "./overview.ts";
 import { findTask, loadTasks } from "./state.ts";
 import { lastOrchestratorSession, orchestratorCommand, orchestratorModel, orchestratorPlugins } from "./up.ts";
@@ -24,11 +22,12 @@ import { forTerminal, page, summaryText, writeSummary } from "./summary.ts";
 import { timelineText } from "./timeline.ts";
 import { orchestratorSessionName, removeForeman } from "./remove.ts";
 import { automerge } from "./automerge.ts";
-import { budgetOf, costText, resetBudget, usd } from "./cost.ts";
+import { budgetLine, costText, resetBudget, setBudget } from "./cost.ts";
 import { recordSession, sessionsFile } from "./transcripts.ts";
-import { restartWorker, resume } from "./stop.ts";
+import { restartedLine, restartWorker, resume, resumedLine } from "./stop.ts";
+import { onModel } from "./spawn.ts";
 import { gatherPane, livePane, openPane, renderPane, spendByTask } from "./pane.ts";
-import { addNote, listNotes, loadNotes, newNoteMessage, removedNoteMessage, removeNote, shareNote } from "./notes.ts";
+import { changeNotes, listNotes, loadNotes } from "./notes.ts";
 
 function version(): string {
   return JSON.parse(readFileSync(join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8")).version;
@@ -49,8 +48,6 @@ function flags(args: string[]): { positional: string[]; opts: Record<string, str
   }
   return { positional, opts };
 }
-
-const onModel = (task: { model?: string }) => (task.model ? `, on ${task.model}` : ", on Claude Code's default model");
 
 async function main(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv;
@@ -123,14 +120,9 @@ async function main(argv: string[]): Promise<number> {
       const repo = findRepo();
       if (!positional.length && !opts.plan) return console.log(budgetOverview(repo, styleFor())), 0;
       if (positional.length === 1 && positional[0] === "reset" && !opts.plan) return resetBudget(repo).forEach((line) => console.log(line)), 0;
-      const budget = { ...budgetOf(repo) };
       const amount = Number(opts.plan?.[0] ?? positional.at(-1));
       if (!Number.isFinite(amount) || amount <= 0) throw usageError("budget");
-      if (opts.plan) budget.plan = amount;
-      else if (positional.length === 2) budget.tasks = { ...budget.tasks, [positional[0]!]: amount };
-      else budget.perTask = amount;
-      saveConfig(repo, { budget });
-      console.log(`budget: ${budget.perTask !== undefined ? `${usd(budget.perTask)} per task` : "no per-task limit"}, ${budget.plan !== undefined ? `${usd(budget.plan)} for the plan` : "no plan limit"}${Object.entries(budget.tasks ?? {}).map(([id, n]) => `, ${id} ${usd(n)}`).join("")}`);
+      console.log(budgetLine(setBudget(repo, { usd: amount, task: positional.length === 2 ? positional[0] : undefined, plan: !!opts.plan })));
       return 0;
     }
     case "workers":
@@ -144,8 +136,7 @@ async function main(argv: string[]): Promise<number> {
       const [id] = positional;
       if (!id) throw usageError("restart");
       const session = requireSession(term, "restart");
-      const task = restartWorker(repo, findTask(repo, id), term, session, { model: opts.model?.[0] });
-      console.log(`restarted ${id}'s worker in a new tab, carrying on its last session${onModel(task)}`);
+      console.log(restartedLine(restartWorker(repo, findTask(repo, id), term, session, { model: opts.model?.[0] })));
       return 0;
     }
     case "resume": {
@@ -153,8 +144,7 @@ async function main(argv: string[]): Promise<number> {
       const [id] = positional;
       if (!id) throw usageError("resume");
       const session = requireSession(term, "resume");
-      const task = resume(repo, id, term, session, { model: opts.model?.[0] });
-      console.log(`resumed ${id}'s worker in a new tab${onModel(task)}`);
+      console.log(resumedLine(resume(repo, id, term, session, { model: opts.model?.[0] })));
       return 0;
     }
     case "status": {
@@ -174,17 +164,8 @@ async function main(argv: string[]): Promise<number> {
     case "note": {
       const repo = findRepo();
       const by = process.env.FOREMAN_TASK ?? "orchestrator";
-      ensureForeman(repo);
-      const told = (s: { sent: string[]; failed: string[] }) => `Told: ${s.sent.join(", ") || "nobody"}${s.failed.length ? `. Couldn't reach: ${s.failed.join(", ")}` : ""}`;
-      if (opts.remove) {
-        const note = removeNote(repo, Number(opts.remove[0]));
-        console.log(`removed note ${opts.remove[0]}: ${note.text}. ${told(shareNote(repo, removedNoteMessage(note), by, term))}`);
-        return 0;
-      }
-      if (!positional.length) throw usageError("note");
-      const note = addNote(repo, positional.join(" "), by);
-      if (!note) return console.log("that note is already there"), 0;
-      console.log(`added note ${loadNotes(repo).length}. ${told(shareNote(repo, newNoteMessage(repo, note), by, term))}`);
+      if (!opts.remove && !positional.length) throw usageError("note");
+      console.log(changeNotes(repo, opts.remove ? { remove: Number(opts.remove[0]) } : { add: positional.join(" ") }, by, term));
       return 0;
     }
     case "notes": {

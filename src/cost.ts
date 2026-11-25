@@ -1,4 +1,4 @@
-import { loadConfig } from "./config.ts";
+import { loadConfig, saveConfig } from "./config.ts";
 import type { Repo } from "./paths.ts";
 import { loadPlan, planPath, type Plan } from "./plan.ts";
 import { rounds } from "./rounds.ts";
@@ -64,6 +64,22 @@ export const DEFAULT_BUDGET: Budget = { perTask: 5, plan: 40 };
 export const budgetOf = (repo: Repo): Budget => ({ ...DEFAULT_BUDGET, ...loadConfig(repo).budget });
 
 export const taskLimit = (b: Budget | undefined, id: string) => b?.tasks?.[id] ?? b?.perTask;
+
+// No task and no plan sets the limit for every task.
+export type BudgetChange = { usd: number; task?: string; plan?: boolean };
+
+export function setBudget(repo: Repo, change: BudgetChange): Budget {
+  if (!Number.isFinite(change.usd) || change.usd <= 0) throw new Error("usd must be a number of dollars above 0");
+  const budget = { ...budgetOf(repo) };
+  if (change.plan) budget.plan = change.usd;
+  else if (change.task) budget.tasks = { ...budget.tasks, [change.task]: change.usd };
+  else budget.perTask = change.usd;
+  saveConfig(repo, { budget });
+  return budget;
+}
+
+export const budgetLine = (b: Budget) =>
+  `budget: ${b.perTask !== undefined ? `${usd(b.perTask)} per task` : "no per-task limit"}, ${b.plan !== undefined ? `${usd(b.plan)} for the plan` : "no plan limit"}${Object.entries(b.tasks ?? {}).map(([id, n]) => `, ${id} ${usd(n)}`).join("")}`;
 
 // Alerts fire once per limit, so a raised limit can alert again, and so can a plan that a reset brought back under its limit. Stop lists every task over its limit on every pass.
 export function overBudget(costs: TaskCost[], planTotal: number, budget: Budget | undefined, alerted: Record<string, number>): { reasons: string[]; alerted: Record<string, number>; stop: string[] } {
