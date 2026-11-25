@@ -54,6 +54,13 @@ export const GROUPS: Group[] = [
     ],
   },
   {
+    title: "Remove Foreman",
+    commands: [
+      { usage: "remove", about: "Take Foreman's worktrees, branches and files out of this repo" },
+      { usage: "remove --discard", about: "Remove them even when a task has unmerged work" },
+    ],
+  },
+  {
     title: "Run by Claude Code",
     commands: [
       { usage: "mcp", about: "Serve Foreman's tools to the orchestrator and workers" },

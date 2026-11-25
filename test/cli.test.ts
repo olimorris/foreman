@@ -26,3 +26,9 @@ test("foreman help leaves out the commands agents call", () => {
   for (const gone of ["report", "spawn", "watch", "baseline", "together", "tidy", "deliver"]) expect(r.out).not.toMatch(new RegExp(`^  ${gone}\\b`, "m"));
   expect(r.out).toMatch(/^  status \[--json\]/m);
 });
+
+test("foreman remove refuses outside a git repo without touching anything", () => {
+  const r = cli("remove");
+  expect(r.err).toContain("not inside a git repository");
+  expect(r.code).toBe(1);
+});

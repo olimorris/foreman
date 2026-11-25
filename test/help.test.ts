@@ -43,7 +43,7 @@ test("the help lists the version command", () => {
 
 test("the help lists only the commands people use, plus the two Claude Code runs", () => {
   const commands = new Set(GROUPS.flatMap((g) => g.commands.map((c) => c.usage.split(" ")[0])));
-  expect([...commands].sort()).toEqual(["automerge", "budget", "cost", "doctor", "hook", "mcp", "note", "notes", "pane", "restart", "resume", "status", "summary", "timeline", "up", "version", "workers"]);
+  expect([...commands].sort()).toEqual(["automerge", "budget", "cost", "doctor", "hook", "mcp", "note", "notes", "pane", "remove", "restart", "resume", "status", "summary", "timeline", "up", "version", "workers"]);
 });
 
 test("a command that moved to the MCP server says so and names the tool", () => {

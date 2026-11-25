@@ -94,16 +94,13 @@ Foreman runs on macOS inside a terminal app. You also need:
 brew uninstall foreman
 ```
 
-To remove the command and the plugin. However, traces of Foreman remain in your repo which can be removed with:
+To remove the command and the plugin. Foreman also leaves worktrees, branches and its `.foreman/` folder in each repo it ran in. Before you uninstall, run this in each of those repos:
 
 ```sh
-git worktree remove --force .foreman/worktrees/<task>   # once per leftover worktree
-rm -rf .foreman
-git worktree prune                                       # if you deleted .foreman/ first
-git branch -D $(git branch --list 'foreman/*' | tr -d ' *+')
+foreman remove
 ```
 
-Then delete the `.foreman/` line from `.git/info/exclude`. Foreman added it so `.foreman/` stays out of git. Its PRs and any branches it pushed are on GitHub, so close or delete those there.
+It closes any worker tabs still open, then removes every task's worktree, the `.foreman/` folder, the local `foreman/*` branches and the `.foreman/` line Foreman added to `.git/info/exclude`. It won't run while the orchestrator is running for the repo. It also won't run while a task has unmerged commits or uncommitted files, and it names those tasks. Run `foreman remove --discard` to lose that work. Branches Foreman pushed and its PRs stay on GitHub, so close or delete those there.
 
 ### Working with an agent
 
