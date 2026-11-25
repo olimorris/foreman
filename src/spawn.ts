@@ -8,7 +8,7 @@ import { pluginArgs, socketPath, taskDir, worktreeDir, type Repo } from "./paths
 import type { Terminal } from "./terminal.ts";
 import { CONVENTIONAL } from "./plan.ts";
 import { setTrust } from "./trust.ts";
-import { loadTasks, withTasks, type Task } from "./state.ts";
+import { loadTasks, nextWorker, withTasks, type Task } from "./state.ts";
 
 export type SpawnOptions = { id: string; title?: string; brief: string; owns: string[]; base: string; session: string; claudeConfig?: string };
 
@@ -53,7 +53,7 @@ export function spawn(repo: Repo, opts: SpawnOptions, term: Terminal): Task {
   writeFileSync(briefPath, briefHeader({ id, worktree, branch, base, owns, index, context }) + briefText);
   setTrust(worktree, true, opts.claudeConfig);
 
-  const task: Task = { id, ...(opts.title ? { title: opts.title } : {}), status: "running", branch, base, worktree, owns, socket: socketPath(repo, id), startSha, createdAt: new Date().toISOString() };
+  const task: Task = { id, ...(opts.title ? { title: opts.title } : {}), worker: nextWorker(loadTasks(repo)), status: "running", branch, base, worktree, owns, socket: socketPath(repo, id), startSha, createdAt: new Date().toISOString() };
   withTasks(repo, (tasks) => tasks.push(task));
   task.tab = term.open(opts.session, tabLabel(task), worktree, workerCommand(task, term, `Your brief is ${briefPath}. Read it and start. This repo's Foreman workflow explicitly allows you to commit and rebase on ${branch}, so commit there as you go, and never on any other branch.`));
   withTasks(repo, (tasks) => Object.assign(tasks.find((t) => t.id === id)!, { tab: task.tab }));
@@ -80,9 +80,13 @@ export function workerCommand(task: Task, term: Terminal, prompt: string, resume
 }
 
 // Ids like T1 mean nothing to someone glancing across tabs, so the label carries the start of the task's title.
-export function tabLabel(task: Pick<Task, "id" | "title">, prefix = ""): string {
+export function taskLabel(task: Pick<Task, "id" | "title">): string {
   const summary = task.title && plainTitle(task.title).split(/\s+/).slice(0, 4).join(" ");
-  return `${prefix}${task.id}${summary ? `: ${summary}` : ""}`;
+  return `${task.id}${summary ? `: ${summary}` : ""}`;
+}
+
+export function tabLabel(task: Pick<Task, "id" | "title" | "worker">): string {
+  return `${task.worker ? `${task.worker} · ` : ""}${taskLabel(task)}`;
 }
 
 export const plainTitle = (title: string) => title.replace(/^\w+(\([\w./-]+\))?!?:\s*/, "").trim();

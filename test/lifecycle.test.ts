@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { appendEvent, readEvents } from "../src/events.ts";
 import { must, run } from "../src/exec.ts";
 import { checkBrief, spawn, tabLabel } from "../src/spawn.ts";
-import { findTask, loadTasks, updateTask } from "../src/state.ts";
+import { findTask, loadTasks, nextWorker, updateTask, type Task } from "../src/state.ts";
 import { teardown } from "../src/teardown.ts";
 import { resume, stopWorker } from "../src/stop.ts";
 import { recordSession, sessionsFile } from "../src/cost.ts";
@@ -41,9 +41,9 @@ describe("spawn", () => {
 
   test("labels the tab with the id and the start of the title", () => {
     const { term } = spawned();
-    expect(term.labels).toEqual(["T1"]);
+    expect(term.labels).toEqual(["W1 · T1"]);
     expect(tabLabel({ id: "T2", title: "feat(settings)!: add an export button to the settings pane" })).toBe("T2: add an export button");
-    expect(tabLabel({ id: "T3", title: "fix: crash" }, "review ")).toBe("review T3: crash");
+    expect(tabLabel({ id: "T3", title: "fix: crash", worker: "W2" })).toBe("W2 · T3: crash");
   });
 
   test("refuses a title that isn't a conventional commit", () => {
@@ -72,6 +72,13 @@ test("tasks saved with a Rex tab load with it as their tab", () => {
   saved.tasks[0] = { ...saved.tasks[0], tab: undefined, rex: { session: "s", window: "w", block: "b" } };
   writeFileSync(path, JSON.stringify(saved));
   expect(findTask(repo, "T1").tab).toEqual({ session: "s", window: "w", pane: "b" });
+});
+
+test("each new worker takes the lowest number no running task holds", () => {
+  const t = (worker: string, status: Task["status"] = "running") => ({ id: worker, worker, status }) as Task;
+  expect(nextWorker([])).toBe("W1");
+  expect(nextWorker([t("W1"), t("W3")])).toBe("W2");
+  expect(nextWorker([t("W1", "torn-down"), t("W2", "merged"), t("W3", "pr-open")])).toBe("W1");
 });
 
 describe("stop and resume", () => {

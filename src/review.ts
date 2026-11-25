@@ -8,7 +8,7 @@ import { pluginRoot, taskDir, worktreeDir, type Repo } from "./paths.ts";
 import type { Terminal } from "./terminal.ts";
 import { sendToTask } from "./send.ts";
 import { capture, parseScreens, type Capture } from "./shots.ts";
-import { tabLabel } from "./spawn.ts";
+import { taskLabel } from "./spawn.ts";
 import { baseRef } from "./snapshot.ts";
 import { findTask, loadTasks, updateTask, type Task } from "./state.ts";
 import { budgetLeft } from "./cost.ts";
@@ -50,7 +50,7 @@ export function startReview(repo: Repo, id: string, term: Terminal, session = te
   const task = findTask(repo, id);
   const target = session ?? task.tab?.session;
   if (!target) throw new Error(`run foreman review from inside ${term.name}, since the task has no tab to open the review beside`);
-  term.open(target, tabLabel(task, "review "), task.worktree, [join(pluginRoot, "bin", "foreman"), "review-run", id], false);
+  term.open(target, `review ${taskLabel(task)}`, task.worktree, [join(pluginRoot, "bin", "foreman"), "review-run", id], false);
 }
 
 export async function runReview(repo: Repo, id: string): Promise<string> {
