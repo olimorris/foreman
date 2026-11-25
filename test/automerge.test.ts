@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { automerge, automergeOn, checksOf, mergeMethod, type Check } from "../src/automerge.ts";
+import { saveConfig } from "../src/config.ts";
 import { UsageError } from "../src/help.ts";
 import { loadPlan, parsePlan, savePlan } from "../src/plan.ts";
 import type { Task } from "../src/state.ts";
@@ -118,14 +119,22 @@ describe("foreman automerge", () => {
   test("switches it for the current plan, and a new plan starts with it off", () => {
     const repo = tempRepo();
     savePlan(repo, parsePlan(PLAN));
-    expect(automerge(repo, [])).toStartWith("Automerge is off");
-    expect(automerge(repo, ["on"])).toStartWith("Automerge is on until this plan finishes");
+    expect(automerge(repo, [])[0]).toStartWith("Automerge is off");
+    expect(automerge(repo, ["on"])).toEqual([expect.stringMatching(/^Automerge is on until this plan finishes/)]);
     savePlan(repo, { ...loadPlan(repo)!, approvedAt: "now" });
     expect(automergeOn(repo)).toBe(true);
-    expect(automerge(repo, ["off"])).toStartWith("Automerge is off");
+    expect(automerge(repo, ["off"])[0]).toStartWith("Automerge is off");
     automerge(repo, ["on"]);
     savePlan(repo, parsePlan(PLAN));
     expect(automergeOn(repo)).toBe(false);
+  });
+
+  test("switching it on lists the never rules about merging", () => {
+    const repo = tempRepo();
+    savePlan(repo, parsePlan(PLAN));
+    saveConfig(repo, { never: ["Merge a release PR. I cut every release.", "Push to main"] });
+    expect(automerge(repo, ["on"]).slice(1)).toEqual(["Your never list mentions merging, and it still applies:", "  - Merge a release PR. I cut every release."]);
+    expect(automerge(repo, ["off"])).toHaveLength(1);
   });
 
   test("needs a plan, and takes only on or off", () => {

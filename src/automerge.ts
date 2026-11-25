@@ -1,3 +1,4 @@
+import { loadConfig, neverRules } from "./config.ts";
 import { run } from "./exec.ts";
 import { usageError } from "./help.ts";
 import type { Repo } from "./paths.ts";
@@ -69,13 +70,15 @@ export function mergePr(root: string, pr: Merge, method: MergeMethod): string | 
 const ON = "Automerge is on until this plan finishes. Foreman merges each task's PR once the reviewer approves it and every check passes. Release PRs, the decisions PR and any PR Foreman didn't open stay with you";
 const OFF = "Automerge is off. You merge every PR yourself";
 
-export function automerge(repo: Repo, args: string[]): string {
+export function automerge(repo: Repo, args: string[]): string[] {
   const [arg, ...extra] = args;
   if (extra.length || (arg !== undefined && arg !== "on" && arg !== "off")) throw usageError("automerge");
   const plan = loadPlan(repo);
-  if (arg === undefined) return plan?.automerge ? ON : OFF;
+  if (arg === undefined) return [plan?.automerge ? ON : OFF];
   if (!plan) throw new Error("no plan. foreman automerge switches it for the current plan, so store one with foreman plan <file> first");
   // Stored on the plan, not in config.json, so the next foreman plan <file> starts with it off.
   writeJson(planPath(repo), { ...plan, automerge: arg === "on" });
-  return arg === "on" ? ON : OFF;
+  if (arg === "off") return [OFF];
+  const merging = neverRules(loadConfig(repo)).filter((r) => /merg/i.test(r));
+  return [ON, ...(merging.length ? ["Your never list mentions merging, and it still applies:", ...merging.map((r) => `  - ${r}`)] : [])];
 }

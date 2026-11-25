@@ -316,7 +316,7 @@ async function main(argv: string[]): Promise<number> {
       for (const line of workers(findRepo(), positional)) console.log(line);
       return 0;
     case "automerge":
-      console.log(automerge(findRepo(), positional));
+      for (const line of automerge(findRepo(), positional)) console.log(line);
       return 0;
     case "pause": {
       const repo = findRepo();
