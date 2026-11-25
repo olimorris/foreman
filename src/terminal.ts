@@ -2,8 +2,12 @@ export type Tab = { session: string; window: string; pane: string };
 
 export type Check = { name: string; ok: boolean; detail: string };
 
+export type Env = Record<string, string | undefined>;
+
 export type Terminal = {
   name: string;
+  /** Whether a process with this environment runs inside this terminal. Foreman uses the one that says yes when `FOREMAN_TERMINAL` isn't set. */
+  inside?(env: Env): boolean;
   /** The session Foreman was run from, or undefined outside this terminal. */
   currentSession(): string | undefined;
   /** Variables this terminal sets that a worker must not inherit, or a user hook in the worker would act on the orchestrator's session. */

@@ -7,6 +7,7 @@ const script = join(import.meta.dir, "rex.sh");
 // Rex resolves a block or window id only within the session it's scoped to, so every tab keeps its session.
 export const rex: Terminal = {
   name: "Rex",
+  inside: (env) => env.TERM_PROGRAM === "rex",
   currentSession: () => process.env.REX_SESSION || undefined,
   sessionEnv: ["REX_SESSION", "REX_BLOCK"],
   requires: ["rex"],

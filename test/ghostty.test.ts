@@ -27,6 +27,10 @@ test("FOREMAN_TERMINAL=ghostty selects this folder", () => {
   expect(typeof term.checks).toBe("function");
 });
 
+test("Foreman picks Ghostty inside a Ghostty terminal without FOREMAN_TERMINAL", () => {
+  expect(terminal(undefined, undefined, { TERM_PROGRAM: "ghostty" }).name).toBe("Ghostty");
+});
+
 test("plain words stay unquoted and everything else survives the shell", () => {
   expect(shellQuote("claude")).toBe("claude");
   expect(shellQuote("FOREMAN_TASK=T5")).toBe("FOREMAN_TASK=T5");

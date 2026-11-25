@@ -128,6 +128,8 @@ export function herdrTerminal(exec: Exec = run, script: (cwd: string, cmd: strin
   };
   return {
     name: "Herdr",
+    // Herdr before 0.9.2 leaves the outer terminal's TERM_PROGRAM in its panes, so only the pane id says Foreman is in Herdr.
+    inside: (env) => env.TERM_PROGRAM === "herdr" || Boolean(env.HERDR_PANE_ID),
     currentSession: () => process.env.HERDR_WORKSPACE_ID || undefined,
     // Herdr sets HERDR_PANE_ID and the other HERDR_* ids fresh in every pane, so a worker never sees the orchestrator's.
     sessionEnv: [],
