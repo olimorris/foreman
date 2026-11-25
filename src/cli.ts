@@ -28,7 +28,7 @@ import { setTrust } from "./trust.ts";
 import { deliver } from "./deliver.ts";
 import { describePlan, loadPlan, maxWorkers, parsePlan, planBrief, readyTasks, savePlan, validatePlan } from "./plan.ts";
 import { sync } from "./sync.ts";
-import { writeSummary } from "./summary.ts";
+import { forTerminal, page, writeSummary } from "./summary.ts";
 import { budgetLeft, budgetOf, orchestratorCost, recordSession, sessionsFile, taskCost, usd } from "./cost.ts";
 import { restartWorker, resume, stopWorker } from "./stop.ts";
 import { watch, watcherArmed } from "./watch.ts";
@@ -231,9 +231,14 @@ async function main(argv: string[]): Promise<number> {
       if (r.failed.length) console.log(`couldn't reach: ${r.failed.join(", ")}`);
       return 0;
     }
-    case "summary":
-      console.log(`wrote ${writeSummary(findRepo())}`);
+    case "summary": {
+      const path = writeSummary(findRepo());
+      // The orchestrator runs this too, and a pager would wait forever for a q nobody types.
+      if (!process.stdout.isTTY) return console.log(`wrote ${path}`), 0;
+      const md = readFileSync(path, "utf8");
+      await page(process.env.NO_COLOR ? md : forTerminal(md));
       return 0;
+    }
     case "cost": {
       const repo = findRepo();
       const budget = budgetOf(repo);
