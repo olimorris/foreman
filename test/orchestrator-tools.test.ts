@@ -6,13 +6,13 @@ import { loadConfig } from "../src/config.ts";
 import { findDecision, propose } from "../src/ledger.ts";
 import { respond, type Server } from "../src/mcp.ts";
 import type { Repo } from "../src/paths.ts";
-import { loadPlan } from "../src/plan.ts";
+import { loadPlan, planPath } from "../src/plan.ts";
 import { loadQuestions } from "../src/questions.ts";
 import { ensureForeman } from "../src/spawn.ts";
 import { findTask } from "../src/state.ts";
 import { orchestratorTools } from "../src/tools/orchestrator.ts";
 import type { Role } from "../src/tools/tool.ts";
-import { orchestratorAllowedTools, orchestratorCommand } from "../src/up.ts";
+import { orchestratorAllowedTools } from "../src/up.ts";
 import { fakeTerminal, tempRepo } from "./helpers.ts";
 
 const task = (id: string, status: string) => ({ id, status, title: `feat: build ${id}`, worker: "W1", branch: `foreman/${id}`, base: "main", worktree: `/w/${id}`, owns: ["src/"], socket: "", createdAt: "", tab: { session: "session:1", window: `window:${id}`, pane: "block:1" } });
@@ -185,7 +185,10 @@ test("plan with tasks replaces one task and adds another, keeping the rest of pl
   const { ok, call } = server(repo);
   await ok("plan", { text: PLAN_TEXT });
   await ok("plan", { approve: true });
+  const startedAt = loadPlan(repo)!.startedAt;
+  expect(startedAt).toBe(loadPlan(repo)!.approvedAt);
   await ok("workers", { count: 2 });
+  writeFileSync(planPath(repo), JSON.stringify({ ...loadPlan(repo), budgetResetAt: "2026-11-25T12:00:00.000Z" }));
   await ok("plan", { tasks: `${planTask("T2", "feat: filter notes by tag", "T1")}\n${planTask("T3", "docs: explain tags", "T1")}` });
   const md = readFileSync(join(repo.foreman, "plan.md"), "utf8");
   expect(md).toStartWith("# Plan: Tags\nDeadline: Friday\n\n## T1: feat: add tags");
@@ -194,6 +197,10 @@ test("plan with tasks replaces one task and adds another, keeping the rest of pl
   expect(p.tasks.map((t) => `${t.id}: ${t.title}`)).toEqual(["T1: feat: add tags", "T2: feat: filter notes by tag", "T3: docs: explain tags"]);
   expect(p.approvedAt).toBeUndefined();
   expect(p.maxWorkers).toBe(2);
+  expect(p.startedAt).toBe(startedAt);
+  expect(p.budgetResetAt).toBe("2026-11-25T12:00:00.000Z");
+  await ok("plan", { approve: true });
+  expect(loadPlan(repo)!.startedAt).toBe(startedAt);
   expect(readFileSync(join(repo.foreman, "plan", "T2.md"), "utf8")).toContain('"feat: filter notes by tag", the user said.');
   expect((await call("plan", { tasks: "Make T2 smaller" })).text).toStartWith("tasks takes only task sections");
   expect((await call("plan", { tasks: planTask("T4", "feat: x", "T9") })).text).toBe("problem: T4 depends on T9, which isn't in the plan");
@@ -212,13 +219,12 @@ test("workers and automerge need a plan to change, and say so", async () => {
   expect((await call("workers", { count: 0 })).text).toBe("count must be 1 or more");
 });
 
-test("the orchestrator is allowed its tools by name, and Bash only for the commands still on the CLI", () => {
+test("the orchestrator is allowed its tools by name, and no foreman command", () => {
   const allowed = orchestratorAllowedTools();
   expect(allowed).toContain("mcp__foreman__accept");
   expect(allowed).toContain("mcp__foreman__spawn");
   expect(allowed).toContain("mcp__foreman__status");
   expect(allowed).not.toContain("mcp__foreman__report");
   expect(allowed).toContain("mcp__foreman__watch");
-  expect(allowed.filter((a) => a.startsWith("Bash("))).toEqual(["Bash(foreman pane *)"]);
-  expect(orchestratorCommand([], "/s.sock", undefined, false)).not.toContain("Bash(foreman *)");
+  expect(allowed.filter((a) => a.startsWith("Bash("))).toEqual([]);
 });

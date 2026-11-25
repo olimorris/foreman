@@ -1,5 +1,5 @@
 import { loadConfig } from "./config.ts";
-import { budgetOf, orchestratorCost, taskCost, taskLimit, usd } from "./cost.ts";
+import { budgetOf, countedText, planSpending, taskCost, taskLimit, usd } from "./cost.ts";
 import type { Repo } from "./paths.ts";
 import { loadPlan } from "./plan.ts";
 import { plainTitle } from "./spawn.ts";
@@ -65,13 +65,17 @@ export function bar(spent: number, limit: number | undefined, style: Style): str
   return tone("█".repeat(filled)) + style.dim("░".repeat(BAR - filled));
 }
 
-export function budgetOverview(repo: Repo, style: Style = PLAIN, change = "Change a limit with foreman budget <usd> for every task, foreman budget <task> <usd> for one, or foreman budget --plan <usd>."): string {
+export function budgetOverview(repo: Repo, style: Style = PLAIN, change = "Change a limit with foreman budget <usd> for every task, foreman budget <task> <usd> for one, or foreman budget --plan <usd>. Start the plan's count again at $0 with foreman budget reset."): string {
   const budget = budgetOf(repo);
-  const tasks = byActivity(loadTasks(repo));
-  const costs = new Map(tasks.map((t) => [t.id, taskCost(repo, t)]));
-  const orch = orchestratorCost(repo);
-  const spent = [...costs.values()].reduce((s, c) => s + c.total, 0) + orch.usd;
+  const all = byActivity(loadTasks(repo));
+  const planned = planSpending(repo, all);
+  const counted = new Set(planned.tasks.map((c) => c.id));
   const done = (t: Task) => t.status === "torn-down" || t.status === "merged";
+  // An earlier plan's task still in flight has its own limit, so it stays on show without counting towards this plan.
+  const tasks = all.filter((t) => counted.has(t.id) || !done(t));
+  const costs = new Map(tasks.map((t) => [t.id, taskCost(repo, t)]));
+  const orch = planned.orchestrator;
+  const spent = planned.usd;
   const numbered = tasks.some((t) => t.worker);
   const row = (t: Task): Row => {
     const limit = taskLimit(budget, t.id);
@@ -79,14 +83,15 @@ export function budgetOverview(repo: Repo, style: Style = PLAIN, change = "Chang
     return { cells: done(t) ? cells : [...cells.slice(0, -1), `${cells.at(-1)!}  ${bar(costs.get(t.id)!.total, limit, style)}`], tone: () => (s: string) => s, dim: done(t) };
   };
   const sections: Section[] = [
-    { title: "In progress", rows: tasks.filter((t) => !done(t)).map(row) },
+    { title: "In progress", rows: tasks.filter((t) => !done(t) && counted.has(t.id)).map(row) },
     { title: "Finished", rows: tasks.filter(done).map(row) },
+    { title: "From earlier plans", rows: tasks.filter((t) => !counted.has(t.id)).map(row) },
     { title: "Foreman itself", rows: [{ cells: ["", ...(numbered ? [""] : []), "The orchestrator", usd(orch.usd), ""], tone: () => (s: string) => s }] },
   ].filter((s) => s.rows.length);
   const spentAt = numbered ? 3 : 2;
   const plan = budget.plan !== undefined
-    ? [`${style.bold(usd(spent))} of ${usd(budget.plan)} spent  ${bar(spent, budget.plan, style)}`, style.dim(`${usd(Math.max(0, budget.plan - spent))} left for the plan, at list prices`)]
-    : [`${style.bold(usd(spent))} spent, with no plan limit`, style.dim("At list prices")];
+    ? [`${style.bold(usd(spent))} of ${usd(budget.plan)} spent  ${bar(spent, budget.plan, style)}`, style.dim(`${usd(Math.max(0, budget.plan - spent))} left for the plan at list prices, ${countedText(planned)}`)]
+    : [`${style.bold(usd(spent))} spent, with no plan limit`, style.dim(`At list prices, ${countedText(planned)}`)];
   const unpriced = [...new Set([...[...costs.values()].flatMap((c) => c.unpriced), ...orch.unpriced])];
   return [
     ...plan,

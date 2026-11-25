@@ -9,7 +9,8 @@ import { loadTasks, writeJson, type Task } from "./state.ts";
 import { usageError } from "./help.ts";
 
 export type PlanTask = { id: string; title: string; owns: string[]; deps: string[]; contract: boolean; model?: string; brief: string };
-export type Plan = { title: string; deadline?: string; approvedAt?: string; calls?: string[]; cut?: string[]; maxWorkers?: number; automerge?: boolean; tasks: PlanTask[] };
+// startedAt is the first approval and stays when an edited plan is approved again, so the plan's budget keeps counting its own tasks.
+export type Plan = { title: string; deadline?: string; approvedAt?: string; startedAt?: string; budgetResetAt?: string; calls?: string[]; cut?: string[]; maxWorkers?: number; automerge?: boolean; tasks: PlanTask[] };
 
 const list = (v: string) => v.split(",").map((s) => s.trim().replace(/^`|`$/g, "")).filter((s) => s && !/^(none|-)$/i.test(s));
 

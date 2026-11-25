@@ -25,7 +25,7 @@ import { forTerminal, page, summaryText, writeSummary } from "./summary.ts";
 import { timelineText } from "./timeline.ts";
 import { orchestratorSessionName, removeForeman } from "./remove.ts";
 import { automerge } from "./automerge.ts";
-import { budgetOf, costText, recordSession, sessionsFile, usd } from "./cost.ts";
+import { budgetOf, costText, recordSession, resetBudget, sessionsFile, usd } from "./cost.ts";
 import { restartWorker, resume } from "./stop.ts";
 import { gatherPane, livePane, openPane, renderPane, spendByTask } from "./pane.ts";
 import { addNote, listNotes, loadNotes, newNoteMessage, removedNoteMessage, removeNote, shareNote } from "./notes.ts";
@@ -122,6 +122,7 @@ async function main(argv: string[]): Promise<number> {
     case "budget": {
       const repo = findRepo();
       if (!positional.length && !opts.plan) return console.log(budgetOverview(repo, styleFor())), 0;
+      if (positional.length === 1 && positional[0] === "reset" && !opts.plan) return resetBudget(repo).forEach((line) => console.log(line)), 0;
       const budget = { ...budgetOf(repo) };
       const amount = Number(opts.plan?.[0] ?? positional.at(-1));
       if (!Number.isFinite(amount) || amount <= 0) throw usageError("budget");

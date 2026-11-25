@@ -18,6 +18,14 @@ test("the orchestrator's command passes the model to claude", () => {
   expect(cmd.slice(cmd.indexOf("--model"), cmd.indexOf("--model") + 2)).toEqual(["--model", "opus"]);
 });
 
+test("the orchestrator can't run the foreman CLI, and no foreman command is allowed", () => {
+  const cmd = orchestratorCommand([], "/s.sock", undefined, false);
+  expect(cmd[cmd.indexOf("--disallowedTools") + 1]).toBe("Bash(foreman *)");
+  const allowed = cmd.slice(cmd.indexOf("--allowedTools") + 1, cmd.indexOf("--disallowedTools"));
+  expect(allowed.length).toBeGreaterThan(0);
+  expect(allowed.every((a) => a.startsWith("mcp__foreman__"))).toBe(true);
+});
+
 test("orchestratorModel comes from the config, and --model wins", () => {
   const repo = tempRepo();
   expect(orchestratorModel(repo)).toBeUndefined();
