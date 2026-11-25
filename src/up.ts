@@ -1,6 +1,7 @@
 import { channelPlugin, loadConfig, telegramPlugins } from "./config.ts";
 import { checkModel } from "./spawn.ts";
-import { findRepo, type Repo } from "./paths.ts";
+import { findRepo, pluginArgs, type Repo } from "./paths.ts";
+import { skillsPluginArgs } from "./skills.ts";
 
 // A bad name would otherwise only fail inside the new session, after its tab has already opened.
 export function orchestratorModel(repo: Repo, flag?: string): string | undefined {
@@ -24,6 +25,10 @@ export function orchestratorModel(repo: Repo, flag?: string): string | undefined
 // The installed Telegram plugins when the repo turns pings on, or false to leave the plugin as the user set it.
 export function orchestratorTelegram(repo: Repo): string[] | false {
   return loadConfig(repo).telegram ? telegramPlugins() : false;
+}
+
+export function orchestratorPlugins(repo: Repo): string[] {
+  return [...pluginArgs(), ...skillsPluginArgs(repo)];
 }
 
 export function orchestratorCommand(plugin: string[], socket: string, model?: string, telegram: string[] | false = orchestratorTelegram(findRepo())): string[] {

@@ -134,3 +134,5 @@ The repo's ADR folder has one writer: you, through the batched docs PR. Workers 
 - review: reviewing finished work, relaying feedback, setting up screenshots.
 - decide: adjudicating proposals, recording accepted decisions, and turning PR comments into proposals.
 - recover: picking up after a restart, a closed worker tab or a missing worktree.
+
+The user's own skills from `.foreman/skills` load as `user-skills:<name>`, in your session and every worker's. Load one when its description fits what you're doing, such as `user-skills:adr` when you record a decision. Foreman's rules and the never list win where they disagree.
