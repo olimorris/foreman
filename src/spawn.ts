@@ -7,6 +7,7 @@ import { findContext, writeIndex } from "./decisions.ts";
 import { pluginArgs, socketPath, taskDir, worktreeDir, type Repo } from "./paths.ts";
 import type { Terminal } from "./terminal.ts";
 import { CONVENTIONAL } from "./plan.ts";
+import { briefNotes } from "./notes.ts";
 import { setTrust } from "./trust.ts";
 import { findTask, loadTasks, nextWorker, withTasks, type Task } from "./state.ts";
 
@@ -52,7 +53,7 @@ export function spawn(repo: Repo, opts: SpawnOptions, term: Terminal): Task {
   const index = writeIndex(repo, base);
   const context = loadConfig(repo).context ?? findContext(worktree);
   const from = parent ? `${parent.branch}, which isn't merged yet` : base;
-  writeFileSync(briefPath, briefHeader({ id, worktree, branch, from, owns, index, context }) + briefText);
+  writeFileSync(briefPath, briefHeader({ id, worktree, branch, from, owns, index, context, notes: briefNotes(repo) }) + briefText);
   setTrust(worktree, true, opts.claudeConfig);
 
   const task: Task = { id, ...(opts.title ? { title: opts.title } : {}), worker: nextWorker(loadTasks(repo)), status: "running", branch, base, worktree, owns, socket: socketPath(repo, id), startSha, ...(parent ? { stackedOn: parent.id, parentSha: startSha } : {}), createdAt: new Date().toISOString() };
@@ -93,9 +94,9 @@ export function tabLabel(task: Pick<Task, "id" | "title" | "worker">): string {
 
 export const plainTitle = (title: string) => title.replace(/^\w+(\([\w./-]+\))?!?:\s*/, "").trim();
 
-type Header = { id: string; worktree: string; branch: string; from: string; owns: string[]; index: string; context?: string };
+type Header = { id: string; worktree: string; branch: string; from: string; owns: string[]; index: string; context?: string; notes: string[] };
 
-function briefHeader({ id, worktree, branch, from, owns, index, context }: Header): string {
+function briefHeader({ id, worktree, branch, from, owns, index, context, notes }: Header): string {
   return [
     `# Task ${id}`,
     "",
@@ -105,6 +106,7 @@ function briefHeader({ id, worktree, branch, from, owns, index, context }: Heade
     `- Commits: this repo's Foreman workflow explicitly allows you to commit and rebase on ${branch}. Never commit on any other branch.`,
     `- Decisions: ${index} (one line each; open a full record only when your work touches it)`,
     ...(context ? [`- Domain terms: ${context}`] : []),
+    ...notes,
     '- Cross-cutting choices: `foreman propose "<decision>" --body "<why, and what was rejected>" --paths <glob>`',
     '- Report with: `foreman report done "<one line>" --test "<step>"... --assume "<assumption>"...`, or `foreman report blocked|needs-decision|rebased "<one line>"`',
     "",

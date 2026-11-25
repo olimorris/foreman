@@ -27,6 +27,15 @@ export const GROUPS: Group[] = [
     ],
   },
   {
+    title: "Notes about the setup",
+    commands: [
+      { usage: "notes", about: "List what workers should know about the setup" },
+      { usage: 'note "<fact>"', about: "Add a note and send it to every worker" },
+      { usage: "note --remove <n>", about: "Remove a note that turned out wrong" },
+      { usage: "baseline", about: "Run the tests on the base branch and note what fails", full: 'baseline [--runs <n>] [--test "<command>"]' },
+    ],
+  },
+  {
     title: "Spending",
     commands: [
       { usage: "budget", about: "What each task has spent against its limit" },
