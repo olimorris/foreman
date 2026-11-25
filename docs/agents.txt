@@ -92,6 +92,7 @@ Run `foreman help` for the full list. The ones people use:
 - `foreman pane`: reopen the status pane beside the current tab.
 - `foreman budget`: what each task has spent against its limit. `foreman cost` splits it into workers and reviews.
 - `foreman budget <usd>`, `foreman budget <task> <usd>`, `foreman budget --plan <usd>`: set the limit for every task, one task, or the plan.
+- `foreman workers <n>`: run up to n workers at once until the current plan finishes. The next plan goes back to `maxWorkers`. Lowering it stops no worker, and raising it starts nothing until `foreman next` runs. `foreman workers` with no number prints the limit and where it comes from.
 - `foreman resume <task>`: reopen a stopped worker's session, such as after raising its limit. Takes `--model <name>`.
 - `foreman restart <task>`: close a worker and reopen its session. Takes `--model <name>`.
 - `foreman summary`: write and show the run summary.
@@ -107,7 +108,7 @@ Most other commands in `foreman help` are for the orchestrator and workers. Leav
 
 Settings live in `.foreman/config.json` in the user's repo. The file is plain JSON, so it can't hold comments. Every key is optional. Foreman writes some keys itself, so edit the file in place and keep the keys already there.
 
-- `maxWorkers` (number, default 3): how many workers run at once. The plugin option of the same name sets it for every repo, and this key overrides it.
+- `maxWorkers` (number, default 3): how many workers run at once. The plugin option of the same name sets it for every repo, and this key overrides it. `foreman workers <n>` overrides both until the current plan finishes.
 - `budget` (object, default `{ "perTask": 5, "plan": 40 }`): spend limits in US dollars. `perTask` covers each task's worker and its reviews. `plan` covers every task plus the orchestrator. `tasks` maps a task to its own limit, like `{ "T3": 15 }`. Keys you leave out keep their defaults. `foreman budget` writes this key for you.
 - `workerModel` (string): the model a task runs on when the plan doesn't name one. Takes an alias like `"sonnet"` or a full model id like `"claude-sonnet-5-5"`. Without it, workers use Claude Code's default model.
 - `orchestratorModel` (string): the model `foreman up` starts the orchestrator on. `foreman up --model <name>` overrides it for one run. Without it, Claude Code's default.

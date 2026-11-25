@@ -5,10 +5,11 @@ import { overlaps } from "./decisions.ts";
 import type { Repo } from "./paths.ts";
 import { latestVerdict } from "./review.ts";
 import { checkBrief, checkModel } from "./spawn.ts";
-import { writeJson, type Task } from "./state.ts";
+import { loadTasks, writeJson, type Task } from "./state.ts";
+import { usageError } from "./help.ts";
 
 export type PlanTask = { id: string; title: string; owns: string[]; deps: string[]; contract: boolean; model?: string; brief: string };
-export type Plan = { title: string; deadline?: string; approvedAt?: string; calls?: string[]; cut?: string[]; tasks: PlanTask[] };
+export type Plan = { title: string; deadline?: string; approvedAt?: string; calls?: string[]; cut?: string[]; maxWorkers?: number; tasks: PlanTask[] };
 
 const list = (v: string) => v.split(",").map((s) => s.trim().replace(/^`|`$/g, "")).filter((s) => s && !/^(none|-)$/i.test(s));
 
@@ -136,9 +137,44 @@ export function readyTasks(plan: Plan, tasks: Task[], max: number, canStackOn?: 
   return { start, waiting };
 }
 
-export function maxWorkers(repo: Repo, flag?: string): number {
-  const n = Number(flag ?? loadConfig(repo).maxWorkers ?? process.env.CLAUDE_PLUGIN_OPTION_MAXWORKERS ?? 3);
-  return Number.isInteger(n) && n > 0 ? n : 3;
+export const DEFAULT_WORKERS = 3;
+export type WorkerLimit = { n: number; from: string };
+
+export function workerLimit(repo: Repo, flag?: string): WorkerLimit {
+  const sources: [unknown, string][] = [
+    [flag, "--max"],
+    [loadPlan(repo)?.maxWorkers, "this plan, set with foreman workers"],
+    [loadConfig(repo).maxWorkers, "maxWorkers in .foreman/config.json"],
+    [process.env.CLAUDE_PLUGIN_OPTION_MAXWORKERS, "the plugin's maxWorkers option"],
+  ];
+  const [value, from] = sources.find(([v]) => v !== undefined) ?? [DEFAULT_WORKERS, "Foreman's default"];
+  const n = Number(value);
+  return Number.isInteger(n) && n > 0 ? { n, from } : { n: DEFAULT_WORKERS, from: "Foreman's default" };
+}
+
+export const maxWorkers = (repo: Repo, flag?: string): number => workerLimit(repo, flag).n;
+
+const atOnce = (n: number) => `${n} worker${n === 1 ? "" : "s"} at once`;
+
+export function workers(repo: Repo, args: string[]): string[] {
+  if (!args.length) {
+    const { n, from } = workerLimit(repo);
+    return [`${atOnce(n)}, from ${from}`];
+  }
+  const n = Number(args[0]);
+  if (args.length > 1 || !/^\d+$/.test(args[0]!) || n <= 0) throw usageError("workers");
+  const p = loadPlan(repo);
+  if (!p) throw new Error("no plan. foreman workers sets the limit for the current plan, so store one with foreman plan <file> first");
+  // Stored on the plan, not in config.json, so the next foreman plan <file> goes back to the default.
+  const plan = { ...p, maxWorkers: n };
+  writeJson(planPath(repo), plan);
+  const tasks = loadTasks(repo);
+  const holding = active(tasks).length;
+  return [
+    `${atOnce(n)} until this plan finishes`,
+    ...(holding > n ? [`${holding} tasks already hold a slot. None of them stops, and new tasks wait until fewer than ${n} do`] : []),
+    ...(holding < n && plan.approvedAt && readyTasks(plan, tasks, n, stackable(repo)).start.length ? ["run foreman next to start waiting tasks"] : []),
+  ];
 }
 
 const planPath = (repo: Repo) => join(repo.foreman, "plan.json");

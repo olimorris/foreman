@@ -1,7 +1,10 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { saveConfig } from "../src/config.ts";
+import { UsageError } from "../src/help.ts";
 import { checkModel } from "../src/spawn.ts";
-import { describePlan, parsePlan, readyTasks, sharedPaths, validatePlan, waves, type Plan } from "../src/plan.ts";
-import type { Task } from "../src/state.ts";
+import { describePlan, loadPlan, maxWorkers, parsePlan, readyTasks, savePlan, sharedPaths, validatePlan, waves, workers, type Plan } from "../src/plan.ts";
+import { withTasks, type Task } from "../src/state.ts";
+import { tempRepo } from "./helpers.ts";
 
 const PLAN = `# Plan: Notes, tags and polish
 Deadline: Friday 28 November
@@ -129,4 +132,62 @@ test("checkModel takes Claude Code's aliases and full ids, and nothing that look
   }
   for (const bad of ["sonet", "Sonnet please", "gpt-5", "-x", "sonnet[2m]"]) expect(() => checkModel(bad)).toThrow("isn't a model name");
   expect(() => checkModel("")).toThrow("the model is empty");
+});
+
+describe("foreman workers", () => {
+  const option = process.env.CLAUDE_PLUGIN_OPTION_MAXWORKERS;
+  beforeEach(() => void delete process.env.CLAUDE_PLUGIN_OPTION_MAXWORKERS);
+  afterEach(() => void (option === undefined ? delete process.env.CLAUDE_PLUGIN_OPTION_MAXWORKERS : (process.env.CLAUDE_PLUGIN_OPTION_MAXWORKERS = option)));
+
+  test("the plan's limit wins over the config, and --max wins over the plan for one call", () => {
+    const repo = tempRepo();
+    savePlan(repo, parsePlan(PLAN));
+    saveConfig(repo, { maxWorkers: 2 });
+    expect(workers(repo, ["5"])).toEqual(["5 workers at once until this plan finishes"]);
+    expect(maxWorkers(repo)).toBe(5);
+    expect(maxWorkers(repo, "1")).toBe(1);
+  });
+
+  test("approving the plan keeps the limit, and a new plan drops it", () => {
+    const repo = tempRepo();
+    savePlan(repo, parsePlan(PLAN));
+    workers(repo, ["6"]);
+    savePlan(repo, { ...loadPlan(repo)!, approvedAt: "now" });
+    expect(maxWorkers(repo)).toBe(6);
+    savePlan(repo, parsePlan(PLAN));
+    expect(maxWorkers(repo)).toBe(3);
+  });
+
+  test("with no number it names where the limit comes from", () => {
+    const repo = tempRepo();
+    expect(workers(repo, [])).toEqual(["3 workers at once, from Foreman's default"]);
+    process.env.CLAUDE_PLUGIN_OPTION_MAXWORKERS = "4";
+    expect(workers(repo, [])).toEqual(["4 workers at once, from the plugin's maxWorkers option"]);
+    saveConfig(repo, { maxWorkers: 2 });
+    expect(workers(repo, [])).toEqual(["2 workers at once, from maxWorkers in .foreman/config.json"]);
+    savePlan(repo, parsePlan(PLAN));
+    workers(repo, ["1"]);
+    expect(workers(repo, [])).toEqual(["1 worker at once, from this plan, set with foreman workers"]);
+  });
+
+  test("raising the limit says how to start waiting tasks, and lowering it stops nothing", () => {
+    const repo = tempRepo();
+    savePlan(repo, { ...parsePlan(PLAN), approvedAt: "now" });
+    withTasks(repo, (tasks) => void tasks.push(task("T1", ["src/types.ts"]), task("T3", ["src/views/list.ts"])));
+    expect(workers(repo, ["2"])).toEqual(["2 workers at once until this plan finishes"]);
+    expect(workers(repo, ["3"])).toEqual(["3 workers at once until this plan finishes", "run foreman next to start waiting tasks"]);
+    expect(workers(repo, ["1"])).toEqual(["1 worker at once until this plan finishes", "2 tasks already hold a slot. None of them stops, and new tasks wait until fewer than 1 do"]);
+  });
+
+  test("a non-number, zero or negative is a usage error", () => {
+    const repo = tempRepo();
+    savePlan(repo, parsePlan(PLAN));
+    for (const bad of ["lots", "0", "-2", "1.5", ""]) expect(() => workers(repo, [bad])).toThrow(UsageError);
+    expect(() => workers(repo, ["2", "3"])).toThrow(UsageError);
+    expect(maxWorkers(repo)).toBe(3);
+  });
+
+  test("setting a limit with no plan stored says to store one first", () => {
+    expect(() => workers(tempRepo(), ["4"])).toThrow("store one with foreman plan <file> first");
+  });
 });

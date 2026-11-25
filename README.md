@@ -126,6 +126,14 @@ By default, each task can spend $5 and the plan $40, which you can change in [Se
 
 On Pro, Max or another Claude subscription, these dollar amounts measure how much work was done at list prices, not what you pay. Your subscription's usage limit is what actually stops work. When a worker hits it, Foreman pauses every worker, starts nothing new and holds reviews until the limit resets, then picks each worker up where it left off. `foreman status` shows the wait and when the limit resets.
 
+### More or fewer workers
+
+```sh
+foreman workers 5
+```
+
+Runs up to 5 workers at once until the current plan finishes. The next plan goes back to `maxWorkers` from [Settings](#gear-settings). Lowering it never stops a running worker, and new tasks wait until fewer are running. After raising it, run `foreman next`, or ask the orchestrator, to start the tasks that were waiting. `foreman workers` on its own shows the limit and where it comes from.
+
 ### The PRs to review
 
 ```sh
@@ -190,7 +198,7 @@ Settings live in `.foreman/config.json` in your repo, and every one is optional.
 
 | Setting | What it does |
 | --- | --- |
-| `maxWorkers` | How many workers run at once |
+| `maxWorkers` | How many workers run at once. `foreman workers <n>` changes it until the current plan finishes, and `foreman workers` shows the limit in force |
 | `budget` | Spend limits in dollars: `perTask` for every task, `plan` for the whole plan and `tasks` for one task. `foreman budget` sets these for you |
 | `orchestratorModel` | The model `foreman up` starts the orchestrator on, as an alias or a full model id. `foreman up --model <name>` overrides it for one run. Without it, the orchestrator uses Claude Code's default |
 | `workerModel` | The model for tasks the plan doesn't give one, as an alias like `"sonnet"` or a full model id. Without it, workers use Claude Code's default |

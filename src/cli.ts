@@ -28,7 +28,7 @@ import { orchestratorCommand, orchestratorModel } from "./up.ts";
 import { teardown } from "./teardown.ts";
 import { setTrust } from "./trust.ts";
 import { deliver } from "./deliver.ts";
-import { describePlan, loadPlan, maxWorkers, parsePlan, planBrief, readyTasks, savePlan, stackable, validatePlan } from "./plan.ts";
+import { describePlan, loadPlan, maxWorkers, parsePlan, planBrief, readyTasks, savePlan, stackable, validatePlan, workers } from "./plan.ts";
 import { sync } from "./sync.ts";
 import { forTerminal, openPrs, page, writeSummary } from "./summary.ts";
 import { together } from "./together.ts";
@@ -311,6 +311,9 @@ async function main(argv: string[]): Promise<number> {
       console.log(`budget: ${budget.perTask !== undefined ? `${usd(budget.perTask)} per task` : "no per-task limit"}, ${budget.plan !== undefined ? `${usd(budget.plan)} for the plan` : "no plan limit"}${Object.entries(budget.tasks ?? {}).map(([id, n]) => `, ${id} ${usd(n)}`).join("")}`);
       return 0;
     }
+    case "workers":
+      for (const line of workers(findRepo(), positional)) console.log(line);
+      return 0;
     case "pause": {
       const repo = findRepo();
       const [id] = positional;
