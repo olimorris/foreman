@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { run } from "./exec.ts";
 import { pluginRoot } from "./paths.ts";
-import { terminal } from "./integrations/index.ts";
+import { availableTerminals, terminal } from "./integrations/index.ts";
 
 type Check = { name: string; ok: boolean; detail: string };
 
@@ -9,11 +9,20 @@ const MIN_CLAUDE = [2, 1, 224];
 
 export function doctor(): Check[] {
   const has = (bin: string) => run(["sh", "-c", `command -v ${bin}`]).code === 0;
-  const checks: Check[] = ["bun", "git", ...terminal().requires, "fswatch", "jq", "nc", "gh"].map((bin) => ({
+  const checks: Check[] = [];
+  let terminalBins: string[] = [];
+  try {
+    const term = terminal();
+    terminalBins = term.requires;
+    console.log(`Terminal: ${term.name}. Available: ${availableTerminals().join(", ")}. Set FOREMAN_TERMINAL to pick another.`);
+  } catch (error) {
+    checks.push({ name: "terminal", ok: false, detail: (error as Error).message });
+  }
+  checks.push(...["bun", "git", ...terminalBins, "fswatch", "jq", "nc", "gh"].map((bin) => ({
     name: bin,
     ok: has(bin),
     detail: has(bin) ? "found" : `missing - install ${bin}`,
-  }));
+  })));
   if (has("gh")) {
     const ok = run(["gh", "auth", "status"]).code === 0;
     checks.push({ name: "gh auth", ok, detail: ok ? "logged in" : "run: gh auth login" });

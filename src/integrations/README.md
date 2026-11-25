@@ -1,13 +1,15 @@
 # Integrations
 
-Foreman runs its orchestrator and workers in terminal tabs. A terminal integration tells Foreman how to open, message, check and close those tabs in one terminal app. Rex is the only one so far.
+Foreman runs its orchestrator and workers in terminal tabs. A terminal integration tells Foreman how to open, message, check and close those tabs in one terminal app. Each folder here is one integration, and the folder name is what `FOREMAN_TERMINAL` selects. Rex is the default.
 
 ## Adding a terminal
 
-1. Make a folder here named after the terminal, such as `tmux/`.
-2. In its `index.ts`, export an object that implements `Terminal` from `src/terminal.ts`. Each tab is a `Tab` of session, window and pane ids, in whatever form the terminal uses. Foreman stores them with the task and passes them back unchanged.
-3. Register it in `TERMINALS` in `index.ts` in this folder.
-4. Select it with `FOREMAN_TERMINAL=<name>`. Rex is the default.
+1. Make a folder here named after the terminal, such as `tmux/`. Foreman finds it by its folder, so there is no list to edit.
+2. In its `index.ts`, export an object that implements `Terminal` from `src/terminal.ts`, either as the default export or as a named export called after the folder. Each tab is a `Tab` of session, window and pane ids, in whatever form the terminal uses. Foreman stores them with the task and passes them back unchanged.
+3. Add a `README.md` in the folder with the terminal's requirements and setup, and what you learned about driving it. This is what `docs/spikes.md` holds for the rest of Foreman.
+4. Select it with `FOREMAN_TERMINAL=<name>`. `foreman doctor` lists every folder it found.
+
+Only the selected folder is loaded, so a broken integration doesn't affect the others.
 
 The integration must:
 
