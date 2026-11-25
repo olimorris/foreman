@@ -5,6 +5,7 @@ import { MAX_REVISIONS, parseVerdict, renderFeedback, reviewerCommand, roundDir,
 import { skillsDir } from "../src/skills.ts";
 import { saveConfig } from "../src/config.ts";
 import { saveLimit } from "../src/limits.ts";
+import { parsePlan, savePlan } from "../src/plan.ts";
 import { readEvents } from "../src/events.ts";
 import { fill, parseScreens, splitArgs } from "../src/shots.ts";
 import { findTask, withTasks, type Task } from "../src/state.ts";
@@ -107,12 +108,13 @@ describe("sendFeedback", () => {
 describe("the never list", () => {
   const approve = JSON.stringify({ structured_output: { ...changes, verdict: "approve", issues: [] } });
 
-  async function promptWith(never?: string[]) {
+  async function promptWith(never?: string[], automerge = false) {
     const repo = tempRepo();
     withTasks(repo, (ts) => ts.push({ id: "T1", status: "done", branch: "main", base: "main", worktree: repo.root, owns: ["src/"], socket: "/nonexistent.sock", createdAt: "" }));
     mkdirSync(join(repo.foreman, "tasks", "T1"), { recursive: true });
     writeFileSync(join(repo.foreman, "tasks", "T1", "brief.md"), "## Intent\n\nx\n");
     saveConfig(repo, { budget: {}, ...(never ? { never } : {}) });
+    if (automerge) savePlan(repo, { ...parsePlan("# Plan\n"), automerge: true });
     expect(await runReview(repo, "T1", { reviewer: () => ({ code: 0, stdout: approve, stderr: "" }), say: () => {} })).toStartWith("approve");
     return readFileSync(join(roundDir(repo, "T1", 1), "prompt.md"), "utf8");
   }
@@ -120,6 +122,12 @@ describe("the never list", () => {
   test("goes in the reviewer's prompt as things a change must not break", async () => {
     const prompt = await promptWith(["Merge a release PR. The user cuts every release."]);
     expect(prompt).toContain("- This repo's never list. A change that breaks one of these is an issue:\n  - Merge a release PR. The user cuts every release.\n");
+  });
+
+  test("with automerge on, tells the reviewer that approving merges the PR", async () => {
+    const line = "Automerge is on, so approving means Foreman merges this PR once its checks pass.";
+    expect(await promptWith(["Merge a PR that changes a migration"], true)).toContain(line);
+    expect(await promptWith(["Merge a PR that changes a migration"])).not.toContain(line);
   });
 
   test("adds nothing to the prompt when it's missing or empty", async () => {

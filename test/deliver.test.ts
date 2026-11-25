@@ -56,6 +56,13 @@ test("the packet carries intent, change, screenshots, verdict and risk", () => {
   expect(md).toContain("- D-1 Notes carry tags (accepted)");
   expect(md).toContain('| home | <img src="https://x/b.png" width="400"> | <img src="https://x/a.png" width="400"> |');
   expect(md).toContain("**low**: Copy change only.");
+  expect(md).toContain("A person set its scope and merges it.");
+});
+
+test("with automerge on, the packet says Foreman merges the PR", () => {
+  const { repo } = setup(["T1"]);
+  const md = renderPacket({ task: findTask(repo, "T1"), intent: "Greet.", stat: "", verdict: approve, round: 1, decisions: [], shots: [], automerge: true, models: { worker: [], reviewer: [] } });
+  expect(md).toContain("AI wrote this change. A person set its scope, and Foreman merges it once its checks pass.");
 });
 
 test("deliver refuses until the latest review approves, then writes the packet", () => {

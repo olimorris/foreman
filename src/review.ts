@@ -5,6 +5,7 @@ import { indexPath, writeIndex } from "./decisions.ts";
 import { appendEvent, lastDone } from "./events.ts";
 import { must, run, type Result, type RunOptions } from "./exec.ts";
 import { limitLine, loadLimit, reviewerLimit, saveLimit, waitForReset, type Sleep } from "./limits.ts";
+import { loadPlan } from "./plan.ts";
 import { pluginRoot, taskDir, worktreeDir, type Repo } from "./paths.ts";
 import type { Terminal } from "./terminal.ts";
 import { sendToTask } from "./send.ts";
@@ -91,7 +92,7 @@ export async function runReview(repo: Repo, id: string, deps: ReviewDeps = {}): 
     writeFileSync(diff, must(["git", "-C", task.worktree, "diff", `${base}...HEAD`]));
     const stat = must(["git", "-C", task.worktree, "diff", "--shortstat", `${base}...HEAD`]).trim();
     const dirty = must(["git", "-C", task.worktree, "status", "--porcelain"]).trim();
-    const prompt = reviewPrompt({ task, against: against(task), round, diff, stat, dirty, shots, index: writeIndex(repo, task.base), previous: lastVerdict(repo, id, round), done: lastDone(repo, id), brief: join(taskDir(repo, id), "brief.md"), never: neverRules(loadConfig(repo)), skills: loadSkills(repo) });
+    const prompt = reviewPrompt({ task, against: against(task), round, diff, stat, dirty, shots, index: writeIndex(repo, task.base), previous: lastVerdict(repo, id, round), done: lastDone(repo, id), brief: join(taskDir(repo, id), "brief.md"), never: neverRules(loadConfig(repo)), automerge: loadPlan(repo)?.automerge === true, skills: loadSkills(repo) });
     writeFileSync(join(dir, "prompt.md"), prompt);
 
     let r = reviewer(reviewerCommand(repo, id, left.usd, model), { cwd: task.worktree, stdin: prompt, env: { FOREMAN_ROLE: "reviewer" } });
@@ -247,7 +248,7 @@ const handover = (id: string, done?: { test?: string[]; assumptions?: string[] }
 
 type PromptInput = {
   done?: { test?: string[]; assumptions?: string[] };
-  task: Task; against: string; round: number; diff: string; stat: string; dirty: string; index: string; brief: string; previous?: string; never: string[]; skills: Skill[];
+  task: Task; against: string; round: number; diff: string; stat: string; dirty: string; index: string; brief: string; previous?: string; never: string[]; automerge?: boolean; skills: Skill[];
   shots: Capture & { before?: string; after?: string; note?: string };
 };
 
@@ -270,6 +271,7 @@ function reviewPrompt(p: PromptInput): string {
     ...handover(p.task.id, p.done),
     `- Owned paths: ${p.task.owns.join(", ")}`,
     ...(p.never.length ? ["- This repo's never list. A change that breaks one of these is an issue:", ...p.never.map((r) => `  - ${r}`)] : []),
+    ...(p.never.length && p.automerge ? ["- Automerge is on, so approving means Foreman merges this PR once its checks pass. A never rule about merging that this PR falls under is an issue."] : []),
     ...skillsSection(p.skills),
     "",
     "Return the verdict.",
