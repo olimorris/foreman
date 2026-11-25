@@ -1,5 +1,5 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { defaultConvention, detectAdr } from "../adr.ts";
 import { writeAdrs } from "../adrwrite.ts";
 import { automerge } from "../automerge.ts";
@@ -64,24 +64,57 @@ function startingNothing(repo: Repo): void {
   if (room.reason) throw new Error(`no new tasks start: ${room.reason}`);
 }
 
+const planFile = (repo: Repo) => join(repo.foreman, "plan.md");
+const sectionsOf = (md: string) => md.split(/^(?=## )/m);
+const sectionId = (section: string) => section.match(/^## ([A-Za-z0-9][A-Za-z0-9-]*):/)?.[1];
+
+// Swaps in each changed task by its id and adds the new ones at the end, so the rest of plan.md stays as the user approved it.
+function changeTasks(current: string, changed: string): string {
+  const parts = sectionsOf(current);
+  const head = sectionId(parts[0] ?? "") ? "" : parts.shift()!;
+  for (const section of sectionsOf(changed)) {
+    const id = sectionId(section);
+    if (!id) {
+      if (section.trim()) throw new Error("tasks takes only task sections, each starting with a line like ## T7: feat: add tags");
+      continue;
+    }
+    const at = parts.findIndex((p) => sectionId(p) === id);
+    if (at < 0) parts.push(section);
+    else parts[at] = section;
+  }
+  return [head, ...parts].map((s) => s.trim()).filter(Boolean).join("\n\n") + "\n";
+}
+
 function planTool(repo: Repo, args: Args): string {
   if (args.approve) {
     const p = loadPlan(repo);
-    if (!p) throw new Error("no plan to approve. Store one with the plan tool and its file first");
+    if (!p) throw new Error("no plan to approve. Store one with the plan tool and its text first");
     savePlan(repo, { ...p, approvedAt: new Date().toISOString() });
     return `approved: ${p.title}. Call next to start the first tasks`;
   }
-  const file = text(args, "file");
-  if (!file) {
+  const whole = text(args, "text");
+  const changed = text(args, "tasks");
+  if (whole && changed) throw new Error("give either text or tasks, not both");
+  if (!whole && !changed) {
     const p = loadPlan(repo);
     if (!p) return "no plan";
     return describePlan(p, loadConfig(repo).workerModel) + (p.approvedAt ? `\napproved ${p.approvedAt}` : "\nnot approved yet");
   }
-  const p = parsePlan(readFileSync(resolve(repo.root, file), "utf8"));
+  const file = planFile(repo);
+  let md = whole;
+  if (changed) {
+    if (!existsSync(file)) throw new Error("no plan to change. Give the whole plan as text first");
+    md = changeTasks(readFileSync(file, "utf8"), changed);
+  }
+  ensureForeman(repo);
+  writeFileSync(file, md!);
+  const p = parsePlan(md!);
   const errors = validatePlan(p);
   if (errors.length) throw new Error(lines(errors.map((e) => `problem: ${e}`)));
-  savePlan(repo, p);
-  return `${describePlan(p, loadConfig(repo).workerModel)}\nSaved as a draft. Show the user, and once they approve call plan with approve`;
+  // A change keeps the run's worker limit and automerge, which a whole new plan starts without.
+  const before = changed ? loadPlan(repo) : undefined;
+  savePlan(repo, { ...p, ...(before?.maxWorkers !== undefined ? { maxWorkers: before.maxWorkers } : {}), ...(before?.automerge !== undefined ? { automerge: before.automerge } : {}) });
+  return `${describePlan(p, loadConfig(repo).workerModel)}\nSaved as a draft in .foreman/plan.md. Show the user, and once they approve call plan with approve`;
 }
 
 function next(repo: Repo, args: Args, term: Terminal): string {
@@ -220,8 +253,12 @@ export function orchestratorTools(term: () => Terminal = terminal): Tool[] {
   });
 
   return [
-    tool("plan", "Check and store a plan, show the stored plan, or approve it. Give file to check a plan file and store it as a draft. Give approve once the user agrees to the stored plan. Give neither to show it. Load the intake skill when the user hands you a backlog.",
-      schema({ file: str("The plan file to check and store, such as .foreman/plan.md"), approve: bool("Approve the stored plan") }),
+    tool("plan", "Check and store a plan, change some of its tasks, show the stored plan, or approve it. Give text to save a whole plan to .foreman/plan.md, check it and store it as a draft. Give tasks to add or replace only those tasks in it, which also needs approving again. Give approve once the user agrees to the stored plan. Give none of them to show it. Load the intake skill when the user hands you a backlog.",
+      schema({
+        text: str("The whole plan in Markdown, as the intake skill lays it out"),
+        tasks: str("Only the task sections that are new or changed, each starting with its ## line. A section whose id is already in the plan replaces that task, and the rest are added at the end"),
+        approve: bool("Approve the stored plan"),
+      }),
       (args, repo) => planTool(repo, args)),
     tool("next", "Start every planned task that's ready, contracts first, within the worker limit. A task whose only unmerged dependency has an approved, open PR starts on top of that dependency's branch. Otherwise tasks wait for their dependencies to merge, and for tasks that share their paths.",
       schema({ max: int("Start at most this many workers at once, this time only") }),
