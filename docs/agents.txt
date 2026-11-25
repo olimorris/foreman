@@ -10,7 +10,7 @@ Tasks are named T1, T2 and so on. Workers are numbered W1, W2 and so on. Decisio
 
 ## Requirements
 
-- macOS, inside a terminal app Foreman can drive. Rex (https://www.superlogical.com) is the default. `FOREMAN_TERMINAL=<name>` picks another, `foreman doctor` lists the ones available, and each terminal's setup is in its folder under `src/integrations/`.
+- macOS, inside a terminal app Foreman can drive. Rex (https://www.superlogical.com) is the default. Foreman detects the terminal it's in, so `FOREMAN_TERMINAL=<name>` is only needed to override that and pick another. `foreman doctor` lists the ones available, and each terminal's setup is in its folder under `src/integrations/`.
 - Claude Code 2.1.224 or later: `brew install --cask claude-code`.
 - git, and gh signed in with `gh auth login`. Homebrew installs Bun, jq, fswatch and gh along with Foreman.
 - Web screenshots need Playwright's Chromium: `bunx playwright install chromium`.
@@ -24,6 +24,17 @@ foreman doctor
 ```
 
 `foreman up` loads the plugin from the same Homebrew install, so the command and the plugin are always the same version. Foreman isn't in a Claude Code plugin marketplace, so there's nothing to install with `/plugin`.
+
+Uninstall: `brew uninstall foreman` removes the command and the plugin, but not what Foreman made in each repo it ran in. In each of those repos:
+
+```sh
+git worktree remove --force .foreman/worktrees/<task>   # once per leftover worktree
+rm -rf .foreman
+git worktree prune                                       # if .foreman/ went first
+git branch -D $(git branch --list 'foreman/*' | tr -d ' *+')
+```
+
+Then delete the `.foreman/` line from `.git/info/exclude`, which Foreman added to keep `.foreman/` out of git. Branches Foreman pushed and its PRs are on GitHub, so close or delete those there.
 
 `foreman doctor` checks every requirement and names what's missing. Run it first whenever something doesn't start.
 
