@@ -11,8 +11,9 @@
 - :camera: Takes before and after screenshots of web and macOS apps
 - :books: Reads your repo's ADRs and keeps every worker to them
 - :link: Tests the open PRs merged together, to catch ones that pass alone but break together
-- :robot: Runs simple tasks on cheaper models
+- :money_with_wings: Runs simple tasks on cheaper models
 - :memo: Runs your tests on the base branch first, and warns every worker about what already fails
+- :hammer_and_wrench: Builds, reviews and opens PRs by your own skills
 - :zzz: Keeps working while you're away, and logs every call it makes
 - :iphone: Pings you on Telegram, and takes your answers from there
 - :clipboard: Writes a summary of the PRs to review, in order
@@ -33,8 +34,6 @@ Foreman is a CLI and a Claude Code plugin. `foreman up` starts Claude Code with 
 - **The manager** is the orchestrator. It never writes code. It plans, hands out work, keeps everyone aligned and checks the work before it reaches you
 - **The leader** is you. You set the direction and approve every PR
 
-You drive Foreman with the `foreman` CLI. The orchestrator and workers drive it through Foreman's MCP server instead. See [The CLI and the MCP server](#electric_plug-the-cli-and-the-mcp-server).
-
 ### How it works
 
 <p align="center">
@@ -54,9 +53,9 @@ You drive Foreman with the `foreman` CLI. The orchestrator and workers drive it 
 
 - Workers run in Claude Code's auto mode, each in a worktree under `.foreman/worktrees/`, and commit to their own `foreman/<task>` branch
 - The reviewer can only read files
-- Foreman's MCP server runs only in the orchestrator and worker sessions Foreman starts, never in your own Claude Code sessions
+- The orchestrator and workers talk to Foreman through its MCP server, which never runs in your own Claude Code sessions
 - Foreman pushes each approved task's branch and opens its PR, plus a PR that adds accepted decisions to your ADR folder
-- Foreman never merges unless you turn on [automerge](#let-foreman-merge), and then only its own task PRs
+- Foreman never merges unless you turn on [automerge](#auto-merging-prs), and then only its own task PRs
 - It keeps its state in `.foreman/`, out of git, and picks up from there after a restart
 
 ### Why not Claude Code's agent teams?
@@ -122,6 +121,8 @@ Here's my backlog: BACKLOG.md. The deadline is tomorrow. Do it as cheaply as you
 
 Foreman asks about anything unclear, then plans the work. If the plan differs from your backlog, such as splitting or cutting an item, it waits for your approval. If you don't answer within 30 minutes, Foreman makes the call and notes it in the summary. Workers open in their own tabs, and approved work arrives as PRs. `foreman help` lists every command.
 
+The orchestrator waits on long-running work as MCP tasks, so you no longer see a message from another session each time it wakes. Its tab shows "MCP task still running" while it waits, and "MCP task ... completed" when something needs it.
+
 ### Status
 
 ```sh
@@ -138,9 +139,9 @@ foreman budget
 
 <img alt="foreman budget" src="assets/README/foreman-budget.png">
 
-By default, each task can spend $5 and the overall plan, $40. This can be changed in [Settings](#gear-settings). When a task goes over, Foreman stops its worker and asks whether to raise the limit.
+By default, each task can spend $5 and the plan $40. Change these in [Settings](#gear-settings). When a task goes over, Foreman stops its worker and asks whether to raise the limit.
 
-On the Pro, Max or other Claude subscription, these dollar amounts measure how much work was done at list prices, not what you paid. Your subscription's usage limit stops work. When reached, Foreman pauses every worker, ensuring no new work is undertaken and holds reviews until the limit resets. The foreman then picks each worker up where it left off. `foreman status` shows the wait and when the limit resets.
+On a Pro, Max or other Claude subscription, these amounts measure work done at list prices, not what you pay. Your usage limit is what stops work. When you hit it, Foreman pauses every worker, starts nothing new and holds reviews until the limit resets. Then it picks each worker up where it left off. `foreman status` shows when the limit resets.
 
 ### Permissions
 
@@ -148,7 +149,7 @@ Workers run in auto mode by default, so Claude Code _may_ refuse a call or wait 
 
 > _"W2 on T5 was blocked from running `gh pr merge 41` by auto mode. To allow it, add `Bash(gh pr merge *)` in /permissions in that worker's tab, or tell me to skip it."_
 
-These events are shown as _"Needs you" via `foreman status` or the status pane. Once allowed or skipped, the orchestrator informs the worker and the task moves back. A worker waiting at this prompt stage is never treated as hung, and therefore will never be cleared.
+`foreman status` and the status pane list the task under "Needs you". Once you allow or skip it, the orchestrator tells the worker and the task moves back. A worker waiting at a prompt is never treated as hung, and answering the prompt in its tab clears it.
 
 ### Workers
 
@@ -156,7 +157,7 @@ These events are shown as _"Needs you" via `foreman status` or the status pane. 
 foreman workers 5
 ```
 
-Runs up to 5 workers at once until the current plan finishes. The next plan goes back to `maxWorkers` from [Settings](#gear-settings). Lowering it will never stop a running worker, and new tasks wait until fewer are running. After raising it, run `foreman next`, or ask the orchestrator, to start the tasks that were waiting. `foreman workers` on its own shows the limit and where it comes from.
+Runs up to 5 workers at once until the current plan finishes. The next plan goes back to `maxWorkers` from [Settings](#gear-settings). Lowering it never stops a running worker, and new tasks wait until fewer are running. After raising it, run `foreman next`, or ask the orchestrator, to start the tasks that were waiting. `foreman workers` on its own shows the limit and where it comes from.
 
 ### Auto-merging PRs
 
@@ -164,7 +165,7 @@ Runs up to 5 workers at once until the current plan finishes. The next plan goes
 foreman automerge on
 ```
 
-Foreman merges each task's PR itself once the reviewer approves it and every check passes in GitHub. A PR with zero checks, merges once it's approved. When a check fails, Foreman doesn't merge and sends the worker to fix it. You can also tell the orchestrator _"feel free to merge"_.
+Foreman merges each task's PR itself once the reviewer approves it and every check passes on GitHub. A PR with no checks merges once it's approved. When a check fails, Foreman doesn't merge and sends the worker to fix it. You can also tell the orchestrator _"feel free to merge"_.
 
 Foreman only merges its own task PRs, from `foreman/<task>` branches. Release PRs, the decisions PR and your own PRs stay with you. Your `never` list still applies. The reviewer won't approve a PR that a rule about merging covers, such as "Merge a PR that changes a migration", and switching automerge on lists those rules. A PR built on another task's branch waits until that task merges. Merges use squash when the repo allows it. `foreman automerge off` hands merging back to you, and `foreman status` shows when it's on.
 
@@ -206,35 +207,6 @@ A status pane beside the orchestrator shows the run at a glance:
 
 A worker that goes quiet turns yellow, then red.
 
-## :electric_plug: The CLI and the MCP server
-
-Foreman starts an MCP server for each worker when it starts, resumes or restarts. The plugin doesn't declare the server itself, so it never starts in your own Claude Code sessions or in the reviewer.
-
-### The tools each session gets
-
-| Session | Tools |
-| --- | --- |
-| Worker | `report`, `propose`, `note` and `tidy` |
-| Orchestrator | Everything it needs to run the plan, like `plan`, `next`, `spawn`, `send`, `review`, `deliver`, `accept` and `ask`. Also `status`, `timeline`, `summary`, `cost` and `budget` to check on the run, and `watch`, `baseline` and `together`, which run as MCP tasks |
-| Reviewer | None. It can only read files |
-
-Workers can't run `foreman` commands any more. Each worker starts with the `foreman` command denied in its Bash tool, so a worker that tries is refused.
-
-The commands you and the orchestrator both use, like `status`, `timeline`, `summary`, `cost` and `budget`, share one implementation. `foreman status` in your terminal and the orchestrator's `status` tool give the same answer.
-
-### What you see while the orchestrator waits
-
-Three of the orchestrator's tools can take a long time. `watch` waits until something in the run needs the orchestrator, `baseline` runs your tests on the base branch and `together` tests the open PRs merged together. Each one returns straight away as an MCP task, so the orchestrator ends its turn and spends nothing while it waits.
-
-In the orchestrator's tab:
-
-- While a task runs, "1 MCP task still running" shows next to the turn's time. `/tasks` lists the running tasks.
-- When a task completes, a line like `⏺ MCP task watch-… (foreman/watch) completed.` appears, and the orchestrator wakes up and acts on what the task found. That's Foreman waking it, not you or another session.
-
-After handling each line from the watcher, the orchestrator calls `watch` again. If it tries to end a turn while tasks are in flight and no watch task is running, a Stop hook sends it back to call `watch`.
-
-The server stops when the orchestrator's session exits, so its tasks don't survive a restart. After a restart, the orchestrator picks up the run from `.foreman/` and calls `watch` again. A baseline or together check that was running when it stopped is lost, so ask for it again if you need it.
-
 ## :gear: Settings
 
 Settings live in `.foreman/config.json` in your repo, and every one is optional. Here they are with their defaults, or an example where there's no default:
@@ -260,7 +232,7 @@ Settings live in `.foreman/config.json` in your repo, and every one is optional.
 
 | Setting | What it does |
 | --- | --- |
-| `maxWorkers` | How many workers run at once. See [More or fewer workers](#more-or-fewer-workers) |
+| `maxWorkers` | How many workers run at once. See [Workers](#workers) |
 | `budget` | Spend limits in dollars: `perTask` for every task, `plan` for the whole plan and `tasks` for one task. `foreman budget` sets these for you |
 | `orchestratorModel` | The model `foreman up` starts the orchestrator on, as an alias or a full model id. `foreman up --model <name>` overrides it for one run. Without it, the orchestrator uses Claude Code's default |
 | `workerModel` | The model for tasks the plan doesn't give one, as an alias like `"sonnet"` or a full model id. Without it, workers use Claude Code's default |
@@ -273,7 +245,7 @@ Settings live in `.foreman/config.json` in your repo, and every one is optional.
 | `screenshots` | How to run your app for before and after screenshots |
 | `prScreenshots` | `"local"` lists screenshot paths in the PR. `"branch"` pushes them to a `foreman-screenshots` branch so they show on GitHub |
 | `never` | Things Foreman must never do in this repo, one plain sentence each. The orchestrator sees the list when it starts, every brief lists it and the reviewer treats a change that breaks one as an issue |
-| `telegram` | Turns on pings through Claude Code's Telegram plugin. `when` says in your own words when the orchestrator should ping you. See [Pings on Telegram](#pings-on-telegram) |
+| `telegram` | Turns on pings through Claude Code's Telegram plugin. `when` says in your own words when the orchestrator should ping you. [docs/agents.txt](docs/agents.txt) covers setting up the plugin |
 
 For a macOS app, `screenshots` builds the app instead of starting a server:
 
@@ -285,7 +257,7 @@ For a macOS app, `screenshots` builds the app instead of starting a server:
 
 Foreman follows your own skills when it builds, reviews and opens PRs. Put each one in `.foreman/skills/<name>/SKILL.md`, in [Claude Code's skill format](https://code.claude.com/docs/en/skills): frontmatter with a `name` and a `description`, then the instructions. They stay on your machine, since Foreman keeps `.foreman/` out of git.
 
-- The orchestrator and every worker load them as `user-skills:<name>`, like any other skill, so workers build by them. Foreman starts each session with a second plugin folder, `.foreman/skills-plugin`, that links back to `.foreman/skills`, so your skills never land in a worktree a worker commits from. The MCP server doesn't serve them, because Team and Enterprise logins ignore an MCP server's skills unless an admin turns them on, while a plugin folder works on every plan.
+- The orchestrator and every worker load them as `user-skills:<name>`. They come from a plugin folder, `.foreman/skills-plugin`, that links to `.foreman/skills`, so they never land in a worktree a worker commits from. It's a plugin folder because Team and Enterprise logins turn off skills from MCP servers.
 - The reviewer reads every skill and checks each change against the ones whose description fits reviewing code, like a code-review skill. Breaking one sends the change back to its worker, with the skill named.
 - A skill named `pull-request` shapes the PRs Foreman opens. The reviewer writes the title and description by it, and Foreman adds the intent, assumptions, decisions, screenshots, verdict and risk below. A title that isn't a conventional commit is dropped for the task's own title.
 - A skill named `adr` shapes the decisions Foreman records. The orchestrator writes each one in its format, and in a repo with no ADR folder yet, the new folder takes the skill's title line, status and a README that describes them. An existing ADR folder keeps its own convention.

@@ -1,55 +1,54 @@
 # Foreman's MCP server
 
-The `foreman` CLI is for people. Foreman's MCP server, started by `foreman mcp`, is for the orchestrator and workers. Decision D-16 records the split, and D-17 and D-21 cover the tools that run as MCP tasks. They reach `docs/decisions/` in the next decisions PR. This note says what was built and why. `docs/spikes.md` has what was checked against Claude Code on the way.
+The `foreman` CLI is for people. The MCP server, started by `foreman mcp`, is for the orchestrator and workers. D-16 records the split. D-17 and D-21 cover the MCP tasks. All three reach `docs/decisions/` in the next decisions PR. `docs/spikes.md` has what was checked against Claude Code.
 
-## Why agents moved off the CLI
+## Why
 
-The orchestrator and workers used to run `foreman` commands through the Bash tool, the same CLI people use.
+Agents used to run `foreman` commands through the Bash tool.
 
-- A message, a decision body or a test step with quotes, backticks or `$` had to go through `--body-file` to survive the shell. A tool takes it as a JSON string.
-- Every session got a `Bash(foreman *)` allow rule, so a worker could run `foreman accept` on its own proposal. A tool is offered only to the role that uses it.
+- Text with quotes, backticks or `$` needed `--body-file` to survive the shell.
+- `Bash(foreman *)` let a worker run `foreman accept` on its own proposal.
 - `foreman help` listed about 30 commands people never run.
 
-An earlier version of this note recommended against a server, because every command would then need two front doors kept in step. D-16 avoids that by giving each command one home: agent commands leave the CLI, and commands both need share one implementation.
+An earlier version of this note argued against a server, because every command would need two front doors. D-16 gives each command one home instead. Agent commands leave the CLI, and commands both need share one implementation.
 
 ## What was built
 
-- `src/mcp.ts` is a stdio JSON-RPC server with no SDK. It speaks protocol 2026-07-28 through `server/discover`, and the older versions through `initialize`.
-- `src/tools/` holds the tools, each with the roles that may call it: `worker.ts`, `orchestrator.ts`, `overview.ts` for the commands people use too, and `tasks.ts` for the MCP tasks.
-- `mcpArgs` in `src/mcp.ts` passes the server to a session with `--mcp-config`, with `FOREMAN_ROLE` and `FOREMAN_TASK` in its environment. `foreman up` passes it to the orchestrator, and `workerCommand` in `src/spawn.ts` to every worker it starts, resumes or restarts.
+- `src/mcp.ts` is a stdio JSON-RPC server with no SDK. It speaks protocol 2026-07-28 through `server/discover`, and older versions through `initialize`.
+- `src/tools/` holds the tools. Each one lists the roles that may call it.
+- `mcpArgs` passes the server to a session with `--mcp-config`, and sets `FOREMAN_ROLE` and `FOREMAN_TASK`. `foreman up` uses it for the orchestrator, and `workerCommand` for every worker.
 - The plugin has no `.mcp.json`. One would start the server in every session a marketplace install loads in, the reviewer's included.
-- `toolsFor` offers each session only its role's tools. A session without a role gets none.
+- A session with no role gets no tools.
 
 | Session | Tools |
 |---|---|
 | Worker | `report`, `propose`, `note`, `tidy` |
-| Orchestrator | `plan`, `next`, `spawn`, `send`, `review`, `feedback`, `deliver`, `sync`, `teardown`, `pause`, `resume`, `restart`, `tidy`, `unblock`, `workers`, `automerge`, `set_budget`, `decisions`, `accept`, `reject`, `propose`, `adr`, `ask`, `answer`, `note`, `notes`, `shots`, then `status`, `timeline`, `summary`, `cost`, `budget`, and the tasks `watch`, `baseline`, `together` |
-| Reviewer | none, since it's a `claude -p` run limited to Read, Grep and Glob |
+| Orchestrator | `plan`, `next`, `spawn`, `send`, `review`, `feedback`, `deliver`, `sync`, `teardown`, `pause`, `resume`, `restart`, `tidy`, `unblock`, `workers`, `automerge`, `set_budget`, `decisions`, `accept`, `reject`, `propose`, `adr`, `ask`, `answer`, `note`, `notes`, `shots`, `status`, `timeline`, `summary`, `cost`, `budget`, `watch`, `baseline`, `together` |
+| Reviewer | none |
 
-- A worker's `--allowedTools` lists its four tools by name, like `mcp__foreman__report`, and its `--disallowedTools` denies `Bash(foreman *)`. Without the deny rule, auto mode's classifier could still let a worker run an orchestrator command.
-- The orchestrator's `--allowedTools` lists all of its tools, so none of them asks for permission.
-- `status`, `timeline`, `summary`, `cost` and `budget` call the same functions as their CLI commands, such as `statusText` in `src/status.ts`. The CLI prints them with colour, and the tools return plain text.
-- A tool that fails returns its error as the tool's result with `isError`, so the agent reads why. A protocol error would read as Foreman being broken.
+- A worker allows its four tools by name, like `mcp__foreman__report`, and denies `Bash(foreman *)`. Without the deny rule, auto mode could still let it run an orchestrator command.
+- The orchestrator allows all its tools, so none asks for permission.
+- `status`, `timeline`, `summary`, `cost` and `budget` call the same functions as their CLI commands, like `statusText`. The CLI adds colour.
+- A tool that fails returns the error as its result, with `isError`. A protocol error would read as Foreman being broken.
 
 ## MCP tasks
 
-`watch`, `baseline` and `together` can run for hours. They used to be background commands that woke the orchestrator through its messaging socket. Now each returns an MCP task (D-17).
+`watch`, `baseline` and `together` can run for hours, so each returns an MCP task (D-17).
 
-- A call from a client that offers the `io.modelcontextprotocol/tasks` extension gets a task straight away, and the orchestrator ends its turn. Claude Code checks the task with `tasks/get` every 5 seconds. When it completes, its one line wakes the orchestrator, even when it's idle.
-- In the orchestrator's tab, the user sees "1 MCP task still running" next to the turn's time while it waits, then a line like `⏺ MCP task watch-… (foreman/watch) completed.` before the orchestrator's reply.
-- A client that doesn't offer the extension, such as `claude -p`, gets the plain result once the handler finishes. For `watch`, that's a call that blocks until something happens.
-- `tasks/cancel` aborts the handler. Closing stdin, which happens when the session exits, aborts every running task.
-- The watch tool writes `.foreman/watch.pid` with the server's pid before it replies. The Stop hook reads it and blocks the orchestrator from ending a turn while tasks are in flight and no watch task is running (D-21).
-- A task can't outlive its session, because the server stops with it. After a restart the orchestrator calls `watch` again.
+- The orchestrator ends its turn once the task starts. Claude Code checks it every 5 seconds, and its line wakes the orchestrator when it completes.
+- The tab shows "MCP task still running" while it waits, then "MCP task ... completed" before the orchestrator's reply.
+- A client without the tasks extension, like `claude -p`, gets the plain result. For `watch`, that call blocks until something happens.
+- `tasks/cancel` aborts the handler. The session exiting closes stdin, which aborts every task.
+- `watch` writes `.foreman/watch.pid` before it replies. The Stop hook reads it to block a turn that ends with tasks in flight and no watch running (D-21).
+- A task can't outlive its session. After a restart the orchestrator calls `watch` again.
 
-## What's still on the CLI
+## Still on the CLI
 
-- Everything people run: `up`, `doctor`, `pane`, `status`, `budget` and the rest of `foreman help`.
-- `foreman hook`, which `hooks/hooks.json` runs for Claude Code's hooks.
-- `foreman mcp` itself.
-- For now, the agent commands too. T32 removes them from the CLI and updates the README's list of commands.
+- Everything people run, like `up`, `doctor`, `pane` and `status`.
+- `foreman hook`, which runs Claude Code's hooks.
+- The agent commands, until T32 removes them.
 
-## What stays the same
+## Trade-offs
 
-- A server keeps the code it started with until its session restarts. A fix to a tool reaches a running orchestrator or worker only after it restarts, while a hook picks up the fix on its next run.
-- The user's own skills reach sessions through a second `--plugin-dir`, not the server. Team and Enterprise logins ignore an MCP server's skills unless an admin turns them on. See "The user's skills in worktree sessions" in `docs/spikes.md`.
+- A server keeps the code it started with. A fix to a tool reaches a session only after it restarts. A hook picks up a fix on its next run.
+- The user's skills come from a plugin folder, not the server. Team and Enterprise logins turn off skills from MCP servers. See "The user's skills in worktree sessions" in `docs/spikes.md`.
