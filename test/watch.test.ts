@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { TaskEvent } from "../src/events.ts";
+import type { Question } from "../src/questions.ts";
 import type { Task } from "../src/state.ts";
 import { scan, type Cursor, type Probes } from "../src/watch.ts";
 
@@ -94,6 +95,31 @@ test("reports new PR comments and a merge once each, only when gh was polled", (
   expect(second.reasons).toEqual(["pr-comments T1 #41 (+2)", "merged T1 #41"]);
   expect(scan([], second.cursor, p("MERGED", 3), prs).reasons).toEqual([]);
   expect(scan([], first.cursor, probes({}), prs).reasons).toEqual([]);
+});
+
+describe("questions", () => {
+  const min = 60_000;
+  const asked = (id: string, extra: Partial<Question> = {}): Question => ({ id, question: "Tabs or spaces?", call: "spaces", askedAt: new Date(0).toISOString(), ...extra });
+  const withQuestions = (questions: Question[]): Probes => ({ ...probes({}), questions: () => questions });
+  const clock = (now: number, answerMs = 30 * min) => ({ now, stallMs: 20 * min, answerMs });
+  const start = { ...empty, main: "aaa" };
+
+  test("wakes the orchestrator once a question goes unanswered for answerMinutes", () => {
+    const p = withQuestions([asked("Q-1"), asked("Q-2", { answeredAt: "x" }), asked("Q-3", { decision: "D-4" })]);
+    expect(scan([], start, p, [], clock(29 * min)).reasons).toEqual([]);
+    const late = scan([], start, p, [], clock(30 * min));
+    expect(late.reasons).toEqual(["unanswered Q-1: Tabs or spaces?", "unanswered Q-3 (D-4): Tabs or spaces?"]);
+    expect(scan([], late.cursor, p, [], clock(90 * min)).reasons).toEqual([]);
+  });
+
+  test("never wakes for questions when answerMinutes is 0", () => {
+    expect(scan([], start, withQuestions([asked("Q-1")]), [], clock(600 * min, 0)).reasons).toEqual([]);
+  });
+
+  test("forgets an answered question", () => {
+    const late = scan([], start, withQuestions([asked("Q-1")]), [], clock(30 * min));
+    expect(scan([], late.cursor, withQuestions([asked("Q-1", { answeredAt: "x" })]), [], clock(31 * min)).cursor.unanswered).toEqual([]);
+  });
 });
 
 test("clips long notes so the wake line stays one line", () => {

@@ -13,6 +13,7 @@ description: Pick up Foreman work after a restart, a worker whose tab closed, or
    - **Status over-budget**: the watcher stopped the worker. Tell the user what it has spent, and resume it only after they raise the limit.
    - **Worktree missing**: the task can't continue. Tell the user, then run `foreman teardown <id>`, which still refuses while the branch has unmerged commits.
 3. If the plan is approved and `foreman status` shows no `baseline:` line, or says `baseline: stopped before it finished`, the baseline stopped with your last session. Start `foreman baseline` in the background again.
-4. Start `foreman watch` in the background once anything is in flight.
+4. `foreman status` lists questions still waiting on the user. Ask them again, with your call. The watcher reports any that run out of time.
+5. Start `foreman watch` in the background once anything is in flight.
 
 When the user asks how the night went, point them at `foreman timeline` and the run summary (`foreman summary`) rather than retelling either.

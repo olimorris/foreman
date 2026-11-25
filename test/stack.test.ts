@@ -281,7 +281,7 @@ describe("the run summary", () => {
   test("lists a stacked PR after the one it builds on, and says so", () => {
     const items = [ready("T2", 8, "high", { stackedOn: "T1" }, ["T3"]), ready("T1", 7, "low"), ready("T4", 9, "medium")];
     expect(reviewOrder(items).map((r) => r.task.id)).toEqual(["T1", "T2", "T4"]);
-    const md = renderSummary({ title: "Tags", ready: items, merged: [], unfinished: [], calls: [], cut: [], open: [], spent: 0 });
+    const md = renderSummary({ title: "Tags", ready: items, merged: [], unfinished: [], calls: [], away: [], asking: [], cut: [], open: [], spent: 0 });
     expect(md).toContain("2. **#8 feat: T2** (T2) - builds on #7 (T1), so merge it after that");
   });
 });

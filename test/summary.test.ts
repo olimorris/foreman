@@ -16,7 +16,16 @@ test("PRs others wait on come first, then riskier ones", () => {
 
 test("the summary says why each PR is where it is, how to test it and what to check", () => {
   const md = renderSummary({
-    title: "Notes", merged: ["T0"], calls: ["Search runs on Enter."], cut: ["JSON download, to make the deadline."], spent: 14.2, limit: 40,
+    title: "Notes", merged: ["T0"], calls: ["Search runs on Enter."],
+    away: [
+      { question: { id: "Q-1", question: "Should tags be case sensitive?", call: "Lowercase them.", task: "T3", askedAt: "", by: "foreman", userAnswer: "keep their case" } },
+      {
+        question: { id: "Q-2", question: "Do exports keep the original audio?", call: "accept D-3 as written", task: "T1", decision: "D-3", askedAt: "", by: "foreman" },
+        decision: { id: "D-3", title: "Exports keep the original audio", body: "", paths: [], supersedes: [], status: "accepted", by: "T1", createdAt: "", decidedBy: "foreman" },
+      },
+    ],
+    asking: [{ id: "Q-4", question: "Which icon goes on the tag chip?", call: "a hash", task: "T6", askedAt: "" }],
+    cut: ["JSON download, to make the deadline."], spent: 14.2, limit: 40,
     open: [{ id: "D-2", title: "Tag names are lowercase", body: "", paths: [], supersedes: [], status: "proposed", by: "T3", createdAt: "" }],
     unfinished: [{ id: "T6", title: "feat: dark mode", reason: "blocked, waiting on you" }],
     ready: [
@@ -29,7 +38,8 @@ test("the summary says why each PR is where it is, how to test it and what to ch
   expect(md).toContain("2. **#4 feat: T3** (T3) - risk medium, so review it early");
   expect(md).toContain("- **feat: dark mode** (T6): blocked, waiting on you");
   expect(md).toContain("## Calls Foreman made for you\n\n- Search runs on Enter.");
-  expect(md).toContain("- D-2: Tag names are lowercase. Proposed by T3 and not decided yet.\n- Cut: JSON download, to make the deadline.");
+  expect(md).toContain("## Calls Foreman made while you were away\n\n- T3: Should tags be case sensitive? Foreman went with: Lowercase them. You answered later: \"keep their case\".\n- T1: Do exports keep the original audio? Foreman went with: accept D-3 as written. This accepted D-3. To undo it, tell Foreman to overrule D-3.");
+  expect(md).toContain("- Q-4 (T6): Which icon goes on the tag chip? Waiting for your answer.\n- D-2: Tag names are lowercase. Proposed by T3 and not decided yet.\n- Cut: JSON download, to make the deadline.");
 });
 
 test("the plan's head carries the calls and cuts", () => {

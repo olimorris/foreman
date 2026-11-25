@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { join } from "node:path";
 import { logRun, readEvents, type TaskEvent } from "./events.ts";
 import { loadDecisions, type Decision } from "./ledger.ts";
+import { answerMs, loadQuestions, type Question } from "./questions.ts";
 import { run } from "./exec.ts";
 import type { Repo } from "./paths.ts";
 import type { Terminal } from "./terminal.ts";
@@ -16,7 +17,7 @@ import { inFlight, loadTasks, updateTask, type Task } from "./state.ts";
 export type PrState = { state: string; comments: number; base?: string };
 export type TrackedPr = { key: string; number: number; base?: string };
 export type Stall = { since: number; nudged: boolean; escalated: boolean };
-export type Cursor = { events: Record<string, number>; main?: string; exited: string[]; prs?: Record<string, PrState>; budget?: Record<string, number>; stalls?: Record<string, Stall>; restarts?: Record<string, number> };
+export type Cursor = { events: Record<string, number>; main?: string; exited: string[]; prs?: Record<string, PrState>; budget?: Record<string, number>; stalls?: Record<string, Stall>; restarts?: Record<string, number>; unanswered?: string[] };
 
 export type Probes = {
   events(id: string): TaskEvent[];
@@ -24,15 +25,16 @@ export type Probes = {
   alive(task: Task): boolean;
   pr?(number: number): PrState | undefined;
   lastActivity?(task: Task): number | undefined;
+  questions?(): Question[];
 };
 
-export type StallCheck = { now: number; stallMs: number; waiting?: (id: string) => string[] };
+export type Clock = { now: number; stallMs: number; answerMs?: number; waiting?: (id: string) => string[] };
 
 export const STALL_MINUTES = 20;
 export const MAX_RESTARTS = 2;
 
-export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: TrackedPr[] = [], stall?: StallCheck): { reasons: string[]; cursor: Cursor; nudge: string[]; restart: string[] } {
-  const next: Cursor = { ...cursor, events: { ...cursor.events }, exited: [...cursor.exited], prs: { ...cursor.prs }, stalls: { ...cursor.stalls }, restarts: { ...cursor.restarts } };
+export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: TrackedPr[] = [], clock?: Clock): { reasons: string[]; cursor: Cursor; nudge: string[]; restart: string[] } {
+  const next: Cursor = { ...cursor, events: { ...cursor.events }, exited: [...cursor.exited], prs: { ...cursor.prs }, stalls: { ...cursor.stalls }, restarts: { ...cursor.restarts }, unanswered: [...(cursor.unanswered ?? [])] };
   const reasons: string[] = [];
   const nudge: string[] = [];
   const restart: string[] = [];
@@ -52,7 +54,7 @@ export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: Tracked
       reasons.push(`exited ${task.id}`);
       next.exited.push(task.id);
     }
-    if (alive && stall) checkStall(task, probes, stall, next, reasons, nudge, restart);
+    if (alive && clock) checkStall(task, probes, clock, next, reasons, nudge, restart);
   }
   for (const id of [...Object.keys(next.stalls!), ...Object.keys(next.restarts!)]) {
     if (!tasks.some((t) => t.id === id && t.status === "running")) delete next.stalls![id], delete next.restarts![id];
@@ -68,6 +70,14 @@ export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: Tracked
     next.prs![`${number}`] = now;
   }
 
+  const open = (probes.questions?.() ?? []).filter((q) => !q.answeredAt);
+  next.unanswered = next.unanswered!.filter((id) => open.some((q) => q.id === id));
+  for (const q of open) {
+    if (!clock?.answerMs || clock.now - Date.parse(q.askedAt) < clock.answerMs || next.unanswered.includes(q.id)) continue;
+    reasons.push(`unanswered ${q.id}${q.decision ? ` (${q.decision})` : ""}: ${clip(q.question)}`);
+    next.unanswered.push(q.id);
+  }
+
   const sha = probes.mainSha();
   if (sha && next.main && sha !== next.main) reasons.push(`main-moved ${sha.slice(0, 8)}`);
   if (sha) next.main = sha;
@@ -76,7 +86,7 @@ export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: Tracked
 }
 
 // A worker idling on a hung background command never wakes by itself, so it's nudged, then restarted, and only a worker that keeps hanging reaches the orchestrator.
-function checkStall(task: Task, probes: Probes, check: StallCheck, cursor: Cursor, reasons: string[], nudge: string[], restart: string[]): void {
+function checkStall(task: Task, probes: Probes, check: Clock, cursor: Cursor, reasons: string[], nudge: string[], restart: string[]): void {
   const stalls = cursor.stalls!;
   const last = task.status === "running" ? probes.lastActivity?.(task) : undefined;
   if (last === undefined) return void delete stalls[task.id];
@@ -159,6 +169,7 @@ export async function watch(repo: Repo, base: string, term: Terminal): Promise<n
     mainSha: () => run(["git", "-C", repo.root, "rev-parse", baseRef(repo, base)]).stdout.trim() || undefined,
     alive: (task) => (task.tab ? term.alive(task.tab) : true),
     lastActivity: (task) => lastActivity(repo, task),
+    questions: () => loadQuestions(repo),
   };
   const stallMs = (loadConfig(repo).stallMinutes ?? STALL_MINUTES) * 60_000;
   const waiting = (id: string) => {
@@ -178,7 +189,7 @@ export async function watch(repo: Repo, base: string, term: Terminal): Promise<n
       // Merges happen on GitHub, so origin's base only moves here when it's fetched.
       if (ghDue && hasOrigin) run(["git", "-C", repo.root, "fetch", "-q", "origin", base]);
       const prs = trackedPrs(tasks, loadDecisions(repo)).filter((p) => !["MERGED", "CLOSED"].includes(cursor.prs?.[`${p.number}`]?.state ?? ""));
-      const result = scan(tasks, cursor, { ...probes, pr: ghDue ? (n) => ghPr(repo.root, n) : undefined }, prs, { now: Date.now(), stallMs, waiting });
+      const result = scan(tasks, cursor, { ...probes, pr: ghDue ? (n) => ghPr(repo.root, n) : undefined }, prs, { now: Date.now(), stallMs, answerMs: answerMs(repo), waiting });
       cursor = result.cursor;
       for (const [id, patch] of prPatches(tasks, prs, cursor.prs ?? {})) updateTask(repo, id, patch);
       for (const id of result.nudge) {

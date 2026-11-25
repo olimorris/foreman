@@ -18,6 +18,7 @@ export type Decision = {
   createdAt: string;
   resolvedAt?: string;
   reason?: string;
+  decidedBy?: "foreman";
   adr?: { number: number; file: string; pr?: number };
 };
 
@@ -73,6 +74,7 @@ function renderRecord(d: Decision): string {
     "",
     `- Status: ${d.status}${d.reason ? ` (${d.reason})` : ""}`,
     `- Proposed by: ${d.by}`,
+    ...(d.decidedBy ? ["- Decided by: Foreman, because the user didn't answer in time. The user can overrule it."] : []),
     `- Paths: ${d.paths.length ? d.paths.join(", ") : "whole repo"}`,
     ...(d.supersedes.length ? [`- Supersedes: ${d.supersedes.map((n) => `ADR ${n}`).join(", ")}`] : []),
     ...(d.adr ? [`- Recorded as: ${d.adr.file}${d.adr.pr ? ` (PR #${d.adr.pr})` : ""}`] : []),

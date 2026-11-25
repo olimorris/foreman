@@ -74,6 +74,8 @@ export const GROUPS: Group[] = [
     commands: [
       { usage: 'report done "<line>"', about: "A worker reports it has finished", full: 'report done "<one line>" --test "<step>"... [--assume "<assumption>"]...' },
       { usage: 'report <state> "<line>"', about: "A worker reports it's blocked, needs a decision or rebased", full: 'report blocked | needs-decision | rebased "<one line>"' },
+      { usage: 'ask "<question>"', about: "Record a question Foreman answers if you don't", full: 'ask "<question>" --call "<what Foreman would do>" [--task <task>] [--decision <D-n>]' },
+      { usage: "answer <Q-n>", about: "Record the answer to a question", full: 'answer <Q-n> ("<the user\'s answer>" | --by-foreman)' },
       { usage: "review <task>", about: "Review a finished task" },
       { usage: "feedback <task>", about: "Send review feedback to a worker" },
       { usage: "shots <task>", about: "Screenshot a task's screens" },

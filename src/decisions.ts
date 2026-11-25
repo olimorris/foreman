@@ -8,6 +8,7 @@ import type { Terminal } from "./terminal.ts";
 import { sendToTask } from "./send.ts";
 import { baseRef, snapshot } from "./snapshot.ts";
 import { inFlight, loadTasks, type Task } from "./state.ts";
+import { settleQuestions } from "./questions.ts";
 
 const staticPrefix = (glob: string) => glob.split(/[*?[{]/)[0]!;
 
@@ -34,6 +35,7 @@ export function accept(repo: Repo, id: string, edits: Partial<Pick<Decision, "ti
   if (current.status !== "proposed") throw new Error(`${id} is already ${current.status}`);
   const clean = Object.fromEntries(Object.entries(edits).filter(([, v]) => v !== undefined && !(Array.isArray(v) && !v.length)));
   const d = updateDecision(repo, id, { ...clean, status: "accepted", resolvedAt: new Date().toISOString() });
+  settleQuestions(repo, id, `accepted ${id}`);
   writeIndex(repo);
   const file = recordPath(repo, id);
   return broadcast(repo, recipients(loadTasks(repo), d), term, (t) =>
@@ -47,11 +49,18 @@ export function accept(repo: Repo, id: string, edits: Partial<Pick<Decision, "ti
 export function reject(repo: Repo, id: string, reason: string, term: Terminal): Broadcast {
   if (!reason.trim()) throw new Error("rejecting needs a reason the worker can act on");
   const current = findDecision(repo, id);
-  if (current.status !== "proposed") throw new Error(`${id} is already ${current.status}`);
+  const overrule = current.status === "accepted" && current.decidedBy === "foreman";
+  if (current.status !== "proposed" && !overrule) throw new Error(`${id} is already ${current.status}`);
+  if (overrule && current.adr) throw new Error(`${id} is already written as ${current.adr.file}. Propose a decision that supersedes it instead`);
   const d = updateDecision(repo, id, { status: "rejected", reason, resolvedAt: new Date().toISOString() });
+  if (!overrule) settleQuestions(repo, id, `rejected ${id}: ${reason}`);
   writeIndex(repo);
-  const proposer = inFlight(loadTasks(repo)).filter((t) => t.id === d.by);
-  return broadcast(repo, proposer, term, () => `Your proposal ${id} (${d.title}) was rejected: ${reason}. Carry on without it.`, d);
+  if (!overrule) {
+    const proposer = inFlight(loadTasks(repo)).filter((t) => t.id === d.by);
+    return broadcast(repo, proposer, term, () => `Your proposal ${id} (${d.title}) was rejected: ${reason}. Carry on without it.`, d);
+  }
+  // Every worker told about the acceptance may have built on it, so each one hears it's gone.
+  return broadcast(repo, recipients(loadTasks(repo), d), term, () => `The user overruled decision ${id} (${d.title}), which Foreman accepted while they were away: ${reason}. Undo any work that follows it.`, d);
 }
 
 function broadcast(repo: Repo, tasks: Task[], term: Terminal, message: (t: Task) => string, decision: Decision): Broadcast {

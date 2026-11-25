@@ -78,11 +78,11 @@ From there:
 
 1. Foreman asks about anything unclear, then shows you one plan: tasks, what runs first, and what it would cut to meet the deadline. Approve it or ask for changes.
 2. Workers open in their own tabs, named like `W1 · T1: add tags to notes`: the worker, then the task it's building. Open one to watch or steer it.
-3. When a worker proposes a decision that affects others, Foreman asks you before accepting it.
+3. When a worker proposes a decision that affects others, Foreman asks you before accepting it. If you don't answer in time, it can make the call itself. See [Questions while you're away](#questions-while-youre-away).
 4. Each finished task gets a review. Approved work arrives as a PR with its review packet. You merge it.
 5. A task that needs one other task's work doesn't wait for you to merge. Once the reviewer approves that task and its PR opens, Foreman starts the next one on top of its branch, so the run keeps going while you're away. Its PR says which PR it builds on, so merge that one first.
 6. When a PR merges, Foreman tears down that task, asks the remaining workers to rebase and starts the tasks that were waiting on it. A PR that built on it moves onto the base branch.
-7. When the run is done, Foreman writes `.foreman/summary.md`: the PRs in the order to review them, how to test each one, and the assumptions the workers made that you should check.
+7. When the run is done, Foreman writes `.foreman/summary.md`: the PRs in the order to review them, how to test each one, the assumptions the workers made that you should check, and the calls Foreman made while you were away.
 
 While it runs, check in from any terminal in the repo:
 
@@ -190,6 +190,18 @@ The tests run with the `test` command in `.foreman/config.json`. If there isn't 
 
 `foreman timeline T5` shows one task.
 
+### Questions while you're away
+
+A question that comes up overnight would otherwise hold up its task until you wake. Usually Foreman already knows what it would do, so it doesn't wait forever:
+
+- Foreman asks you as normal, and says what it would do.
+- If you don't answer within 30 minutes, Foreman goes ahead with that call and tells the worker.
+- If the question was about a decision, Foreman accepts it and marks it as its own call.
+
+Foreman never makes a call about money or lost work. It always waits for you before raising a budget, discarding unmerged work, or closing or merging a PR.
+
+`foreman status` lists the questions waiting on you. The run summary lists each call Foreman made while you were away. To undo a decision Foreman made, tell it to overrule that decision, such as D-4, and it tells the workers.
+
 ### Settings
 
 `.foreman/config.json` also takes:
@@ -199,4 +211,5 @@ The tests run with the `test` command in `.foreman/config.json`. If there isn't 
 - `stackTasks`: `false` makes a task wait for its dependency to merge, instead of starting on top of its approved PR (default `true`)
 - `test`: the command that runs the repo's tests, like `swift test`. Foreman uses it for the baseline run and to check the open PRs together, both in a fresh checkout, so include any setup, like `bun install && bun test`. Foreman works it out when it plans the work
 - `testMinutes`: how long one test run can take before Foreman stops it as hung (default 15)
+- `answerMinutes`: how long Foreman waits for your answer before it goes ahead with its own call (default 30). `0` makes it always wait for you
 - `prScreenshots`: `"local"` keeps screenshots on your machine and lists their paths in the PR. `"branch"` pushes them to a `foreman-screenshots` branch so they show in the PR on GitHub
