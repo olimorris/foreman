@@ -12,11 +12,13 @@ import { capture, parseScreens, type Capture } from "./shots.ts";
 import { checkModel, taskLabel } from "./spawn.ts";
 import { diffBase, findTask, loadTasks, updateTask, type Task } from "./state.ts";
 import { budgetLeft } from "./cost.ts";
+import { loadSkills, prSkill, PR_SKILL, skillsDir, type Skill } from "./skills.ts";
 
 export const MAX_REVISIONS = 2;
 
 export type Issue = { where: string; screenshot?: string; intent: string; problem: string; expected: string };
-export type Verdict = { verdict: "approve" | "changes"; summary: string; issues: Issue[]; risk: "low" | "medium" | "high"; risk_note: string; decisions_touched: string[] };
+export type PrDraft = { title: string; description: string };
+export type Verdict = { verdict: "approve" | "changes"; summary: string; issues: Issue[]; risk: "low" | "medium" | "high"; risk_note: string; decisions_touched: string[]; pr?: PrDraft };
 
 export const VERDICT_SCHEMA = {
   type: "object",
@@ -43,6 +45,12 @@ export const VERDICT_SCHEMA = {
     decisions_touched: { type: "array", items: { type: "string" } },
   },
 };
+
+export function verdictSchema(draftPr: boolean) {
+  if (!draftPr) return VERDICT_SCHEMA;
+  const pr = { type: "object", required: ["title", "description"], properties: { title: { type: "string" }, description: { type: "string" } } };
+  return { ...VERDICT_SCHEMA, properties: { ...VERDICT_SCHEMA.properties, pr } };
+}
 
 export const roundDir = (repo: Repo, id: string, round: number) => join(taskDir(repo, id), "review", `round-${round}`);
 
@@ -83,7 +91,7 @@ export async function runReview(repo: Repo, id: string, deps: ReviewDeps = {}): 
     writeFileSync(diff, must(["git", "-C", task.worktree, "diff", `${base}...HEAD`]));
     const stat = must(["git", "-C", task.worktree, "diff", "--shortstat", `${base}...HEAD`]).trim();
     const dirty = must(["git", "-C", task.worktree, "status", "--porcelain"]).trim();
-    const prompt = reviewPrompt({ task, against: against(task), round, diff, stat, dirty, shots, index: writeIndex(repo, task.base), previous: lastVerdict(repo, id, round), done: lastDone(repo, id), brief: join(taskDir(repo, id), "brief.md"), never: neverRules(loadConfig(repo)) });
+    const prompt = reviewPrompt({ task, against: against(task), round, diff, stat, dirty, shots, index: writeIndex(repo, task.base), previous: lastVerdict(repo, id, round), done: lastDone(repo, id), brief: join(taskDir(repo, id), "brief.md"), never: neverRules(loadConfig(repo)), skills: loadSkills(repo) });
     writeFileSync(join(dir, "prompt.md"), prompt);
 
     let r = reviewer(reviewerCommand(repo, id, left.usd, model), { cwd: task.worktree, stdin: prompt, env: { FOREMAN_ROLE: "reviewer" } });
@@ -122,13 +130,15 @@ export function reviewerModel(repo: Repo): string | undefined {
 }
 
 export function reviewerCommand(repo: Repo, id: string, budget?: number, model?: string): string[] {
+  const skills = loadSkills(repo);
   return [
     // Not --agent: with it, --json-schema leaves structured_output empty.
-    "claude", "-p", "--output-format", "json", "--json-schema", JSON.stringify(VERDICT_SCHEMA),
+    "claude", "-p", "--output-format", "json", "--json-schema", JSON.stringify(verdictSchema(!!prSkill(skills))),
     ...(model ? ["--model", model] : []),
     ...(budget !== undefined ? ["--max-budget-usd", budget.toFixed(2)] : []),
     "--append-system-prompt-file", join(pluginRoot, "prompts", "reviewer.md"),
     "--tools", "Read,Grep,Glob", "--allowedTools", "Read,Grep,Glob", "--add-dir", taskDir(repo, id), join(repo.foreman, "decisions"),
+    ...(skills.length ? [skillsDir(repo)] : []),
   ];
 }
 
@@ -237,7 +247,7 @@ const handover = (id: string, done?: { test?: string[]; assumptions?: string[] }
 
 type PromptInput = {
   done?: { test?: string[]; assumptions?: string[] };
-  task: Task; against: string; round: number; diff: string; stat: string; dirty: string; index: string; brief: string; previous?: string; never: string[];
+  task: Task; against: string; round: number; diff: string; stat: string; dirty: string; index: string; brief: string; previous?: string; never: string[]; skills: Skill[];
   shots: Capture & { before?: string; after?: string; note?: string };
 };
 
@@ -260,7 +270,24 @@ function reviewPrompt(p: PromptInput): string {
     ...handover(p.task.id, p.done),
     `- Owned paths: ${p.task.owns.join(", ")}`,
     ...(p.never.length ? ["- This repo's never list. A change that breaks one of these is an issue:", ...p.never.map((r) => `  - ${r}`)] : []),
+    ...skillsSection(p.skills),
     "",
     "Return the verdict.",
   ].join("\n");
+}
+
+function skillsSection(skills: Skill[]): string[] {
+  if (!skills.length) return [];
+  const draft = prSkill(skills)
+    ? [`When you approve, draft the PR's title and description in \`pr\`, following the ${PR_SKILL} skill. Start from the intent and the worker's test steps. Foreman adds the intent, assumptions, decisions, screenshots, your verdict and the risk below your description, so leave those out of it.`, ""]
+    : [];
+  return [
+    "",
+    "## The user's skills",
+    "",
+    "Check the change against each skill below whose description fits reviewing code. A change that breaks one is an issue, with the skill's name and the rule it breaks in `intent`.",
+    "",
+    ...draft,
+    ...skills.flatMap((s) => [`### ${s.name}`, "", `${s.description || "(no description)"} From ${s.path}.`, "", s.body, ""]),
+  ];
 }

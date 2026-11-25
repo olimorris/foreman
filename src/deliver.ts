@@ -7,14 +7,14 @@ import { must, run } from "./exec.ts";
 import { loadDecisions } from "./ledger.ts";
 import { taskDir, type Repo } from "./paths.ts";
 import { CONVENTIONAL, loadPlan, stackable } from "./plan.ts";
-import { roundDir, type Verdict } from "./review.ts";
+import { roundDir, type PrDraft, type Verdict } from "./review.ts";
 import { diffBase, findTask, loadTasks, updateTask, type Task } from "./state.ts";
 import { loadSessions, sessionsFile, taskCost, transcriptDir } from "./cost.ts";
 
 export type Shot = { name: string; before?: string; after?: string };
 export type PacketInput = {
   task: Task; intent: string; doneNote?: string; test?: string[]; assumptions?: string[]; stat: string; verdict: Verdict; round: number;
-  decisions: string[]; shots: Shot[]; shotsNote?: string; buildsOn?: Task;
+  decisions: string[]; shots: Shot[]; shotsNote?: string; buildsOn?: Task; draft?: PrDraft;
 };
 
 export function section(md: string, heading: string): string {
@@ -41,13 +41,16 @@ function buildsOnNote(parent: Task, base: string): string {
   return `This builds on ${name} and should merge after it. It targets ${target}, so the diff shows only this change. Foreman moves it to ${base} once ${name} merges.`;
 }
 
-export function renderPacket(p: PacketInput & { models: Models; cost?: number }): string {
-  const revisions = p.task.revisions ?? 0;
-  return [
+const intentText = (p: PacketInput) => p.intent || "(the brief has no Intent section)";
+
+// The user's pull-request skill writes the top of the PR, and Foreman's own sections follow it.
+const opening = (p: PacketInput) => (p.draft
+  ? [p.draft.description.trim(), "", "## Intent", "", intentText(p), ""]
+  : [
     "## Description",
     "",
     ...(p.buildsOn ? [buildsOnNote(p.buildsOn, p.task.base), ""] : []),
-    p.intent || "(the brief has no Intent section)",
+    intentText(p),
     "",
     ...(p.doneNote ? [p.doneNote, ""] : []),
     p.stat ? "```\n" + p.stat + "\n```" : "No committed changes.",
@@ -56,6 +59,13 @@ export function renderPacket(p: PacketInput & { models: Models; cost?: number })
     "",
     ...(p.test?.length ? p.test.map((s, i) => `${i + 1}. ${s}`) : ["The worker gave no steps."]),
     "",
+  ]);
+
+export function renderPacket(p: PacketInput & { models: Models; cost?: number }): string {
+  const revisions = p.task.revisions ?? 0;
+  return [
+    ...(p.draft && p.buildsOn ? [buildsOnNote(p.buildsOn, p.task.base), ""] : []),
+    ...opening(p),
     "## Assumptions",
     "",
     ...(p.assumptions?.length ? p.assumptions.map((s) => `- ${s}`) : ["None: the brief settled every choice."]),
@@ -145,7 +155,7 @@ export function uploadShots(repo: Repo, shots: Shot[], prefix: string, nwo: stri
   return shots.map((s) => ({ name: s.name, before: url(s, "before"), after: url(s, "after") }));
 }
 
-export type Delivery = { packet: string; pr?: number; url?: string; note: string };
+export type Delivery = { packet: string; title: string; pr?: number; url?: string; note: string };
 
 export function deliver(repo: Repo, id: string, opts: { dryRun?: boolean; title?: string } = {}): Delivery {
   const task = findTask(repo, id);
@@ -158,7 +168,11 @@ export function deliver(repo: Repo, id: string, opts: { dryRun?: boolean; title?
   const decisions = loadDecisions(repo)
     .filter((d) => d.by === id || verdict.decisions_touched.some((t) => t.includes(d.id)))
     .map((d) => `${d.id} ${d.title} (${d.status}${d.adr ? `, ADR ${d.adr.number}` : ""})`);
-  const title = opts.title ?? loadPlan(repo)?.tasks.find((t) => t.id === id)?.title ?? task.title ?? "";
+  const planned = loadPlan(repo)?.tasks.find((t) => t.id === id)?.title ?? task.title ?? "";
+  const drafted = verdict.pr?.title.trim();
+  const useDraft = !opts.title && !!drafted && CONVENTIONAL.test(drafted);
+  const title = opts.title ?? (useDraft ? drafted! : planned);
+  const titleNote = !opts.title && drafted && !useDraft ? `. The pull-request skill's title "${drafted}" isn't a conventional commit, so the PR uses the task's title` : "";
   if (!CONVENTIONAL.test(title)) throw new Error(`PR titles must be conventional commits. Rerun with --title "<type>: <summary>", like --title "feat: add tags to notes"`);
 
   const origin = run(["git", "-C", repo.root, "remote", "get-url", "origin"]).code === 0;
@@ -173,19 +187,19 @@ export function deliver(repo: Repo, id: string, opts: { dryRun?: boolean; title?
     shotsNote = undefined;
   }
   const packet = join(taskDir(repo, id), "pr.md");
-  writeFileSync(packet, renderPacket({ task, intent: section(brief, "Intent"), doneNote, test: done?.test, assumptions: done?.assumptions, stat, verdict, round, decisions, shots, shotsNote, buildsOn, models: { worker: workerModels(repo, task), reviewer: reviewerModels(repo, task) }, cost: taskCost(repo, task).total }));
+  writeFileSync(packet, renderPacket({ task, intent: section(brief, "Intent"), doneNote, test: done?.test, assumptions: done?.assumptions, stat, verdict, round, decisions, shots, shotsNote, buildsOn, draft: verdict.pr?.description.trim() ? verdict.pr : undefined, models: { worker: workerModels(repo, task), reviewer: reviewerModels(repo, task) }, cost: taskCost(repo, task).total }));
 
-  if (opts.dryRun) return { packet, note: `wrote the PR packet to ${packet}` };
-  if (!origin) return { packet, note: `this repo has no origin remote, so nothing was pushed. The PR packet is at ${packet}` };
+  if (opts.dryRun) return { packet, title, note: `wrote the PR packet to ${packet}${titleNote}` };
+  if (!origin) return { packet, title, note: `this repo has no origin remote, so nothing was pushed. The PR packet is at ${packet}${titleNote}` };
   must(["git", "-C", repo.root, "push", "-q", "--force-with-lease", "origin", `${task.branch}:refs/heads/${task.branch}`]);
-  if (!github) return { packet, note: `pushed ${task.branch}, but gh can't see a GitHub repo for origin. Open the PR by hand with the body in ${packet}` };
+  if (!github) return { packet, title, note: `pushed ${task.branch}, but gh can't see a GitHub repo for origin. Open the PR by hand with the body in ${packet}${titleNote}` };
 
   if (task.pr) {
-    must(["gh", "pr", "edit", String(task.pr), "--body-file", packet], { cwd: repo.root });
+    must(["gh", "pr", "edit", String(task.pr), "--body-file", packet, ...(useDraft ? ["--title", title] : [])], { cwd: repo.root });
     logRun(repo, id, "pr-updated", `#${task.pr}`);
     const stacked = loadTasks(repo).filter((t) => t.stackedOn === id && t.status !== "torn-down").map((t) => t.id);
     const restack = stacked.length ? `. ${stacked.join(", ")} ${stacked.length > 1 ? "build" : "builds"} on this branch, so run foreman sync to ask ${stacked.length > 1 ? "their workers" : "its worker"} to rebase` : "";
-    return { packet, pr: task.pr, note: `pushed ${task.branch} and refreshed PR #${task.pr}${restack}` };
+    return { packet, title, pr: task.pr, note: `pushed ${task.branch} and refreshed PR #${task.pr}${restack}${titleNote}` };
   }
   const url = must(["gh", "pr", "create", "--base", buildsOn?.branch ?? task.base, "--head", task.branch, "--title", title, "--body-file", packet], { cwd: repo.root }).trim().split("\n").at(-1)!;
   const pr = Number(url.match(/\/pull\/(\d+)/)?.[1]);
@@ -193,5 +207,5 @@ export function deliver(repo: Repo, id: string, opts: { dryRun?: boolean; title?
   logRun(repo, id, "pr-opened", `#${pr}`);
   const started = new Set(loadTasks(repo).map((t) => t.id));
   const next = stackable(repo) ? loadPlan(repo)?.tasks.filter((t) => t.deps.includes(id) && !started.has(t.id)).map((t) => t.id) ?? [] : [];
-  return { packet, pr, url, note: `opened PR #${pr}: ${url}${next.length ? `. Run foreman next, which can start ${next.join(", ")} on top of it` : ""}` };
+  return { packet, title, pr, url, note: `opened PR #${pr}: ${url}${next.length ? `. Run foreman next, which can start ${next.join(", ")} on top of it` : ""}${titleNote}` };
 }

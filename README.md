@@ -218,3 +218,18 @@ For a macOS app, `screenshots` builds the app instead of starting a server:
 { "screenshots": { "adapter": "macos", "build": "xcodebuild -scheme App -derivedDataPath {derivedData} build", "app": "{derivedData}/Build/Products/Debug/App.app" } }
 ```
 
+### Your own skills
+
+Foreman can follow your own skills when it reviews work and opens PRs. Put each one in `.foreman/skills/<name>/SKILL.md`, in [Claude Code's skill format](https://code.claude.com/docs/en/skills): frontmatter with a `name` and a `description`, then the instructions. They stay on your machine, since Foreman keeps `.foreman/` out of git.
+
+- The reviewer reads every skill and checks each change against the ones whose description fits reviewing code, like a code-review skill. Breaking one sends the change back to its worker, with the skill named.
+- A skill named `pull-request` shapes the PRs Foreman opens. The reviewer writes the title and description by it, and Foreman adds the intent, assumptions, decisions, screenshots, verdict and risk below. A title that isn't a conventional commit is dropped for the task's own title.
+- Workers don't see these skills, so they shape the review and the PR, not how workers build.
+
+Foreman's own [pull-request skill](.claude/skills/pull-request/SKILL.md) is a working example. Copy it in and make it yours:
+
+```sh
+mkdir -p .foreman/skills && cp -r ~/Code/Foreman/.claude/skills/pull-request .foreman/skills/
+```
+
+Skills apply from the next review, so add them before a task reports done. Without `.foreman/skills/`, the review and the PR stay as they are.

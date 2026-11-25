@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { deliver, modelName, renderPacket, section } from "../src/deliver.ts";
@@ -133,4 +133,44 @@ test("modelName turns model ids into the names people use", () => {
   expect(modelName("claude-opus-5-5")).toBe("Opus 5.5");
   expect(modelName("claude-sonnet-4-5-20250929")).toBe("Sonnet 4.5");
   expect(modelName("gpt-x")).toBe("gpt-x");
+});
+
+describe("a pull-request skill's draft", () => {
+  const draft = { title: "feat: greet people in T1", description: "## Summary\n\nT1 says hi.\n\n## Why\n\nIt was rude." };
+
+  function approved(verdict: Verdict) {
+    const { repo, commit } = setup(["T1"]);
+    commit("T1");
+    mkdirSync(roundDir(repo, "T1", 1), { recursive: true });
+    writeFileSync(join(roundDir(repo, "T1", 1), "verdict.json"), JSON.stringify(verdict));
+    updateTask(repo, "T1", { reviews: 1 });
+    appendEvent(repo, "T1", "done", "Greets in T1", { test: ["Open T1.txt. It says hi."], assumptions: ["Hi, not hello."] });
+    return repo;
+  }
+
+  test("writes the PR's title and opening, and Foreman's own sections follow it", () => {
+    const r = deliver(approved({ ...approve, decisions_touched: [], pr: draft }), "T1", { dryRun: true });
+    expect(r.title).toBe("feat: greet people in T1");
+    const md = readFileSync(r.packet, "utf8");
+    expect(md).toStartWith("## Summary\n\nT1 says hi.\n\n## Why\n\nIt was rude.\n\n## Intent\n\nGreet in T1.\n");
+    expect(md).not.toContain("## Description");
+    expect(md).not.toContain("## How to test");
+    for (const part of ["## Assumptions\n\n- Hi, not hello.", "## Decisions", "## AI Usage", "It approved in round 1: Matches the intent.", "## Screenshots", "## Risk\n\n**low**: Copy change only."]) expect(md).toContain(part);
+  });
+
+  test("gives way to --title, and to the task's title when it isn't a conventional commit", () => {
+    expect(deliver(approved({ ...approve, pr: draft }), "T1", { dryRun: true, title: "fix: mine" }).title).toBe("fix: mine");
+    const repo = approved({ ...approve, pr: { ...draft, title: "Greet people" } });
+    updateTask(repo, "T1", { title: "feat: greet in T1" });
+    const r = deliver(repo, "T1", { dryRun: true });
+    expect(r.title).toBe("feat: greet in T1");
+    expect(r.note).toContain(`The pull-request skill's title "Greet people" isn't a conventional commit`);
+  });
+
+  test("without one, the packet is Foreman's own", () => {
+    const r = deliver(approved(approve), "T1", { dryRun: true, title: "feat: greet in T1" });
+    const md = readFileSync(r.packet, "utf8");
+    expect(md).toStartWith("## Description\n\nGreet in T1.");
+    expect(md).toContain("## How to test\n\n1. Open T1.txt. It says hi.");
+  });
 });

@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { MAX_REVISIONS, parseVerdict, renderFeedback, reviewerCommand, roundDir, runReview, sendFeedback, startReview, verdictLine, type Verdict } from "../src/review.ts";
+import { MAX_REVISIONS, parseVerdict, renderFeedback, reviewerCommand, roundDir, runReview, sendFeedback, startReview, VERDICT_SCHEMA, verdictLine, type Verdict } from "../src/review.ts";
+import { skillsDir } from "../src/skills.ts";
 import { saveConfig } from "../src/config.ts";
 import { saveLimit } from "../src/limits.ts";
 import { readEvents } from "../src/events.ts";
@@ -168,5 +169,53 @@ describe("the usage limit", () => {
     expect(await runReview(repo, "T1", deps([verdict]))).toStartWith("approve, round 1");
     expect(calls).toHaveLength(1);
     expect(calls[0]).toBeGreaterThanOrEqual(RESET);
+  });
+});
+
+describe("the user's skills", () => {
+  const approve = JSON.stringify({ structured_output: { ...changes, verdict: "approve", issues: [] } });
+  const skill = (repo: ReturnType<typeof tempRepo>, name: string, description: string, body: string) => {
+    mkdirSync(join(skillsDir(repo), name), { recursive: true });
+    writeFileSync(join(skillsDir(repo), name, "SKILL.md"), `---\nname: ${name}\ndescription: ${description}\n---\n\n${body}\n`);
+  };
+
+  async function review(setup: (repo: ReturnType<typeof tempRepo>) => void = () => {}) {
+    const repo = tempRepo();
+    withTasks(repo, (ts) => ts.push({ id: "T1", status: "done", branch: "main", base: "main", worktree: repo.root, owns: ["src/"], socket: "/nonexistent.sock", createdAt: "" }));
+    mkdirSync(join(repo.foreman, "tasks", "T1"), { recursive: true });
+    writeFileSync(join(repo.foreman, "tasks", "T1", "brief.md"), "## Intent\n\nx\n");
+    saveConfig(repo, { budget: {} });
+    setup(repo);
+    const commands: string[][] = [];
+    const line = await runReview(repo, "T1", { reviewer: (cmd) => (commands.push(cmd), { code: 0, stdout: approve, stderr: "" }), say: () => {} });
+    expect(line).toStartWith("approve");
+    const schema = JSON.parse(commands[0]![commands[0]!.indexOf("--json-schema") + 1]!);
+    return { repo, command: commands[0]!, schema, prompt: readFileSync(join(roundDir(repo, "T1", 1), "prompt.md"), "utf8") };
+  }
+
+  test("a code-review skill reaches the reviewer's prompt as rules to check", async () => {
+    const { repo, prompt, command, schema } = await review((r) => skill(r, "code-review", "Review code in this repo. Use when reviewing a change.", "Every new function has a test."));
+    expect(prompt).toContain("## The user's skills");
+    expect(prompt).toContain("A change that breaks one is an issue, with the skill's name and the rule it breaks in `intent`.");
+    expect(prompt).toContain(`### code-review\n\nReview code in this repo. Use when reviewing a change. From ${join(skillsDir(repo), "code-review", "SKILL.md")}.\n\nEvery new function has a test.`);
+    expect(prompt).not.toContain("draft the PR");
+    expect(command).toContain(skillsDir(repo));
+    expect(schema.properties.pr).toBeUndefined();
+    expect(prompt.trimEnd()).toEndWith("Return the verdict.");
+  });
+
+  test("a pull-request skill asks the reviewer for a PR draft", async () => {
+    const { prompt, schema } = await review((r) => skill(r, "pull-request", "Write the PR.", "Sections: Summary, Why, How to test."));
+    expect(prompt).toContain("When you approve, draft the PR's title and description in `pr`, following the pull-request skill.");
+    expect(prompt).toContain("Sections: Summary, Why, How to test.");
+    expect(schema.properties.pr.required).toEqual(["title", "description"]);
+    expect(schema.required).not.toContain("pr");
+  });
+
+  test("nothing changes without a .foreman/skills folder", async () => {
+    const { repo, prompt, command, schema } = await review();
+    expect(prompt).not.toContain("skill");
+    expect(command).not.toContain(skillsDir(repo));
+    expect(schema).toEqual(VERDICT_SCHEMA);
   });
 });
