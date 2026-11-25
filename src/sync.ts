@@ -52,7 +52,7 @@ function commitsSinceStart(repo: Repo, task: Task, ref: string): number {
 }
 
 const RESOLVE = "Resolve conflicts only within your owned paths. If one needs a change elsewhere, abort the rebase and report blocked.";
-const REPORT = `Rerun your checks, then run \`foreman report rebased "<one line>"\`.`;
+const REPORT = "Rerun your checks, then call the report tool with type rebased and one line.";
 
 export function sync(repo: Repo, base: string, term: Terminal, probes: SyncProbes = realProbes(repo)): SyncResult {
   if (run(["git", "-C", repo.root, "remote", "get-url", "origin"]).code === 0) probes.fetch(base);

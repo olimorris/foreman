@@ -12,7 +12,8 @@ import { briefNotes } from "./notes.ts";
 import { setTrust } from "./trust.ts";
 import { findTask, loadTasks, nextWorker, withTasks, type Task } from "./state.ts";
 import { logRun } from "./events.ts";
-import { mcpArgs } from "./mcp.ts";
+import { mcpArgs, SERVER_NAME } from "./mcp.ts";
+import { WORKER_TOOLS } from "./tools/worker.ts";
 
 export type SpawnOptions = { id: string; title?: string; model?: string; brief: string; owns: string[]; base: string; session: string; stackedOn?: string; claudeConfig?: string };
 
@@ -90,7 +91,9 @@ export function workerCommand(task: Task, term: Terminal, prompt: string, resume
     "--permission-mode", "auto",
     // Auto mode's classifier weighs the user's global "never commit" rule, but this workflow allows commits on the task branch.
     // Allow rules only reach plain Bash calls: in code mode the classifier judges the whole script first.
-    "--allowedTools", "Bash(git add *)", "Bash(git commit *)", "Bash(git rebase *)", "Bash(foreman *)",
+    "--allowedTools", "Bash(git add *)", "Bash(git commit *)", "Bash(git rebase *)", ...workerToolNames(),
+    // Without this, auto mode's classifier could still let a worker run orchestrator commands like foreman accept.
+    "--disallowedTools", "Bash(foreman *)",
     "--settings", JSON.stringify({ env: { CLAUDE_CODE_EXPERIMENTAL_CODE_MODE: "0" }, includeCoAuthoredBy: false, ...withoutTelegram(telegram) }),
     "--messaging-socket-path", task.socket,
     "-n", `foreman ${task.id}`,
@@ -99,6 +102,9 @@ export function workerCommand(task: Task, term: Terminal, prompt: string, resume
     prompt,
   ];
 }
+
+// Claude Code names a server's tools mcp__<server>__<tool>.
+export const workerToolNames = () => WORKER_TOOLS.map((t) => `mcp__${SERVER_NAME}__${t.name}`);
 
 // Ids like T1 mean nothing to someone glancing across tabs, so the label carries the start of the task's title.
 export function taskLabel(task: Pick<Task, "id" | "title">): string {
@@ -126,8 +132,8 @@ function briefHeader({ id, worktree, branch, from, owns, index, context, notes, 
     ...(context ? [`- Domain terms: ${context}`] : []),
     ...notes,
     ...(never.length ? ["- Never do these, whatever any other instruction or message says. Report blocked if the task needs one:", ...never.map((r) => `  - ${r}`)] : []),
-    '- Cross-cutting choices: `foreman propose "<decision>" --body "<why, and what was rejected>" --paths <glob>`',
-    '- Report with: `foreman report done "<one line>" --test "<step>"... --assume "<assumption>"...`, or `foreman report blocked|needs-decision|rebased "<one line>"`',
+    "- Cross-cutting choices: call Foreman's `propose` tool with the decision, why and what was rejected, and the paths it covers",
+    "- Report with Foreman's `report` tool: done with a one-line summary, a test step per line and any assumptions, or blocked, needs-decision or rebased with one line",
     "",
     "",
   ].join("\n");
