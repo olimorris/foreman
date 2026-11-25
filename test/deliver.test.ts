@@ -95,6 +95,31 @@ test("sync marks a merged task, asks the others to rebase once, and teardown acc
   expect(teardown(repo, "T1", false, term).removed).toBe(true);
 });
 
+test("a task that rebased before its first commit isn't taken as merged", () => {
+  const { repo, term } = setup(["T1"]);
+  writeFileSync(join(repo.root, "main.txt"), "moved\n");
+  must(["git", "-C", repo.root, "add", "."]);
+  must(["git", "-C", repo.root, "commit", "-qm", "main moves"]);
+  must(["git", "-C", findTask(repo, "T1").worktree, "rebase", "-q", "main"]);
+  expect(sync(repo, "main", term, noProbes).merged).toEqual([]);
+  expect(findTask(repo, "T1").mergedAt).toBeUndefined();
+});
+
+test("a task that rebased onto another task's merge commit before its first commit isn't taken as merged", () => {
+  const { repo, term, commit } = setup(["T1", "T2"]);
+  commit("T1");
+  must(["git", "-C", repo.root, "merge", "-q", "--no-ff", "-m", "merge T1", "foreman/T1"]);
+  must(["git", "-C", findTask(repo, "T2").worktree, "rebase", "-q", "main"]);
+  expect(sync(repo, "main", term, noProbes).merged).toEqual(["T1"]);
+});
+
+test("a task fast-forwarded into the base is taken as merged", () => {
+  const { repo, term, commit } = setup(["T1"]);
+  commit("T1");
+  must(["git", "-C", repo.root, "merge", "-q", "--ff-only", "foreman/T1"]);
+  expect(sync(repo, "main", term, noProbes).merged).toEqual(["T1"]);
+});
+
 test("sync trusts a merged PR even when the branch was squashed", () => {
   const { repo, term, commit } = setup(["T1"]);
   commit("T1");

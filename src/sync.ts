@@ -21,9 +21,22 @@ export const realProbes = (repo: Repo): SyncProbes => ({
 export function isMerged(repo: Repo, task: Task, ref: string, prState?: string): boolean {
   if (prState === "MERGED") return true;
   const git = (...args: string[]) => run(["git", "-C", repo.root, ...args]);
+  const own = workerCommitted(repo, task.branch) ?? commitsSinceStart(repo, task, ref) > 0;
+  return own && git("merge-base", "--is-ancestor", task.branch, ref).code === 0;
+}
+
+// A worker that rebases before its first commit moves its branch onto base commits, which looks exactly like a fast-forward merge, so only the branch's reflog can tell whether the worker committed anything.
+export function workerCommitted(repo: Repo, branch: string): boolean | undefined {
+  const r = run(["git", "-C", repo.root, "reflog", "show", "--format=%gs", `refs/heads/${branch}`]);
+  const entries = r.stdout.split("\n").filter(Boolean);
+  if (r.code !== 0 || !entries.length) return undefined;
+  return entries.some((e) => /^(commit|cherry-pick|merge)\b/.test(e));
+}
+
+function commitsSinceStart(repo: Repo, task: Task, ref: string): number {
+  const git = (...args: string[]) => run(["git", "-C", repo.root, ...args]);
   const from = task.startSha ?? git("merge-base", task.branch, ref).stdout.trim();
-  const commits = Number(git("rev-list", "--count", `${from}..${task.branch}`).stdout.trim()) || 0;
-  return commits > 0 && git("merge-base", "--is-ancestor", task.branch, ref).code === 0;
+  return Number(git("rev-list", "--count", `${from}..${task.branch}`).stdout.trim()) || 0;
 }
 
 export function sync(repo: Repo, base: string, term: Terminal, probes: SyncProbes = realProbes(repo)): SyncResult {
