@@ -243,13 +243,6 @@ export function prPatches(tasks: Task[], prs: TrackedPr[], seen: Record<string, 
   });
 }
 
-export async function watch(repo: Repo, base: string, term: Terminal): Promise<number> {
-  process.on("SIGTERM", () => (release(repo), process.exit(143)));
-  process.on("SIGINT", () => (release(repo), process.exit(130)));
-  console.log(await watchFor(repo, base, term, { notice: (notice) => console.log(notice) }));
-  return 0;
-}
-
 export type WaitForChange = (paths: string[], ms: number, signal?: AbortSignal) => Promise<void>;
 export type Watching = { signal?: AbortSignal; notice?: (notice: string) => void; wait?: WaitForChange };
 

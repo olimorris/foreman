@@ -72,7 +72,7 @@ export const GROUPS: Group[] = [
 ];
 
 // Commands that moved to the MCP server, each named after the tool that replaced it.
-const ON_THE_SERVER = [
+export const ON_THE_SERVER = [
   "accept", "adr", "answer", "ask", "baseline", "decisions", "deliver", "feedback", "next", "pause", "plan", "propose",
   "reject", "report", "review", "send", "shots", "spawn", "sync", "teardown", "tidy", "together", "unblock", "watch",
 ];

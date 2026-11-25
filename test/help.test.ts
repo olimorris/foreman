@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { goneText, GROUPS, helpText, styleFor, usageError } from "../src/help.ts";
+import { goneText, GROUPS, helpText, ON_THE_SERVER, styleFor, usageError } from "../src/help.ts";
 
 test("every command in the help fits on one line, so the descriptions line up", () => {
   const text = helpText(styleFor({ isTTY: false }), undefined);
@@ -51,4 +51,17 @@ test("a command that moved to the MCP server says so and names the tool", () => 
   for (const cmd of ["watch", "baseline", "together", "tidy", "spawn", "deliver"]) expect(goneText(cmd)).toContain(`the ${cmd} tool`);
   expect(goneText("status")).toBeUndefined();
   expect(goneText("frobnicate")).toBeUndefined();
+});
+
+test("no string in src names a foreman command that moved to the MCP server", () => {
+  const src = join(import.meta.dir, "..", "src");
+  // Transpiling drops comments, so only text a caller can see is checked.
+  const transpiler = new Bun.Transpiler({ loader: "ts" });
+  const named = new RegExp(`foreman (${ON_THE_SERVER.join("|")})(?![\\w-])`, "g");
+  const found: string[] = [];
+  for (const file of new Bun.Glob("**/*.ts").scanSync(src)) {
+    const code = transpiler.transformSync(readFileSync(join(src, file), "utf8"));
+    for (const m of code.matchAll(named)) found.push(`${file}: ${m[0]}`);
+  }
+  expect(found).toEqual([]);
 });
