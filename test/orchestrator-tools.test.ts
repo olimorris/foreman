@@ -6,6 +6,7 @@ import { loadConfig } from "../src/config.ts";
 import { findDecision, propose } from "../src/ledger.ts";
 import { respond, type Server } from "../src/mcp.ts";
 import type { Repo } from "../src/paths.ts";
+import { loadPlan } from "../src/plan.ts";
 import { loadQuestions } from "../src/questions.ts";
 import { ensureForeman } from "../src/spawn.ts";
 import { findTask } from "../src/state.ts";
@@ -164,6 +165,43 @@ test("spawn refuses an id that would write outside the task folders", async () =
   const repo = crew({});
   const { call } = server(repo);
   expect(await call("spawn", { task: "../x", title: "feat: x", brief: "## Intent\n\n## Spec\n", owns: "src/" })).toEqual({ text: "task id must be letters, digits and dashes: ../x", isError: true });
+});
+
+const planTask = (id: string, title: string, deps = "none") => `## ${id}: ${title}\n- Owns: src/${id}/\n- Depends on: ${deps}\n\n### Intent\n"${title}", the user said.\n\n### Spec\nBuild it.\n`;
+const PLAN_TEXT = `# Plan: Tags\nDeadline: Friday\n\n${planTask("T1", "feat: add tags")}\n${planTask("T2", "feat: filter by tag", "T1")}`;
+
+test("plan takes the whole plan as text, saves plan.md and stores it as a draft", async () => {
+  const repo = crew({});
+  const { ok } = server(repo);
+  expect(await ok("plan", { text: PLAN_TEXT })).toContain("Saved as a draft in .foreman/plan.md");
+  expect(readFileSync(join(repo.foreman, "plan.md"), "utf8")).toBe(PLAN_TEXT);
+  expect(loadPlan(repo)!.tasks.map((t) => t.id)).toEqual(["T1", "T2"]);
+  expect(await ok("plan", { approve: true })).toStartWith("approved: Tags.");
+  expect(await ok("plan")).toContain("approved ");
+});
+
+test("plan with tasks replaces one task and adds another, keeping the rest of plan.md", async () => {
+  const repo = crew({});
+  const { ok, call } = server(repo);
+  await ok("plan", { text: PLAN_TEXT });
+  await ok("plan", { approve: true });
+  await ok("workers", { count: 2 });
+  await ok("plan", { tasks: `${planTask("T2", "feat: filter notes by tag", "T1")}\n${planTask("T3", "docs: explain tags", "T1")}` });
+  const md = readFileSync(join(repo.foreman, "plan.md"), "utf8");
+  expect(md).toStartWith("# Plan: Tags\nDeadline: Friday\n\n## T1: feat: add tags");
+  expect(md).not.toContain("## T2: feat: filter by tag\n");
+  const p = loadPlan(repo)!;
+  expect(p.tasks.map((t) => `${t.id}: ${t.title}`)).toEqual(["T1: feat: add tags", "T2: feat: filter notes by tag", "T3: docs: explain tags"]);
+  expect(p.approvedAt).toBeUndefined();
+  expect(p.maxWorkers).toBe(2);
+  expect(readFileSync(join(repo.foreman, "plan", "T2.md"), "utf8")).toContain('"feat: filter notes by tag", the user said.');
+  expect((await call("plan", { tasks: "Make T2 smaller" })).text).toStartWith("tasks takes only task sections");
+  expect((await call("plan", { tasks: planTask("T4", "feat: x", "T9") })).text).toBe("problem: T4 depends on T9, which isn't in the plan");
+});
+
+test("plan with tasks needs a plan to change", async () => {
+  const repo = crew({});
+  expect((await server(repo).call("plan", { tasks: planTask("T1", "feat: add tags") })).text).toBe("no plan to change. Give the whole plan as text first");
 });
 
 test("workers and automerge need a plan to change, and say so", async () => {

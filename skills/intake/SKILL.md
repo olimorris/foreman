@@ -5,7 +5,7 @@ description: Turn the user's backlog and deadline into one Foreman plan they app
 
 # Intake
 
-The user gives you a backlog (a list, a file or an issue query) and usually a deadline. You turn it into one plan file. The user reads it once and approves it, and then the `next` tool runs it.
+The user gives you a backlog (a list, a file or an issue query) and usually a deadline. You turn it into one plan. The user reads it once and approves it, and then the `next` tool runs it.
 
 ## 1. Read before planning
 
@@ -37,7 +37,7 @@ When you do have questions, ask them all in one batch, one line each, with your 
 
 ## 4. Write the plan
 
-Write `.foreman/plan.md`:
+Lay the plan out like this. You send it to the `plan` tool as text, and the tool saves it to `.foreman/plan.md`. Never write or edit that file yourself:
 
 ```markdown
 # Plan: <short title>
@@ -69,7 +69,7 @@ Add `- Model: <name>` to a task's fields only when you chose a smaller model for
 
 ## 5. Check it, then start or ask
 
-1. Call `plan` with the file `.foreman/plan.md`. It checks the plan (unknown dependencies, cycles, missing sections) and prints the waves and which tasks share paths. Fix any problem it names.
+1. Call `plan` with the whole plan as `text`. It saves it to `.foreman/plan.md`, checks it (unknown dependencies, cycles, missing sections) and prints the waves and which tasks share paths. Fix any problem it names.
 2. Show the user only what they wouldn't assume from their own backlog. The summary grows with the surprises, not with the number of tasks:
    - Tasks that don't map one-to-one to a backlog item: a split, a merge, or a contract task, with one line on why.
    - What goes first, only when the order isn't obvious or affects the deadline.
@@ -87,8 +87,8 @@ Add `- Model: <name>` to a task's fields only when you chose a smaller model for
 
 Call `baseline` the first time with `test` set to the command you worked out, which saves it. After that, call it with no arguments. It returns at once as a task and runs the tests on the base branch while the workers start, so it doesn't hold them up. Anything it finds reaches them as a note, and its line wakes you when it's done.
 
-If they ask for changes, edit `plan.md` and call `plan` with its file again. That clears the approval, so ask again.
+If they ask for changes, call `plan` with `tasks` set to only the task sections that change, each with its `##` line and all its fields and sections. A section with an id already in the plan replaces that task, and the rest are added at the end. To change the title, deadline, `Calls:` or `Cut:`, send the whole plan as `text` again. Either way the approval is cleared, so ask again.
 
 ## Changing the plan later
 
-To add or change tasks mid-flight, edit `plan.md`, call `plan` with its file again, and get the user's approval for the change. Tasks that have already started keep running. Use new ids for new work.
+To add or change tasks mid-flight, call `plan` with `tasks` set to only the new or changed task sections, then get the user's approval for the change. The worker limit and automerge stay as they were. Tasks that have already started keep running. Use new ids for new work.
