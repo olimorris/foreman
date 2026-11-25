@@ -91,15 +91,13 @@ Foreman asks about anything unclear, then shows you a plan to approve. Workers o
 
 ### What each task is doing
 
-<img alt="foreman status" src="assets/README/foreman-status.png">
-
 ```sh
 foreman status
 ```
 
-### What it's cost so far
+<img alt="foreman status" src="assets/README/foreman-status.png">
 
-<img alt="foreman budget" src="assets/README/foreman-budget.png">
+### What it's cost so far
 
 ```sh
 foreman budget
@@ -107,9 +105,9 @@ foreman budget
 
 Each task has a $5 limit and the plan has $40. When a task goes over, Foreman stops its worker and asks whether to raise the limit.
 
-### The PRs to review
+<img alt="foreman budget" src="assets/README/foreman-budget.png">
 
-<img alt="foreman summary" src="assets/README/foreman-summary.png">
+### The PRs to review
 
 ```sh
 foreman summary
@@ -117,9 +115,9 @@ foreman summary
 
 The PRs in the order to review them, how to test each one, and the assumptions to check.
 
-### How the run went
+<img alt="foreman summary" src="assets/README/foreman-summary.png">
 
-<img alt="foreman timeline" src="assets/README/foreman-timeline.png">
+### How the run went
 
 ```sh
 foreman timeline
@@ -127,11 +125,11 @@ foreman timeline
 
 When each task started, when its worker went quiet, and which tasks waited on it.
 
+<img alt="foreman timeline" src="assets/README/foreman-timeline.png">
+
 Run `foreman help` to see every command. Foreman keeps its state in `.foreman/` in your repo, out of git, and picks up from there if the orchestrator restarts.
 
 ### Status pane
-
-<img alt="foreman pane" src="assets/README/foreman-pane.png">
 
 ```sh
 foreman pane
@@ -146,6 +144,8 @@ foreman pane
 - **Recent**: the last few things that happened
 
 A worker that goes quiet turns yellow, then red. Run `foreman pane` if you close it.
+
+<img alt="foreman pane" src="assets/README/foreman-pane.png">
 
 ## :gear: Settings
 
