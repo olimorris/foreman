@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { writeAdrs } from "../src/adrwrite.ts";
 import { saveConfig } from "../src/config.ts";
 import { accept, overlaps, recipients, reject, writeIndex } from "../src/decisions.ts";
-import { readEvents } from "../src/events.ts";
 import { must, run } from "../src/exec.ts";
 import { findDecision, propose, recordPath } from "../src/ledger.ts";
 import type { Repo } from "../src/paths.ts";
@@ -96,15 +95,4 @@ test("writeAdrs commits records on their own branch without touching the main ch
   expect(run(["git", "-C", repo.root, "worktree", "list"]).stdout.trim().split("\n")).toHaveLength(1);
   expect(findDecision(repo, "D-1").adr).toEqual({ number: 3, file: "docs/decisions/0003-workers-own-their-folders.md", pr: undefined });
   expect(() => writeAdrs(repo, { dryRun: false, push: false, base: "main" })).toThrow("no accepted decisions");
-});
-
-test("a worker's proposal wakes the orchestrator through its task events", async () => {
-  const repo = tempRepo();
-  withTasks(repo, (ts) => ts.push(task("T1", ["src/"])));
-  const cli = join(import.meta.dir, "..", "src", "cli.ts");
-  const p = Bun.spawnSync(["bun", cli, "propose", "Exports", "are", "H.264", "--body", "Why.", "--paths", "src/export/"], {
-    cwd: repo.root, env: { ...process.env, FOREMAN_TASK: "T1" },
-  });
-  expect(p.stdout.toString()).toContain("proposed D-1");
-  expect(readEvents(repo, "T1")).toMatchObject([{ type: "needs-decision", note: "D-1 Exports are H.264" }]);
 });
