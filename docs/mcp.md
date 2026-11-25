@@ -1,6 +1,6 @@
 # Foreman's MCP server
 
-The `foreman` CLI is for people. The MCP server, started by `foreman mcp`, is for the orchestrator and workers. D-16 records the split. D-17 and D-21 cover the MCP tasks. All three reach `docs/decisions/` in the next decisions PR. `docs/spikes.md` has what was checked against Claude Code.
+The `foreman` CLI is for people. The MCP server, started by `foreman mcp`, is for the orchestrator and workers. D-16 records the split. D-17 and D-21 cover the MCP tasks. All three reach `docs/decisions/` in the next decisions PR. `docs/findings.md` has what was checked against Claude Code.
 
 ## Why
 
@@ -51,4 +51,4 @@ An earlier version of this note argued against a server, because every command w
 ## Trade-offs
 
 - A server keeps the code it started with. A fix to a tool reaches a session only after it restarts. A hook picks up a fix on its next run.
-- The user's skills come from a plugin folder, not the server. Team and Enterprise logins turn off skills from MCP servers. See "The user's skills in worktree sessions" in `docs/spikes.md`.
+- The user's skills come from a plugin folder, not the server. Team and Enterprise logins turn off skills from MCP servers. See "The user's skills in worktree sessions" in `docs/findings.md`.

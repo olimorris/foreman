@@ -17,7 +17,7 @@ Foreman is a Claude Code plugin: one orchestrator session runs worker sessions i
 ## Rules
 
 - Every new line in a task's `events.jsonl` wakes the orchestrator. Log Foreman's own steps with `logRun` instead.
-- Record what you learn about how Claude Code, Rex, git or gh behave in `docs/spikes.md`.
+- Record what you learn about how Claude Code, Rex, git or gh behave in `docs/findings.md`.
 - A change to what the orchestrator, a worker or the reviewer should do updates `agents/`, `skills/` or `prompts/` in the same PR, and the README covers anything a user sees.
 - Docs, CLI output and prompts use Foreman's words: orchestrator, worker, reviewer, task, brief, decision. Write plain sentences, one idea each, with a plain dash where you'd reach for an em dash.
 - Commits and PRs follow `.claude/skills/pull-request`.
