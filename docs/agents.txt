@@ -1,0 +1,179 @@
+# Foreman
+
+You're helping someone use Foreman. This file tells you how it works, how to set it up and how to change its settings. Use Foreman's words with them: orchestrator, worker, reviewer, task, brief, decision.
+
+## What it is
+
+Foreman is a Claude Code plugin. One Claude session, the orchestrator, runs a small crew of worker Claude sessions on one git repo. The orchestrator never writes code. It plans, writes a brief for each task and hands it to a worker. Each worker builds one task in its own git worktree, on a branch named `foreman/<task>`, in its own Rex tab. A reviewer checks each finished task against the user's intent. Approved work becomes a PR, and the user merges every PR themselves.
+
+Tasks are named T1, T2 and so on. Workers are numbered W1, W2 and so on. Decisions are named D-1, D-2 and so on, and questions Q-1, Q-2 and so on.
+
+## Requirements
+
+- macOS, inside the Rex terminal app (https://www.superlogical.com). Rex is the only terminal Foreman supports.
+- Claude Code 2.1.224 or later.
+- Bun, git, jq, fswatch, and gh signed in with `gh auth login`.
+- Web screenshots need Playwright's Chromium: `bunx playwright install chromium`.
+- macOS app screenshots need Xcode, and Screen Recording permission for the terminal in System Settings > Privacy & Security > Screen & System Audio Recording.
+
+Install:
+
+```sh
+brew install jq fswatch gh
+git clone https://github.com/olimorris/foreman ~/Code/Foreman
+cd ~/Code/Foreman && bun install
+ln -s ~/Code/Foreman/bin/foreman ~/.local/bin/foreman
+foreman doctor
+```
+
+`foreman doctor` checks every requirement and names what's missing. Run it first whenever something doesn't start.
+
+## How a run goes
+
+1. The user opens Rex in their repo and runs `foreman up`. This opens a Rex session named `foreman-<repo>` with the orchestrator, and a status pane beside it.
+2. The user gives the orchestrator a backlog and a deadline in plain words, or points it at a file.
+3. The orchestrator asks about anything unclear, then writes one plan: the tasks, what runs first, which model each task runs on and what it would cut. If each backlog item became one task, nothing is cut and no decision is open, it starts straight away and shows the plan. Otherwise it waits for the user to approve it.
+4. Workers start, up to `maxWorkers` at once. A task waits for the tasks it depends on, and for any running task that owns the same files.
+5. When a worker finishes, the reviewer checks it and sends feedback until it's right. Then Foreman pushes the branch and opens the PR.
+6. A task that depends on one other task starts on top of that task's branch once its PR is approved and open, unless `stackTasks` is `false`. Its PR says which PR to merge first.
+7. When the user merges a PR, Foreman removes that task's worktree and tab, asks the other workers to rebase and starts the tasks that were waiting on it.
+8. At the end, Foreman writes `.foreman/summary.md`: the PRs in review order, how to test each, the assumptions to check and the calls Foreman made on its own.
+
+The user talks to the orchestrator in its Rex tab for anything about the plan or a task. Changing settings, checking on the run and fixing setup are things you can help with from outside.
+
+## Why a task is waiting
+
+`foreman status` gives each waiting task's reason. A planned task starts once all of these are true:
+
+- A worker slot is free. At most `maxWorkers` workers run at once.
+- No running task owns files that overlap its own. Each task owns the smallest set of paths it changes, so two tasks that touch the same files run one after the other.
+- The tasks it depends on have merged. A task with exactly one unmerged dependency is the exception: it starts on top of that dependency's branch once its PR is approved and open, unless `stackTasks` is `false`. With two or more unmerged dependencies, it waits for them to merge.
+
+Contract tasks go first. They're small tasks that set up a type, API or schema that other tasks share.
+
+## Decisions
+
+A decision is a rule that affects more than one task, like the shape of an API. Decisions are named D-1, D-2 and so on.
+
+- Every brief points the worker at the repo's ADR folder and the decisions accepted so far.
+- A worker that needs a new decision proposes it. The orchestrator accepts or rejects it. When it affects other tasks, the orchestrator asks the user first, and if they don't answer within `answerMinutes`, it decides and marks the decision as its own call.
+- Accepted decisions reach every running worker straight away. They reach the repo as ADRs in one batched decisions PR, which the user merges like any other.
+- A PR comment that states a rule, like "always store times in UTC", can become a decision too.
+- To overrule a decision, the user tells the orchestrator, such as "overrule D-4". It rejects the decision and tells the workers.
+- `foreman decisions` lists proposed and accepted decisions.
+
+## Review
+
+- When a worker reports done, a separate reviewer session checks the change against the user's intent. For a change to the app's screens, it takes before and after screenshots.
+- If the reviewer finds problems, the same worker gets the issues, fixes them and reports done again. After two rounds of changes, the orchestrator stops and asks the user whether to send a third round, take over the task or merge it as is. Each round's screenshots are in `.foreman/tasks/<task>/review/round-<n>/`.
+- Approved work becomes a PR. Its description has the user's intent, what changed, the decisions it touched, before and after screenshots, the reviewer's verdict and risk, and an AI Usage section with the task's cost. A PR built on another task's branch says which PR to merge first.
+
+## Steering and stopping
+
+- For anything about the plan, such as adding, changing or cutting a task, or stopping the run, the user tells the orchestrator in its tab. There's no single command that stops everything.
+- To steer one worker, the user can open its Rex tab, named like `W1 · T1: add tags to notes`, and type to it. `foreman send <task> "<message>"` does the same from any terminal.
+- `foreman pause <task>` stops a worker by closing its tab. Its commits stay on its branch and uncommitted work stays in its worktree. `foreman resume <task>` reopens its session where it left off.
+- If the user closes a worker's tab, the orchestrator notices and asks whether to resume the task or tear it down. It never discards unmerged work without the user's yes.
+
+## Updating Foreman
+
+```sh
+cd ~/Code/Foreman && git pull && bun install
+```
+
+Running orchestrators and workers load Foreman from that folder, so update between runs rather than in the middle of one.
+
+## Commands for the user
+
+Run `foreman help` for the full list. The ones people use:
+
+- `foreman up`: start the orchestrator and status pane in the current repo.
+- `foreman status`: what each task is doing, what's waiting to start and the questions waiting on the user.
+- `foreman pane`: reopen the status pane beside the current tab.
+- `foreman budget`: what each task has spent against its limit. `foreman cost` splits it into workers and reviews.
+- `foreman budget <usd>`, `foreman budget <task> <usd>`, `foreman budget --plan <usd>`: set the limit for every task, one task, or the plan.
+- `foreman resume <task>`: reopen a stopped worker's session, such as after raising its limit. Takes `--model <name>`.
+- `foreman restart <task>`: close a worker and reopen its session. Takes `--model <name>`.
+- `foreman summary`: write and show the run summary.
+- `foreman timeline [<task>]`: what happened to each task and when, and which tasks waited on a quiet worker.
+- `foreman together`: merge the open PRs into a throwaway copy of the base branch and run the tests on the result.
+- `foreman notes`, `foreman note "<fact>"`, `foreman note --remove <n>`: list, add or remove known problems every worker should know about, such as a test that deadlocks.
+- `foreman baseline`: run the tests on the base branch and note what hangs or fails there.
+- `foreman tidy <task>`: stop processes a task's old runs left behind.
+
+Most other commands in `foreman help` are for the orchestrator and workers. Leave them to Foreman.
+
+## Settings
+
+Settings live in `.foreman/config.json` in the user's repo. The file is plain JSON, so it can't hold comments. Every key is optional. Foreman writes some keys itself, so edit the file in place and keep the keys already there.
+
+- `maxWorkers` (number, default 3): how many workers run at once. The plugin option of the same name sets it for every repo, and this key overrides it.
+- `budget` (object, default `{ "perTask": 5, "plan": 40 }`): spend limits in US dollars. `perTask` covers each task's worker and its reviews. `plan` covers every task plus the orchestrator. `tasks` maps a task to its own limit, like `{ "T3": 15 }`. Keys you leave out keep their defaults. `foreman budget` writes this key for you.
+- `workerModel` (string): the model a task runs on when the plan doesn't name one. Takes an alias like `"sonnet"` or a full model id like `"claude-sonnet-5-5"`. Without it, workers use Claude Code's default model.
+- `reviewerModel` (string): the model the reviewer runs on. Without it, Claude Code's default.
+- `stackTasks` (boolean, default true): `false` makes a task wait for its dependency to merge, instead of starting on top of its approved PR.
+- `answerMinutes` (number, default 30): how long the orchestrator waits for the user to answer a question before it goes ahead with the call it said it would make. `0` makes it always wait.
+- `stallMinutes` (number, default 20): how long a worker can go without replying, while its commands use no CPU, before Foreman nudges it.
+- `test` (string): the command that runs the repo's tests, like `"swift test"`. Foreman runs it in a fresh checkout for the baseline and the `together` check, so include any setup, like `"bun install && bun test"`. The orchestrator works it out and saves it when it plans, if it's missing.
+- `testMinutes` (number, default 15): how long one test run can take before Foreman stops it as hung. Raise it for a slow suite.
+- `screenshots` (object): how to run the app for before and after screenshots. See below.
+- `prScreenshots` (`"local"` or `"branch"`, default `"local"`): `"local"` keeps screenshots on the user's machine and lists their paths in the PR. `"branch"` pushes them to a `foreman-screenshots` branch so they show in the PR on GitHub.
+- `prices` (object): prices for models Foreman doesn't know, so it can work out their cost. Maps a model id to dollars per million tokens: `{ "my-model": { "input": 3, "output": 15, "cacheRead": 0.3 } }`. Foreman already knows claude-fable-5-2, claude-opus-5-5, claude-sonnet-5-5 and claude-haiku-5-5.
+- `context` (string): the path to the repo's glossary of domain terms, which every brief points workers at. Foreman finds `CONTEXT.md` or `docs/CONTEXT.md` on its own.
+- `adr` (object): how the repo writes its architecture decision records. `foreman adr detect` fills it in from the repo's ADR folder, and `foreman adr init [--dir <path>]` sets up a new one. Don't write it by hand.
+
+### Screenshots
+
+The reviewer takes screenshots of the screens a task changes, before and after, and puts them in the PR. The orchestrator lists those screens in each brief. Each task's app runs from its own worktree, so tasks never share a server or an app's data.
+
+For a web app:
+
+```json
+{ "screenshots": { "adapter": "web", "start": "npm run dev -- --port {port}", "url": "http://localhost:{port}" } }
+```
+
+- `start` (required): the command that starts the dev server. Foreman replaces `{port}` with a free port.
+- `url` (required): where the app answers, with the same `{port}`.
+- `install`: a command to run in the worktree first, like `"npm install"`.
+- `viewport` (default `"1280,800"`): the browser's width and height.
+- `readySeconds` (default 120): how long to wait for the URL to answer.
+
+For a macOS app:
+
+```json
+{ "screenshots": { "adapter": "macos", "build": "xcodebuild -scheme App -derivedDataPath {derivedData} build", "app": "{derivedData}/Build/Products/Debug/App.app" } }
+```
+
+- `build` (required): the command that builds the app. Foreman replaces `{derivedData}` with a folder of its own for each task.
+- `app` (required): the path to the built `.app`, with the same `{derivedData}`.
+- `prepare`: a command to run in the worktree before the build, like generating the Xcode project.
+- `settleSeconds` (default 5): how long to wait after launch before the screenshot.
+- `env`: environment variables for the app, like `{ "UI_TESTING": "1" }`.
+
+Each copy of a macOS app runs with its own bundle id and home folder, so screenshots never touch the user's real app data.
+
+## What Foreman does on its own
+
+- **Over budget.** Foreman checks spend at least every 30 seconds. A task over its limit has its worker stopped, and the orchestrator asks the user whether to raise the limit. When the plan goes over, every worker stops and no new task starts. Work already committed stays on the task's branch, and uncommitted work stays in its worktree. Costs use Anthropic's list prices, so on a subscription they show how much work was done, not what the user pays.
+- **Hung workers.** After `stallMinutes` with no reply and no CPU use, Foreman messages the worker and names the command that looks hung. At twice that, it restarts the worker in a new tab. A worker whose commands keep using CPU, like a long build, is left alone until four times `stallMinutes`. After two restarts, the orchestrator steps in.
+- **Leftover processes.** Foreman stops any process in a worktree whose parent has exited, such as a test runner left behind by a timed-out run. Anything else open in the worktree, like the user's shell or editor, is left alone.
+- **Unanswered questions.** The orchestrator tells the user the call it would make. If they don't answer within `answerMinutes`, it makes that call and the summary lists it. It never does this for money or lost work: raising a budget, discarding unmerged work, or closing or merging a PR always waits for the user.
+- **PRs that clash.** Once two or more PRs are open, Foreman merges them into a throwaway copy of the base branch and runs `test`. It reports PRs that conflict, the order to merge them in and tests that fail only when they're combined.
+
+## Where things live
+
+- `.foreman/` in the user's repo holds every bit of Foreman's state. Foreman keeps it out of git. If the orchestrator restarts, it picks up from there.
+- `.foreman/config.json` is the only file in there for people to edit. Change the rest through `foreman` commands.
+- `.foreman/summary.md` is the run summary.
+- `.foreman/worktrees/<task>` is each task's worktree.
+- The repo's ADR folder, such as `docs/decisions` or `docs/adr`, holds the decisions that have merged.
+
+## When something goes wrong
+
+- Something won't start: run `foreman doctor`.
+- `foreman up` says the session already exists: the orchestrator is already running in that Rex session. Switch to it in Rex.
+- The status pane is gone: run `foreman pane` from the orchestrator's tab.
+- A task stopped over budget: `foreman budget <task> <usd>`, then `foreman resume <task>`.
+- A worker seems stuck: `foreman timeline <task>` shows when it went quiet. Foreman restarts hung workers itself, and `foreman restart <task>` does it by hand.
+- Tests hang or fail on the base branch: `foreman note "<what happens and how to avoid it>"` tells every worker. `foreman baseline` checks the base branch again.
+- The `together` check says tests ran too long: raise `testMinutes`.
