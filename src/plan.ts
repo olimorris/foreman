@@ -186,7 +186,7 @@ export function loadPlan(repo: Repo): Plan | undefined {
 const runningPlan = (repo: Repo, stored: Plan, incoming: Plan): boolean => {
   const tasks = loadTasks(repo);
   const done = (id: string) => tasks.some((t) => t.id === id && (t.status === "merged" || t.status === "torn-down"));
-  return !!stored.approvedAt && ![...stored.tasks, ...incoming.tasks].every((t) => done(t.id));
+  return ![...stored.tasks, ...incoming.tasks].every((t) => done(t.id));
 };
 
 export function savePlan(repo: Repo, plan: Plan): void {

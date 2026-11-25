@@ -138,6 +138,8 @@ describe("foreman automerge", () => {
     withTasks(repo, (tasks) => void tasks.push(task(loadPlan(repo)!.tasks[0]!.id, { status: "merged" })));
     savePlan(repo, parsePlan(PLAN + PLAN.replaceAll("T1", "T2").replace("feat: notes carry tags", "feat: notes carry colours")));
     expect(automergeOn(repo)).toBe(true);
+    savePlan(repo, parsePlan(PLAN + PLAN.replaceAll("T1", "T2")));
+    expect(automergeOn(repo)).toBe(true);
     savePlan(repo, { ...loadPlan(repo)!, approvedAt: "later" });
     expect(automergeOn(repo)).toBe(true);
   });
