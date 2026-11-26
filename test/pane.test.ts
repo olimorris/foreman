@@ -110,3 +110,11 @@ test("a short pane keeps the Up next rows that fit and counts the rest", () => {
   expect(lines.filter((l) => l.includes("all 4 worker slots are busy"))).toHaveLength(3);
   expect(renderPane(many, 60).filter((l) => l.includes("all 4 worker slots are busy"))).toHaveLength(8);
 });
+
+test("an open PR that automerge leaves with the user for its risk says so under Ready to merge", () => {
+  const held = { ...sample, tasks: [row(task("T5", "pr-open", { pr: 7 }), { title: "show tag colours", risk: "medium", hold: "waits for you: risk medium is above maxRisk low" })] };
+  const lines = renderPane(held, 60);
+  const at = lines.findIndex((l) => l.includes("#7 risk medium"));
+  expect(lines[at - 1]).toContain("READY TO MERGE");
+  expect(lines[at + 1]).toMatch(/^ +waits for you: risk medium is above maxRisk low$/);
+});

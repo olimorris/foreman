@@ -3,27 +3,55 @@ import { run } from "./exec.ts";
 import { usageError } from "./help.ts";
 import type { Repo } from "./paths.ts";
 import { loadPlan, updatePlan } from "./plan.ts";
-import { latest } from "./rounds.ts";
+import { latest, type Verdict } from "./rounds.ts";
 import type { Task } from "./state.ts";
 
 export type Check = { name: string; state: "pass" | "fail" | "pending" };
 export type PrView = { state: string; base?: string; head?: string; sha?: string; draft?: boolean; checks?: Check[] };
-export type MergeCall = "merge" | "wait" | "no-checks" | { failing: string[] };
+export type Risk = Verdict["risk"];
+export type MergeCall = "merge" | "wait" | "no-checks" | { failing: string[] } | { tooRisky: Risk };
+export type MergeRules = { allowNoChecks?: boolean; maxRisk?: Risk };
 export type Merge = { id: string; number: number; sha: string };
 
 export const automergeOn = (repo: Repo): boolean => loadPlan(repo)?.automerge === true;
 
 export const allowNoChecks = (repo: Repo): boolean => loadConfig(repo).automerge?.allowNoChecks === true;
 
-export const approved = (repo: Repo, task: Task): boolean => latest(repo, task)?.verdict?.verdict === "approve";
+const RISKS: Risk[] = ["low", "medium", "high"];
 
-export function mergeCall(task: Task, pr: PrView, isApproved: boolean, allowNoChecks = false): MergeCall {
-  if (!isApproved || task.status !== "pr-open" || pr.state !== "OPEN" || pr.draft || !pr.sha) return "wait";
+// A hand-typed level Foreman doesn't know falls back to the default, so a typo never lets riskier PRs merge.
+export function maxRisk(repo: Repo): Risk {
+  const level = loadConfig(repo).automerge?.maxRisk;
+  return level && RISKS.includes(level) ? level : "low";
+}
+
+// The reviewer fills a missing risk with medium, so an old verdict without one counts as medium here too.
+export const aboveRisk = (risk: Risk | undefined, max: Risk): boolean => RISKS.indexOf(risk ?? "medium") > RISKS.indexOf(max);
+
+export type LatestVerdict = Pick<Verdict, "verdict"> & { risk?: Risk };
+
+export const latestVerdict = (repo: Repo, task: Task): LatestVerdict | undefined => latest(repo, task)?.verdict;
+
+// What status and the pane say about an approved PR that automerge leaves for the user because of its risk.
+export function riskHold(verdict: LatestVerdict | undefined, max: Risk): string | undefined {
+  if (verdict?.verdict !== "approve" || !aboveRisk(verdict.risk, max)) return undefined;
+  return `waits for you: risk ${verdict.risk ?? "medium"} is above maxRisk ${max}`;
+}
+
+export function mergeCall(task: Task, pr: PrView, verdict: LatestVerdict | undefined, rules: MergeRules = {}): MergeCall {
+  if (verdict?.verdict !== "approve" || task.status !== "pr-open" || pr.state !== "OPEN" || pr.draft || !pr.sha) return "wait";
   // Release-please's PR, the decisions PR and anything the user opened all live on other branches.
   if (pr.head !== `foreman/${task.id}`) return "wait";
   // A PR stacked on another task's branch would merge into that branch, not ship.
   if (!pr.base || pr.base !== task.base) return "wait";
-  const checks = pr.checks ?? [];
+  const call = checksCall(pr.checks ?? [], rules.allowNoChecks ?? false);
+  // Failing checks still go back to the worker first, so the user isn't handed a PR that a worker could fix.
+  if (call !== "merge" && call !== "no-checks") return call;
+  const max = rules.maxRisk ?? "low";
+  return aboveRisk(verdict.risk, max) ? { tooRisky: verdict.risk ?? "medium" } : call;
+}
+
+function checksCall(checks: Check[], allowNoChecks: boolean): MergeCall {
   // Nothing has checked the code, and a repo whose CI hasn't registered its checks yet looks the same as one with no CI.
   if (!checks.length) return allowNoChecks ? "merge" : "no-checks";
   const failing = checks.filter((c) => c.state === "fail").map((c) => c.name);
@@ -74,10 +102,18 @@ export function mergePr(root: string, pr: Merge, method: MergeMethod): string | 
 const ON = "Automerge is on until this plan finishes. Foreman merges each task's PR once the reviewer approves it and every check passes. Release PRs, the decisions PR and any PR Foreman didn't open stay with you";
 const OFF = "Automerge is off. You merge every PR yourself";
 
+const RISK_LINES: Record<Risk, string> = {
+  low: "It only merges PRs the reviewer rated low risk. Medium and high risk PRs stay with you",
+  medium: "It merges PRs the reviewer rated low or medium risk. High risk PRs stay with you",
+  high: "It merges PRs at any risk the reviewer gives",
+};
+
+const riskLine = (max: Risk): string => `${RISK_LINES[max]}. Set automerge.maxRisk in .foreman/config.json to change the level`;
+
 export function automerge(repo: Repo, args: string[]): string[] {
   const [arg, ...extra] = args;
   if (extra.length || (arg !== undefined && arg !== "on" && arg !== "off")) throw usageError("automerge");
-  if (arg === undefined) return [automergeOn(repo) ? ON : OFF];
+  if (arg === undefined) return automergeOn(repo) ? [ON, riskLine(maxRisk(repo))] : [OFF];
   // Stored on the plan, not in config.json, so the next plan starts with it off.
   updatePlan(repo, (plan) => {
     if (!plan) throw new Error("no plan. This switches it for the current plan, and the orchestrator stores one with the plan tool");
@@ -86,5 +122,5 @@ export function automerge(repo: Repo, args: string[]): string[] {
   if (arg === "off") return [OFF];
   const merging = neverRules(loadConfig(repo)).filter((r) => /merg/i.test(r));
   const noChecks = allowNoChecks(repo) ? ["automerge.allowNoChecks is on in .foreman/config.json, so a PR with no checks merges once the reviewer approves it"] : [];
-  return [ON, ...noChecks, ...(merging.length ? ["Your never list mentions merging, and it still applies:", ...merging.map((r) => `  - ${r}`)] : [])];
+  return [ON, riskLine(maxRisk(repo)), ...noChecks, ...(merging.length ? ["Your never list mentions merging, and it still applies:", ...merging.map((r) => `  - ${r}`)] : [])];
 }

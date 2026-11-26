@@ -12,6 +12,7 @@ import { blockSummary, openBlocks, type PermissionBlock } from "./permissions.ts
 import { baselineStatus } from "./baseline.ts";
 import { answerMs, loadQuestions, waitingLines } from "./questions.ts";
 import { watcherArmed } from "./watch.ts";
+import { latestVerdict, maxRisk, riskHold } from "./automerge.ts";
 
 
 
@@ -32,7 +33,10 @@ export function statusView(repo: Repo, style: Style, armed: boolean, now = Date.
   const tasks = byActivity(loadTasks(repo));
   const plan = loadPlan(repo);
   const blocksOf = (t: Task) => (isFinished(t) || t.status === "pr-open" ? [] : blocks.filter((b) => b.task === t.id));
-  const needsYou = (t: Task) => needsUser(t) || blocksOf(t).length > 0;
+  // An open PR has its own section, as in the pane, so it isn't listed twice.
+  const needsYou = (t: Task) => (needsUser(t) && t.status !== "pr-open") || blocksOf(t).length > 0;
+  const max = maxRisk(repo);
+  const held = (t: Task) => (plan?.automerge ? riskHold(latestVerdict(repo, t), max) : undefined);
   const row = (t: Task): Row => {
     const held = blocksOf(t);
     const label = held.length && t.status === "running" ? permissionLabel(held) : statusLabel(t);
@@ -48,7 +52,14 @@ export function statusView(repo: Repo, style: Style, armed: boolean, now = Date.
   const waiting = plan?.approvedAt ? readyTasks(plan, tasks, maxWorkers(repo), stackable(repo)).waiting : [];
   const sections: Section[] = [
     { title: "Needs you", rows: [...orchestrator, ...tasks.filter(needsYou).map(row)] },
-    { title: "In progress", rows: tasks.filter((t) => !isFinished(t) && !needsYou(t)).map(row) },
+    { title: "In progress", rows: tasks.filter((t) => !isFinished(t) && !needsYou(t) && t.status !== "pr-open").map(row) },
+    {
+      title: "Ready to merge",
+      rows: tasks.filter((t) => t.status === "pr-open" && !needsYou(t)).map((t) => {
+        const hold = held(t);
+        return { ...row(t), ...(hold ? { notes: [hold] } : {}) };
+      }),
+    },
     {
       title: "Waiting to start",
       rows: waiting.map((w) => ({ cells: [w.id, "", clip(plainTitle(plan!.tasks.find((t) => t.id === w.id)!.title), 56), w.reason, ""], tone: (s: Style) => s.dim })),
