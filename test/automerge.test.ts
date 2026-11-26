@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { automerge, automergeOn, checksOf, mergeMethod, type Check } from "../src/automerge.ts";
+import { allowNoChecks, automerge, automergeOn, checksOf, mergeMethod, type Check } from "../src/automerge.ts";
 import { saveConfig } from "../src/config.ts";
 import { UsageError } from "../src/help.ts";
 import { loadPlan, parsePlan, savePlan } from "../src/plan.ts";
@@ -17,8 +17,8 @@ const open = (extra: Partial<PrState> = {}): PrState => ({ state: "OPEN", commen
 const tracked: TrackedPr[] = [{ key: "T1", number: 41, base: "main" }];
 const start: Cursor = { events: {}, exited: [], main: "aaa" };
 
-function probes(pr: PrState, opts: { on?: boolean; approved?: boolean } = {}): Probes {
-  return { events: () => [], mainSha: () => "aaa", alive: () => true, pr: () => pr, automerge: () => opts.on ?? true, approved: () => opts.approved ?? true };
+function probes(pr: PrState, opts: { on?: boolean; approved?: boolean; noChecks?: boolean } = {}): Probes {
+  return { events: () => [], mainSha: () => "aaa", alive: () => true, pr: () => pr, automerge: () => opts.on ?? true, approved: () => opts.approved ?? true, allowNoChecks: () => opts.noChecks ?? false };
 }
 
 describe("merging approved PRs", () => {
@@ -26,8 +26,18 @@ describe("merging approved PRs", () => {
     expect(scan([task("T1")], start, probes(open()), tracked).merge).toEqual([{ id: "T1", number: 41, sha: "abc" }]);
   });
 
-  test("a PR with no checks merges once approved", () => {
-    expect(scan([task("T1")], start, probes(open({ checks: [] })), tracked).merge).toHaveLength(1);
+  test("a PR with no checks waits, and the orchestrator hears about it once per PR", () => {
+    const bare = open({ checks: [] });
+    const first = scan([task("T1")], start, probes(bare), tracked);
+    expect(first).toMatchObject({ merge: [], reasons: ["no-checks T1 #41"] });
+    expect(scan([task("T1")], first.cursor, probes(bare), tracked)).toMatchObject({ merge: [], reasons: [] });
+    expect(scan([task("T1")], first.cursor, probes(open({ checks: [], sha: "def" })), tracked)).toMatchObject({ merge: [], reasons: [] });
+    expect(scan([task("T1")], first.cursor, probes(open()), tracked).merge).toEqual([{ id: "T1", number: 41, sha: "abc" }]);
+  });
+
+  test("a PR with no checks merges once approved when allowNoChecks is on", () => {
+    const r = scan([task("T1")], start, probes(open({ checks: [] }), { noChecks: true }), tracked);
+    expect(r).toMatchObject({ merge: [{ id: "T1", number: 41, sha: "abc" }], reasons: [] });
   });
 
   test("pending checks wait without waking the orchestrator", () => {
@@ -151,6 +161,16 @@ describe("foreman automerge", () => {
     saveConfig(repo, { never: ["Merge a release PR. I cut every release.", "Push to main"] });
     expect(automerge(repo, ["on"]).slice(1)).toEqual(["Your never list mentions merging, and it still applies:", "  - Merge a release PR. I cut every release."]);
     expect(automerge(repo, ["off"])).toHaveLength(1);
+  });
+
+  test("switching it on mentions allowNoChecks only when it's set", () => {
+    const repo = tempRepo();
+    savePlan(repo, parsePlan(PLAN));
+    expect(automerge(repo, ["on"])).toHaveLength(1);
+    expect(allowNoChecks(repo)).toBe(false);
+    saveConfig(repo, { automerge: { allowNoChecks: true } });
+    expect(allowNoChecks(repo)).toBe(true);
+    expect(automerge(repo, ["on"])[1]).toStartWith("automerge.allowNoChecks is on in .foreman/config.json");
   });
 
   test("needs a plan, and takes only on or off", () => {
