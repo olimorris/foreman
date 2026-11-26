@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { allowNoChecks, automerge, automergeOn, checksOf, maxRisk, mergeMethod, riskHold, type Check, type Risk } from "../src/automerge.ts";
+import { allowNoChecks, automerge, automergeOn, checksOf, foremanMerges, maxRisk, mergeMethod, protectedHits, riskHold, type Check, type Risk } from "../src/automerge.ts";
+import { protectedLines } from "../src/brief.ts";
 import { saveConfig } from "../src/config.ts";
 import { UsageError } from "../src/help.ts";
 import { loadPlan, parsePlan, savePlan } from "../src/plan.ts";
@@ -17,7 +18,7 @@ const open = (extra: Partial<PrState> = {}): PrState => ({ state: "OPEN", commen
 const tracked: TrackedPr[] = [{ key: "T1", number: 41, base: "main" }];
 const start: Cursor = { events: {}, exited: [], main: "aaa" };
 
-type Opts = { on?: boolean; approved?: boolean; noChecks?: boolean; risk?: Risk | null; max?: Risk };
+type Opts = { on?: boolean; approved?: boolean; noChecks?: boolean; risk?: Risk | null; max?: Risk; protect?: string[]; changed?: string[] | null };
 
 // risk null stands for an old verdict written before the reviewer gave one.
 function probes(pr: PrState, opts: Opts = {}): Probes {
@@ -25,6 +26,7 @@ function probes(pr: PrState, opts: Opts = {}): Probes {
   return {
     events: () => [], mainSha: () => "aaa", alive: () => true, pr: () => pr, automerge: () => opts.on ?? true, verdict: () => verdict,
     allowNoChecks: () => opts.noChecks ?? false, ...(opts.max ? { maxRisk: () => opts.max! } : {}),
+    ...(opts.protect ? { protect: () => opts.protect! } : {}), changed: () => (opts.changed === null ? undefined : opts.changed ?? []),
   };
 }
 
@@ -115,6 +117,32 @@ describe("merging approved PRs", () => {
     const failing = open({ checks: [{ name: "test", state: "fail" }] });
     expect(scan([task("T1")], start, probes(failing, { risk: "high" }), tracked).reasons).toEqual(["check-failed T1 #41: test"]);
     expect(scan([task("T1")], start, probes(open({ checks: [{ name: "test", state: "pending" }] }), { risk: "high" }), tracked).reasons).toEqual([]);
+  });
+
+  test("a PR that touches a protected path waits, and the orchestrator hears the matched paths once per PR", () => {
+    const opts = { protect: ["migrations/**", ".github/"], changed: ["src/a.ts", "migrations/0004.sql", ".github/workflows/ci.yml"] };
+    const first = scan([task("T1")], start, probes(open(), opts), tracked);
+    expect(first).toMatchObject({ merge: [], reasons: ["protected T1 #41: migrations/0004.sql, .github/workflows/ci.yml"] });
+    expect(scan([task("T1")], first.cursor, probes(open({ sha: "def" }), opts), tracked)).toMatchObject({ merge: [], reasons: [] });
+    expect(scan([task("T1")], first.cursor, probes(open({ sha: "def" }), { ...opts, changed: ["src/a.ts"] }), tracked).merge).toEqual([{ id: "T1", number: 41, sha: "def" }]);
+  });
+
+  test("a PR that touches no protected path merges, and with no protect list the files aren't listed", () => {
+    expect(scan([task("T1")], start, probes(open(), { protect: ["migrations/**"], changed: ["src/a.ts"] }), tracked).merge).toHaveLength(1);
+    let listed = false;
+    const p = { ...probes(open()), changed: () => ((listed = true), ["migrations/0004.sql"]) };
+    expect(scan([task("T1")], start, p, tracked).merge).toHaveLength(1);
+    expect(scan([task("T1")], start, { ...p, protect: () => [] }, tracked).merge).toHaveLength(1);
+    expect(listed).toBe(false);
+  });
+
+  test("with a protect list, a PR whose files can't be listed waits", () => {
+    expect(scan([task("T1")], start, probes(open(), { protect: ["migrations/**"], changed: null }), tracked)).toMatchObject({ merge: [], reasons: ["protected T1 #41: couldn't list its changed files, so it waits"] });
+  });
+
+  test("a protected PR with a failing check goes back to its worker first", () => {
+    const failing = open({ checks: [{ name: "test", state: "fail" }] });
+    expect(scan([task("T1")], start, probes(failing, { protect: ["migrations/**"], changed: ["migrations/1.sql"] }), tracked).reasons).toEqual(["check-failed T1 #41: test"]);
   });
 
   test("a head the merge was refused for isn't tried again", () => {
@@ -208,6 +236,14 @@ describe("foreman automerge", () => {
     expect(maxRisk(repo)).toBe("low");
   });
 
+  test("switching it on lists the protected paths", () => {
+    const repo = tempRepo();
+    savePlan(repo, parsePlan(PLAN));
+    expect(automerge(repo, ["on"]).join("\n")).not.toContain("protected");
+    saveConfig(repo, { protect: ["migrations/**", " ", ".github/**"] });
+    expect(automerge(repo, ["on"]).slice(2)).toEqual(["It never merges a PR that touches a protected path, set by protect in .foreman/config.json:", "  - migrations/**", "  - .github/**"]);
+  });
+
   test("status and the pane say why an approved PR above maxRisk waits", () => {
     expect(riskHold({ verdict: "approve", risk: "medium" }, "low")).toBe("waits for you: risk medium is above maxRisk low");
     expect(riskHold({ verdict: "approve" }, "low")).toBe("waits for you: risk medium is above maxRisk low");
@@ -230,5 +266,26 @@ describe("foreman automerge", () => {
     expect(() => automerge(repo, ["on"])).toThrow("no plan. This switches it for the current plan, and the orchestrator stores one with the plan tool");
     savePlan(repo, parsePlan(PLAN));
     for (const bad of [["yes"], ["on", "off"]]) expect(() => automerge(repo, bad)).toThrow(UsageError);
+  });
+});
+
+describe("protected paths", () => {
+  test("match changed files with the owned-path globs", () => {
+    expect(protectedHits([], ["migrations/1.sql"])).toBeUndefined();
+    expect(protectedHits(["migrations/**"], ["src/a.ts"])).toBeUndefined();
+    expect(protectedHits(["migrations/**", "*.lock"], ["migrations/1.sql", "bun.lock", "src/a.ts"])).toEqual(["migrations/1.sql", "bun.lock"]);
+    expect(protectedHits(["migrations/**"], undefined)).toEqual([]);
+  });
+
+  test("Foreman merges only with automerge on, at or below maxRisk and with nothing protected", () => {
+    expect(foremanMerges(true, "low", "low", undefined)).toBe(true);
+    expect(foremanMerges(false, "low", "low", undefined)).toBe(false);
+    expect(foremanMerges(true, "medium", "low", undefined)).toBe(false);
+    expect(foremanMerges(true, "low", "low", ["migrations/1.sql"])).toBe(false);
+  });
+
+  test("every brief lists them, saying the PR then stays with the user", () => {
+    expect(protectedLines({})).toEqual([]);
+    expect(protectedLines({ protect: ["migrations/**", ".github/**"] })).toEqual(["- Protected paths: `migrations/**`, `.github/**`. You can edit these, but a PR that touches one never automerges and stays with the user"]);
   });
 });
