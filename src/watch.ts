@@ -17,7 +17,7 @@ import { clockAt, loadLimit, resetPhrase, resumeDue, saveLimit, type LimitHit, t
 import { taskDir } from "./paths.ts";
 import { inFlight, loadTasks, updateTask, type Task } from "./state.ts";
 import { tabOpen } from "./lifecycle.ts";
-import { approved, automergeOn, checksOf, mergeCall, mergePr, repoMergeMethod, type Check, type Merge, type MergeMethod } from "./automerge.ts";
+import { allowNoChecks, approved, automergeOn, checksOf, mergeCall, mergePr, repoMergeMethod, type Check, type Merge, type MergeMethod } from "./automerge.ts";
 import { blockLine, syncBlocks, type PermissionBlock } from "./permissions.ts";
 import { busy, commandName, isWorker, pidAlive, processesIn, sample, tidy, unstoppableLine, type CpuSample, type Proc } from "./procs.ts";
 import { andList, clip } from "./text.ts";
@@ -26,7 +26,7 @@ import { needsOrchestrator, sync } from "./sync.ts";
 export type PrState = { state: string; comments: number; base?: string; head?: string; sha?: string; draft?: boolean; checks?: Check[] };
 export type TrackedPr = { key: string; number: number; base?: string };
 export type Stall = { since: number; nudged: boolean; escalated: boolean; cpu?: CpuSample; measuredAt?: number; busyAt?: number };
-export type Cursor = { events: Record<string, number>; main?: string; exited: string[]; prs?: Record<string, PrState>; budget?: Record<string, number>; stalls?: Record<string, Stall>; restarts?: Record<string, number>; unanswered?: string[]; unstoppable?: number[]; limit?: UsageLimit; limitEnded?: number; held?: string[]; unmergeable?: Record<string, string>; blocks?: string[] };
+export type Cursor = { events: Record<string, number>; main?: string; exited: string[]; prs?: Record<string, PrState>; budget?: Record<string, number>; stalls?: Record<string, Stall>; restarts?: Record<string, number>; unanswered?: string[]; unstoppable?: number[]; limit?: UsageLimit; limitEnded?: number; held?: string[]; unmergeable?: Record<string, string>; noChecks?: number[]; blocks?: string[] };
 export type Nudge = { id: string; text: string };
 
 export type Probes = {
@@ -39,6 +39,7 @@ export type Probes = {
   processes?(task: Task): Proc[];
   limit?(task: Task): LimitHit | undefined;
   automerge?(): boolean;
+  allowNoChecks?(): boolean;
   approved?(task: Task): boolean;
   blocks?(): PermissionBlock[];
   spend?(tasks: Task[]): Spend;
@@ -59,7 +60,7 @@ export const BUSY_STALLS = 4;
 const MIN_SAMPLE_MS = 10_000;
 
 export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: TrackedPr[] = [], clock?: Clock): ScanResult {
-  const next: Cursor = { ...cursor, events: { ...cursor.events }, exited: [...cursor.exited], prs: { ...cursor.prs }, stalls: { ...cursor.stalls }, restarts: { ...cursor.restarts }, unanswered: [...(cursor.unanswered ?? [])], unmergeable: { ...cursor.unmergeable }, ...(cursor.limit ? { limit: { ...cursor.limit, paused: [...cursor.limit.paused] } } : {}) };
+  const next: Cursor = { ...cursor, events: { ...cursor.events }, exited: [...cursor.exited], prs: { ...cursor.prs }, stalls: { ...cursor.stalls }, restarts: { ...cursor.restarts }, unanswered: [...(cursor.unanswered ?? [])], unmergeable: { ...cursor.unmergeable }, noChecks: [...(cursor.noChecks ?? [])], ...(cursor.limit ? { limit: { ...cursor.limit, paused: [...cursor.limit.paused] } } : {}) };
   const reasons: string[] = [];
   const nudge: Nudge[] = [];
   const restart: string[] = [];
@@ -113,9 +114,12 @@ export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: Tracked
     const task = tasks.find((t) => t.id === key);
     // A head whose failing check or refused merge was already reported is skipped, or the orchestrator would hear about it every poll.
     if (!task || !probes.automerge?.() || !now.sha || next.unmergeable![`${number}`] === now.sha) continue;
-    const call = mergeCall(task, now, probes.approved?.(task) ?? false);
+    const call = mergeCall(task, now, probes.approved?.(task) ?? false, probes.allowNoChecks?.() ?? false);
     if (call === "merge") merge.push({ id: key, number, sha: now.sha });
-    else if (call !== "wait") {
+    else if (call === "no-checks") {
+      // Not remembered by head, so a push to a repo with no CI doesn't tell the user again, and checks that show up later still merge.
+      if (!next.noChecks!.includes(number)) reasons.push(`no-checks ${key} #${number}`), next.noChecks!.push(number);
+    } else if (call !== "wait") {
       reasons.push(`check-failed ${key} #${number}: ${call.failing.join(", ")}`);
       next.unmergeable![`${number}`] = now.sha;
     }
@@ -358,6 +362,7 @@ export async function watchFor(repo: Repo, base: string, term: Terminal, { signa
     questions: () => loadQuestions(repo),
     limit: (task) => transcripts(repo, task).limit(),
     automerge: () => automergeOn(repo),
+    allowNoChecks: () => allowNoChecks(repo),
     approved: (task) => approved(repo, task),
     spend: (tasks) => ({ costs: tasks.map((t) => taskCost(repo, t)), plan: planSpend(repo, loadTasks(repo)), budget: budgetOf(repo) }),
   };

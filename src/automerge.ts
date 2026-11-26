@@ -8,20 +8,24 @@ import type { Task } from "./state.ts";
 
 export type Check = { name: string; state: "pass" | "fail" | "pending" };
 export type PrView = { state: string; base?: string; head?: string; sha?: string; draft?: boolean; checks?: Check[] };
-export type MergeCall = "merge" | "wait" | { failing: string[] };
+export type MergeCall = "merge" | "wait" | "no-checks" | { failing: string[] };
 export type Merge = { id: string; number: number; sha: string };
 
 export const automergeOn = (repo: Repo): boolean => loadPlan(repo)?.automerge === true;
 
+export const allowNoChecks = (repo: Repo): boolean => loadConfig(repo).automerge?.allowNoChecks === true;
+
 export const approved = (repo: Repo, task: Task): boolean => latest(repo, task)?.verdict?.verdict === "approve";
 
-export function mergeCall(task: Task, pr: PrView, isApproved: boolean): MergeCall {
+export function mergeCall(task: Task, pr: PrView, isApproved: boolean, allowNoChecks = false): MergeCall {
   if (!isApproved || task.status !== "pr-open" || pr.state !== "OPEN" || pr.draft || !pr.sha) return "wait";
   // Release-please's PR, the decisions PR and anything the user opened all live on other branches.
   if (pr.head !== `foreman/${task.id}`) return "wait";
   // A PR stacked on another task's branch would merge into that branch, not ship.
   if (!pr.base || pr.base !== task.base) return "wait";
   const checks = pr.checks ?? [];
+  // Nothing has checked the code, and a repo whose CI hasn't registered its checks yet looks the same as one with no CI.
+  if (!checks.length) return allowNoChecks ? "merge" : "no-checks";
   const failing = checks.filter((c) => c.state === "fail").map((c) => c.name);
   if (failing.length) return { failing };
   return checks.some((c) => c.state === "pending") ? "wait" : "merge";
@@ -81,5 +85,6 @@ export function automerge(repo: Repo, args: string[]): string[] {
   });
   if (arg === "off") return [OFF];
   const merging = neverRules(loadConfig(repo)).filter((r) => /merg/i.test(r));
-  return [ON, ...(merging.length ? ["Your never list mentions merging, and it still applies:", ...merging.map((r) => `  - ${r}`)] : [])];
+  const noChecks = allowNoChecks(repo) ? ["automerge.allowNoChecks is on in .foreman/config.json, so a PR with no checks merges once the reviewer approves it"] : [];
+  return [ON, ...noChecks, ...(merging.length ? ["Your never list mentions merging, and it still applies:", ...merging.map((r) => `  - ${r}`)] : [])];
 }
