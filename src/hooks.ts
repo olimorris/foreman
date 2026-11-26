@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join, relative, resolve } from "node:path";
+import { basename, join, relative, resolve } from "node:path";
 import { loadConfig, neverRules, telegramSetup, telegramWhen, type TelegramSetup } from "./config.ts";
 import { isInside, type Repo } from "./paths.ts";
 import type { Terminal } from "./terminal.ts";
@@ -23,6 +23,8 @@ export function areaLock(input: HookInput, ctx: LockContext, scratch = scratchDi
   const tool = input.tool_name ?? "";
   const isBash = tool === "Bash";
   if (!isBash && !EDIT_TOOLS.includes(tool)) return undefined;
+  const merges = mergeOrPush(input);
+  if (merges) return merges;
   const targets = writeTargets(input);
   const { repo } = ctx;
   const worktrees = join(repo.foreman, "worktrees");
@@ -120,14 +122,16 @@ function expandWord(word: string): string | undefined {
 
 // A `>` inside a commit message, heredoc or comment isn't a redirect, so blank out text that is only data.
 // Quoted text right after a redirect, tee or cd keeps its value, rewritten as one double-quoted piece with no quotes inside.
-function stripText(command: string): string {
+// With keep, every quoted value survives as one double-quoted piece, its own quotes swapped for QUOTE.
+function stripText(command: string, keep = false): string {
   let i = 0;
   let out = "";
   const heredocs: { tag: string; tabs: boolean }[] = [];
   const isTarget = () => TARGET_BEFORE.test(out);
   // A target that holds a command substitution can't be placed, so it becomes "$", which expandWord skips.
   const piece = (value: string, expands = false, subs = "") => {
-    out += isTarget() ? `"${expands ? "$" : value.replaceAll('"', "")}"` : `""${subs}`;
+    if (keep) out += `"${value.replaceAll('"', QUOTE)}"${subs}`;
+    else out += isTarget() ? `"${expands ? "$" : value.replaceAll('"', "")}"` : `""${subs}`;
   };
 
   // A `<<` with no closing tag line, like a shift in `(( a << 2 ))`, isn't a heredoc, so the lines after it are still scanned.
@@ -276,6 +280,103 @@ function arithmeticEnd(command: string, from: number): number {
     }
   }
   return command.length;
+}
+
+const QUOTE = "\uE000";
+
+const NO_MERGE_OR_PUSH = "Only Foreman's automerge merges PRs, and Foreman pushes a task's branch with its deliver tool. Don't run it another way. If the user wants it done by hand, they run it themselves.";
+
+export function mergeOrPush(input: HookInput): string | undefined {
+  if (input.tool_name !== "Bash") return undefined;
+  const found = mergeOrPushIn(String(input.tool_input?.command ?? ""));
+  return found && `Foreman blocks \`${found}\` in its sessions. ${NO_MERGE_OR_PUSH}`;
+}
+
+// Returns the blocked command's name, like "git push". Best effort: a script file or an alias that pushes isn't seen.
+export function mergeOrPushIn(command: string, depth = 0): string | undefined {
+  const calls: string[][] = [[]];
+  let target = false;
+  for (const m of stripText(command, true).matchAll(CALL_TOKENS)) {
+    const { word, redirect } = m.groups!;
+    if (word !== undefined) {
+      if (!target) calls[calls.length - 1]!.push(word.replaceAll('"', "").replaceAll(QUOTE, '"'));
+      target = false;
+    } else if (redirect !== undefined) target = !redirect.includes("&");
+    else calls.push([]);
+  }
+  for (const call of calls) {
+    const found = blockedCall(unwrap(call), depth);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+const CALL_TOKENS = new RegExp(String.raw`(?<word>${WORD})|(?<redirect>(?:<<<|<<|>>|[<>])\|?(?:&\d*-?)?)|[;&|()\n]`, "g");
+
+// Commands that run the rest of their words as another command, with the options of theirs that take a value.
+const PREFIXES: Record<string, string[]> = {
+  env: ["-u", "-C", "--unset", "--chdir"],
+  command: [],
+  builtin: [],
+  exec: ["-a"],
+  nohup: [],
+  time: [],
+  sudo: ["-u", "-g", "-C", "-D"],
+  nice: ["-n"],
+  timeout: ["-s", "-k", "--signal", "--kill-after"],
+};
+
+function unwrap(words: string[]): string[] {
+  let rest = words;
+  for (;;) {
+    const [first, ...after] = rest;
+    if (first === undefined) return rest;
+    if (/^[A-Za-z_]\w*=/.test(first)) {
+      rest = after;
+      continue;
+    }
+    const name = basename(first);
+    const valued = PREFIXES[name];
+    if (!valued) return rest;
+    rest = skipOptions(after, valued);
+    if (name === "env") while (rest[0] && /^[A-Za-z_]\w*=/.test(rest[0])) rest = rest.slice(1);
+    if (name === "timeout") rest = rest.slice(1);
+  }
+}
+
+function skipOptions(words: string[], valued: string[]): string[] {
+  let at = 0;
+  while (at < words.length && words[at]!.startsWith("-") && words[at] !== "-") {
+    if (words[at] === "--") return words.slice(at + 1);
+    at += valued.includes(words[at]!) ? 2 : 1;
+  }
+  return words.slice(at);
+}
+
+const SHELLS = ["bash", "sh", "zsh", "dash", "ksh", "fish"];
+const GIT_VALUED = ["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--config-env", "--super-prefix"];
+const MERGE_ENDPOINT = /(?:^|\/)repos\/[^/]+\/[^/]+\/pulls\/[^/]+\/merge\/?(?:\?|$)/;
+
+function blockedCall(words: string[], depth: number): string | undefined {
+  const [first, ...args] = words;
+  if (first === undefined) return undefined;
+  const name = basename(first);
+  if (depth < 5 && name === "eval") return mergeOrPushIn(args.join(" "), depth + 1);
+  if (depth < 5 && SHELLS.includes(name)) {
+    const flag = args.findIndex((a) => /^-[a-zA-Z]*c[a-zA-Z]*$/.test(a));
+    const script = flag < 0 ? undefined : args[flag + 1];
+    return script === undefined ? undefined : mergeOrPushIn(script, depth + 1);
+  }
+  if (name === "git") {
+    const [sub] = skipOptions(args, GIT_VALUED);
+    return sub === "push" ? "git push" : undefined;
+  }
+  if (name !== "gh") return undefined;
+  const [sub, action] = args;
+  if (sub === "pr" && action === "merge") return "gh pr merge";
+  if (sub === "pr" && action === "review" && args.some((a) => a === "-a" || a === "--approve" || a === "--approve=true")) return "gh pr review --approve";
+  if (sub === "api" && args.some((a) => MERGE_ENDPOINT.test(a) || /\b(?:mergePullRequest|enablePullRequestAutoMerge)\b/.test(a))) return "gh api merge";
+  return undefined;
 }
 
 // Claude Code overrides a Stop hook after repeated blocks, and an endless block loop burns turns, so give up after a few.

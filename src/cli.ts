@@ -9,7 +9,7 @@ import { asRole } from "./tools/tool.ts";
 import { styleFor } from "./style.ts";
 import { runReview } from "./review.ts";
 import { join } from "node:path";
-import { areaLock, hookWho, recordHookBlock, sessionStartContext, stopHook, type HookInput, type LockContext } from "./hooks.ts";
+import { areaLock, hookWho, mergeOrPush, recordHookBlock, sessionStartContext, stopHook, type HookInput, type LockContext } from "./hooks.ts";
 import { ensureForeman, findRepo, pluginRoot, socketPath, type Repo } from "./paths.ts";
 import { terminal } from "./integrations/index.ts";
 import { requireSession, type Terminal } from "./terminal.ts";
@@ -203,7 +203,10 @@ async function hook(event: string | undefined): Promise<number> {
     recordHookBlock(repo, event, input, hookWho(role, process.env.FOREMAN_TASK, realpathSync(input.cwd), loadTasks(repo)));
     return 0;
   }
-  if (role === "reviewer") return 0;
+  if (role === "reviewer") {
+    if (event === "pre-tool-use") denyTool(mergeOrPush(input));
+    return 0;
+  }
   const ctx: LockContext =
     role === "orchestrator"
       ? { role, repo }
@@ -211,10 +214,7 @@ async function hook(event: string | undefined): Promise<number> {
   input.cwd = realpathSync(input.cwd);
 
   if (event === "pre-tool-use") {
-    const reason = areaLock(input, ctx);
-    if (reason) {
-      console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason } }));
-    }
+    denyTool(areaLock(input, ctx));
   } else if (event === "stop") {
     if (role === "orchestrator") console.log(JSON.stringify(stopHook(repo)));
   } else if (event === "session-start") {
@@ -223,6 +223,10 @@ async function hook(event: string | undefined): Promise<number> {
     console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext } }));
   }
   return 0;
+}
+
+function denyTool(reason: string | undefined) {
+  if (reason) console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason } }));
 }
 
 try {

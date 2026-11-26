@@ -149,3 +149,10 @@ Checked against Claude Code 2.1.332 on a Claude Enterprise login, with an intera
 
 - The orchestrator runs with `--disallowedTools "Bash(foreman *)"` and no `Bash` rule allowed, so it can't run the `foreman` command and has to use the Foreman tools.
 - A `--disallowedTools` rule wins over a matching `--allowedTools` rule. In a scratch `claude -p` session in default permission mode, `--allowedTools "Bash(echo *)"` ran `echo hello-spike`, and adding `--disallowedTools "Bash(echo *)"` to the same call blocked it.
+
+## Blocking merges and pushes
+
+- The PreToolUse hook gets a Bash call's command in `tool_input.command` as the model wrote it, before Claude Code wraps it in `zsh -c` and `eval`. One call can chain several commands, wrap them in `bash -c "..."`, or quote a command's name inside a commit message, so the hook reads it with the same quote-aware scan as the edit guard rather than matching text.
+- Hooks fire only on a Claude session's own tool calls. `mergePr` in the watcher, `deliver` and the decisions PR run `gh` and `git` from Foreman's process, so the hook never sees them and they keep working.
+- The reviewer runs with `--tools Read,Grep,Glob`, so it has no Bash today. The hook still checks a reviewer's Bash calls in case that changes.
+- The scan can't see inside a script file the command runs, a git alias that pushes, or a heredoc fed to a shell, like `bash <<EOF`.
