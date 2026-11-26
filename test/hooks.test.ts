@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { homedir } from "node:os";
 import { saveConfig } from "../src/config.ts";
-import { areaLock, bashWriteTargets, hookWho, owned, recordHookBlock, sessionStartContext, stopDecision, STOP_BLOCK_BUDGET, type LockContext } from "../src/hooks.ts";
+import { areaLock, bashWriteTargets, hookWho, mergeOrPush, mergeOrPushIn, owned, recordHookBlock, sessionStartContext, stopDecision, STOP_BLOCK_BUDGET, type LockContext } from "../src/hooks.ts";
 import { openBlocks } from "../src/permissions.ts";
 import type { Task } from "../src/state.ts";
 import { fakeTerminal, tempRepo } from "./helpers.ts";
@@ -172,6 +172,98 @@ describe("bashWriteTargets reads quoted text as data", () => {
     expect(bashWriteTargets(`cat <<< "x"\necho y > a.txt`, "/w")).toEqual(["/w/a.txt"]);
     expect(bashWriteTargets(`jq . <<< "$json" > out.json`, "/w")).toEqual(["/w/out.json"]);
     expect(bashWriteTargets(`(( a << 2 ))\necho y > a.txt`, "/w")).toEqual(["/w/a.txt"]);
+  });
+});
+
+describe("merges, approvals and pushes are Foreman's alone", () => {
+  const orch: LockContext = { role: "orchestrator", repo };
+
+  test("every role is refused, with a reason that names automerge and deliver", () => {
+    const reason = areaLock(bash("gh pr merge 12 --squash", "/r"), orch);
+    expect(reason).toContain("Only Foreman's automerge merges PRs");
+    expect(reason).toContain("deliver tool");
+    expect(areaLock(bash("git push origin foreman/T1"), worker)).toContain("`git push`");
+    expect(mergeOrPush({ cwd: wt, tool_name: "Bash", tool_input: { command: "gh pr review 3 --approve" } })).toContain("`gh pr review --approve`");
+    expect(mergeOrPush({ cwd: wt, tool_name: "Read", tool_input: { file_path: "a" } })).toBeUndefined();
+  });
+
+  test("finds each command in plain form", () => {
+    for (const command of [
+      "gh pr merge",
+      "gh pr merge 12 --auto --squash",
+      "gh pr review 3 --approve",
+      "gh pr review 3 -a -b ok",
+      "gh pr review --approve=true",
+      "gh api -X PUT repos/o/r/pulls/12/merge",
+      "gh api --method=PUT /repos/o/r/pulls/12/merge -f merge_method=squash",
+      "gh api -XPUT repos/{owner}/{repo}/pulls/12/merge",
+      "gh api graphql -f query='mutation { mergePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }'",
+      "git push",
+      "git push --force",
+      "git push -f origin x",
+      "git push --force-with-lease origin x",
+      "git -C /r/.foreman/worktrees/T1 push",
+      "git -c push.default=current push",
+      "/usr/bin/git push",
+    ]) {
+      expect([command, mergeOrPushIn(command)]).toEqual([command, expect.any(String)]);
+    }
+  });
+
+  test("finds it behind quotes, chains, substitutions, wrappers and prefixes", () => {
+    for (const command of [
+      `"gh" pr "merge" 12`,
+      `git 'push' origin`,
+      `g\it push`,
+      "bun test && git push",
+      "bun test; gh pr merge 1",
+      "echo ok | gh pr merge 1",
+      "bun test || git push",
+      "(cd /r && git push)",
+      "echo $(gh pr merge 1)",
+      `echo "$(git push)"`,
+      "echo `git push`",
+      `bash -c "git push origin x"`,
+      `sh -c 'bun test && gh pr merge 1'`,
+      `bash -lc "gh pr review 1 --approve"`,
+      `bash -c "sh -c 'git push'"`,
+      `eval "git push"`,
+      "env GH_TOKEN=x gh pr merge 1",
+      "env -u FOO git push",
+      "command git push",
+      "FOO=1 git push",
+      "timeout 60 git push",
+      "nohup git push > /tmp/out 2>&1",
+      "git push 2>&1 | tail -5",
+      "git commit -m 'wip' &&\ngit push",
+    ]) {
+      expect([command, mergeOrPushIn(command)]).toEqual([command, expect.any(String)]);
+    }
+  });
+
+  test("leaves the same words alone when they're only data", () => {
+    for (const command of [
+      `git commit -m "feat: stop gh pr merge and git push in sessions"`,
+      `git commit -m 'docs: say "gh pr merge; git push" is Foreman\'s job'`,
+      `foreman report done "blocked merges" --test "run gh pr merge 1 in a worker; it's refused"`,
+      `gh pr comment 3 --body "please gh pr merge this"`,
+      `echo 'git push && gh pr merge 1'`,
+      `bash -c "echo 'git push'"`,
+      `grep -n "git push" src/hooks.ts`,
+      "git commit -F - <<'EOF'\nfeat: x\n\ngit push happens in deliver\nEOF",
+      "# git push\nbun test",
+      "echo x > git",
+      "git pull --rebase",
+      "git log origin/main..HEAD",
+      "gh pr view 3",
+      "gh pr review 3 --comment -b 'looks fine'",
+      "gh pr review 3 --request-changes -b 'see -a'",
+      "gh api repos/o/r/pulls/12",
+      "gh api repos/o/r/pulls/12/merged-by",
+      "gh pr list --search 'is:merged'",
+    ]) {
+      expect([command, mergeOrPushIn(command)]).toEqual([command, undefined]);
+    }
   });
 });
 
