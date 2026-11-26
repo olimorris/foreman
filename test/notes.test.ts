@@ -68,6 +68,10 @@ test("a worker paused for the usage limit hears the notes it missed when it resu
   addNote(repo, "the build cache is shared", "T2");
   pauseForLimit(repo, findTask(repo, "T1"), term);
   const note = addNote(repo, "port 3000 is taken on this machine", "T2")!;
+  // The clock can read the same millisecond for the pause and both notes, so the times are pinned.
+  withTasks(repo, (tasks) => { tasks.find((t) => t.id === "T1")!.pausedAt = "2026-01-01T00:00:01.000Z"; });
+  const times = ["2026-01-01T00:00:00.000Z", "2026-01-01T00:00:02.000Z"];
+  writeFileSync(join(repo.foreman, "notes.jsonl"), loadNotes(repo).map((n, i) => JSON.stringify({ ...n, at: times[i] }) + "\n").join(""));
   expect(shareNote(repo, newNoteMessage(repo, note), "T2", term).sent).toEqual([]);
 
   term.alive = () => false;
