@@ -10,14 +10,14 @@ import { sendToTask } from "./send.ts";
 import { baseRef } from "./base.ts";
 import { budgetOf, overBudget, planSpend, taskCost, taskLimit, usd, type Budget, type TaskCost } from "./cost.ts";
 import { transcripts } from "./transcripts.ts";
-import { loadConfig } from "./config.ts";
+import { loadConfig, protectedGlobs } from "./config.ts";
 import { loadPlan, readyTasks, maxWorkers, stackable } from "./plan.ts";
 import { pauseForLimit, restartWorker, resume, stopWorker } from "./stop.ts";
 import { clockAt, loadLimit, resetPhrase, resumeDue, saveLimit, type LimitHit, type UsageLimit } from "./limits.ts";
 import { taskDir } from "./paths.ts";
 import { inFlight, loadTasks, updateTask, type Task } from "./state.ts";
 import { tabOpen } from "./lifecycle.ts";
-import { allowNoChecks, automergeOn, checksOf, latestVerdict, maxRisk, mergeCall, mergePr, repoMergeMethod, type Check, type LatestVerdict, type Merge, type MergeMethod, type Risk } from "./automerge.ts";
+import { allowNoChecks, automergeOn, changedFiles, checksOf, latestVerdict, maxRisk, mergeCall, mergePr, repoMergeMethod, type Check, type LatestVerdict, type Merge, type MergeMethod, type Risk } from "./automerge.ts";
 import { blockLine, syncBlocks, type PermissionBlock } from "./permissions.ts";
 import { busy, commandName, isWorker, pidAlive, processesIn, sample, tidy, unstoppableLine, type CpuSample, type Proc } from "./procs.ts";
 import { andList, clip } from "./text.ts";
@@ -26,7 +26,7 @@ import { needsOrchestrator, sync } from "./sync.ts";
 export type PrState = { state: string; comments: number; base?: string; head?: string; sha?: string; draft?: boolean; checks?: Check[] };
 export type TrackedPr = { key: string; number: number; base?: string };
 export type Stall = { since: number; nudged: boolean; escalated: boolean; cpu?: CpuSample; measuredAt?: number; busyAt?: number };
-export type Cursor = { events: Record<string, number>; main?: string; exited: string[]; prs?: Record<string, PrState>; budget?: Record<string, number>; stalls?: Record<string, Stall>; restarts?: Record<string, number>; unanswered?: string[]; unstoppable?: number[]; limit?: UsageLimit; limitEnded?: number; held?: string[]; unmergeable?: Record<string, string>; noChecks?: number[]; tooRisky?: number[]; blocks?: string[] };
+export type Cursor = { events: Record<string, number>; main?: string; exited: string[]; prs?: Record<string, PrState>; budget?: Record<string, number>; stalls?: Record<string, Stall>; restarts?: Record<string, number>; unanswered?: string[]; unstoppable?: number[]; limit?: UsageLimit; limitEnded?: number; held?: string[]; unmergeable?: Record<string, string>; noChecks?: number[]; tooRisky?: number[]; protected?: number[]; blocks?: string[] };
 export type Nudge = { id: string; text: string };
 
 export type Probes = {
@@ -41,6 +41,8 @@ export type Probes = {
   automerge?(): boolean;
   allowNoChecks?(): boolean;
   maxRisk?(): Risk;
+  protect?(): string[];
+  changed?(base: string, head: string): string[] | undefined;
   verdict?(task: Task): LatestVerdict | undefined;
   blocks?(): PermissionBlock[];
   spend?(tasks: Task[]): Spend;
@@ -61,7 +63,7 @@ export const BUSY_STALLS = 4;
 const MIN_SAMPLE_MS = 10_000;
 
 export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: TrackedPr[] = [], clock?: Clock): ScanResult {
-  const next: Cursor = { ...cursor, events: { ...cursor.events }, exited: [...cursor.exited], prs: { ...cursor.prs }, stalls: { ...cursor.stalls }, restarts: { ...cursor.restarts }, unanswered: [...(cursor.unanswered ?? [])], unmergeable: { ...cursor.unmergeable }, noChecks: [...(cursor.noChecks ?? [])], tooRisky: [...(cursor.tooRisky ?? [])], ...(cursor.limit ? { limit: { ...cursor.limit, paused: [...cursor.limit.paused] } } : {}) };
+  const next: Cursor = { ...cursor, events: { ...cursor.events }, exited: [...cursor.exited], prs: { ...cursor.prs }, stalls: { ...cursor.stalls }, restarts: { ...cursor.restarts }, unanswered: [...(cursor.unanswered ?? [])], unmergeable: { ...cursor.unmergeable }, noChecks: [...(cursor.noChecks ?? [])], tooRisky: [...(cursor.tooRisky ?? [])], protected: [...(cursor.protected ?? [])], ...(cursor.limit ? { limit: { ...cursor.limit, paused: [...cursor.limit.paused] } } : {}) };
   const reasons: string[] = [];
   const nudge: Nudge[] = [];
   const restart: string[] = [];
@@ -116,8 +118,15 @@ export function scan(tasks: Task[], cursor: Cursor, probes: Probes, prs: Tracked
     // A head whose failing check or refused merge was already reported is skipped, or the orchestrator would hear about it every poll.
     if (!task || !probes.automerge?.() || !now.sha || next.unmergeable![`${number}`] === now.sha) continue;
     const max = probes.maxRisk?.() ?? "low";
-    const call = mergeCall(task, now, probes.verdict?.(task), { allowNoChecks: probes.allowNoChecks?.() ?? false, maxRisk: max });
+    const protect = probes.protect?.() ?? [];
+    const changed = protect.length && now.base ? probes.changed?.(now.base, now.sha) : undefined;
+    const call = mergeCall(task, now, probes.verdict?.(task), { allowNoChecks: probes.allowNoChecks?.() ?? false, maxRisk: max, protect, changed });
     if (call === "merge") merge.push({ id: key, number, sha: now.sha });
+    else if (typeof call === "object" && "protected" in call) {
+      // Once per PR, so every poll doesn't repeat it, and a push that drops the protected files still merges.
+      const files = call.protected.length ? call.protected.join(", ") : "couldn't list its changed files, so it waits";
+      if (!next.protected!.includes(number)) reasons.push(`protected ${key} #${number}: ${files}`), next.protected!.push(number);
+    }
     else if (typeof call === "object" && "tooRisky" in call) {
       // Once per PR, like no-checks, so a push or a new round at the same risk doesn't repeat it.
       if (!next.tooRisky!.includes(number)) reasons.push(`too-risky ${key} #${number}: ${call.tooRisky}, above maxRisk ${max}`), next.tooRisky!.push(number);
@@ -370,6 +379,8 @@ export async function watchFor(repo: Repo, base: string, term: Terminal, { signa
     automerge: () => automergeOn(repo),
     allowNoChecks: () => allowNoChecks(repo),
     maxRisk: () => maxRisk(repo),
+    protect: () => protectedGlobs(loadConfig(repo)),
+    changed: (base, head) => changedFiles(repo, base, head),
     verdict: (task) => latestVerdict(repo, task),
     spend: (tasks) => ({ costs: tasks.map((t) => taskCost(repo, t)), plan: planSpend(repo, loadTasks(repo)), budget: budgetOf(repo) }),
   };

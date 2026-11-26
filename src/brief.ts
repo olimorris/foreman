@@ -1,3 +1,5 @@
+import { protectedGlobs, type Config } from "./config.ts";
+
 export const CONVENTIONAL = /^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([\w./-]+\))?!?: \S/;
 
 export const plainTitle = (title: string) => title.replace(/^\w+(\([\w./-]+\))?!?:\s*/, "").trim();
@@ -16,4 +18,10 @@ export function checkModel(model: string): void {
   const alias = ALIASES.includes(model.replace(/\[1m\]$/, ""));
   const id = /^[A-Za-z0-9][\w.:@\/[\]-]*$/.test(model) && /^claude-|anthropic|^arn:/.test(model);
   if (!alias && !id) throw new Error(`"${model}" isn't a model name. Use sonnet, opus, haiku, fable, opusplan or default, or a full id like claude-sonnet-5-5`);
+}
+
+export function protectedLines(config: Config): string[] {
+  const protect = protectedGlobs(config);
+  if (!protect.length) return [];
+  return [`- Protected paths: ${protect.map((g) => `\`${g}\``).join(", ")}. You can edit these, but a PR that touches one never automerges and stays with the user`];
 }

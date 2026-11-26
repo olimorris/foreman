@@ -1,6 +1,8 @@
-import { loadConfig, neverRules } from "./config.ts";
+import { baseRef } from "./base.ts";
+import { loadConfig, neverRules, protectedGlobs } from "./config.ts";
 import { run } from "./exec.ts";
 import { usageError } from "./help.ts";
+import { owned } from "./hooks.ts";
 import type { Repo } from "./paths.ts";
 import { loadPlan, updatePlan } from "./plan.ts";
 import { latest, type Verdict } from "./rounds.ts";
@@ -9,8 +11,9 @@ import type { Task } from "./state.ts";
 export type Check = { name: string; state: "pass" | "fail" | "pending" };
 export type PrView = { state: string; base?: string; head?: string; sha?: string; draft?: boolean; checks?: Check[] };
 export type Risk = Verdict["risk"];
-export type MergeCall = "merge" | "wait" | "no-checks" | { failing: string[] } | { tooRisky: Risk };
-export type MergeRules = { allowNoChecks?: boolean; maxRisk?: Risk };
+export type MergeCall = "merge" | "wait" | "no-checks" | { failing: string[] } | { tooRisky: Risk } | { protected: string[] };
+// An undefined changed list means the files couldn't be listed, and with a protect list that counts as touching one.
+export type MergeRules = { allowNoChecks?: boolean; maxRisk?: Risk; protect?: string[]; changed?: string[] };
 export type Merge = { id: string; number: number; sha: string };
 
 export const automergeOn = (repo: Repo): boolean => loadPlan(repo)?.automerge === true;
@@ -48,8 +51,28 @@ export function mergeCall(task: Task, pr: PrView, verdict: LatestVerdict | undef
   // Failing checks still go back to the worker first, so the user isn't handed a PR that a worker could fix.
   if (call !== "merge" && call !== "no-checks") return call;
   const max = rules.maxRisk ?? "low";
-  return aboveRisk(verdict.risk, max) ? { tooRisky: verdict.risk ?? "medium" } : call;
+  if (aboveRisk(verdict.risk, max)) return { tooRisky: verdict.risk ?? "medium" };
+  const hits = protectedHits(rules.protect ?? [], rules.changed);
+  return hits ? { protected: hits } : call;
 }
+
+// Returns the changed files that match a protected glob, an empty list when the files are unknown, or undefined when nothing is protected.
+export function protectedHits(protect: string[], changed: string[] | undefined): string[] | undefined {
+  if (!protect.length) return undefined;
+  if (!changed) return [];
+  const hits = changed.filter((f) => owned(f, protect));
+  return hits.length ? hits : undefined;
+}
+
+// Against origin's base, since the user's local base lags behind merged PRs and would add their files to the list.
+export function changedFiles(repo: Repo, base: string, head: string): string[] | undefined {
+  const r = run(["git", "-C", repo.root, "diff", "--name-only", `${baseRef(repo, base)}...${head}`]);
+  return r.code === 0 ? r.stdout.split("\n").filter(Boolean) : undefined;
+}
+
+// Whether automerge would merge this PR once its checks pass, for the line in the PR that says who merges it.
+export const foremanMerges = (automerge: boolean, risk: Risk | undefined, max: Risk, hits: string[] | undefined): boolean =>
+  automerge && !aboveRisk(risk, max) && !hits;
 
 function checksCall(checks: Check[], allowNoChecks: boolean): MergeCall {
   // Nothing has checked the code, and a repo whose CI hasn't registered its checks yet looks the same as one with no CI.
@@ -120,7 +143,9 @@ export function automerge(repo: Repo, args: string[]): string[] {
     return { ...plan, automerge: arg === "on" };
   });
   if (arg === "off") return [OFF];
+  const protect = protectedGlobs(loadConfig(repo));
+  const protectLines = protect.length ? ["It never merges a PR that touches a protected path, set by protect in .foreman/config.json:", ...protect.map((g) => `  - ${g}`)] : [];
   const merging = neverRules(loadConfig(repo)).filter((r) => /merg/i.test(r));
   const noChecks = allowNoChecks(repo) ? ["automerge.allowNoChecks is on in .foreman/config.json, so a PR with no checks merges once the reviewer approves it"] : [];
-  return [ON, riskLine(maxRisk(repo)), ...noChecks, ...(merging.length ? ["Your never list mentions merging, and it still applies:", ...merging.map((r) => `  - ${r}`)] : [])];
+  return [ON, riskLine(maxRisk(repo)), ...noChecks, ...protectLines, ...(merging.length ? ["Your never list mentions merging, and it still applies:", ...merging.map((r) => `  - ${r}`)] : [])];
 }

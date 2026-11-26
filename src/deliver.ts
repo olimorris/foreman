@@ -1,7 +1,8 @@
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadConfig } from "./config.ts";
+import { changedFiles, foremanMerges, maxRisk, protectedHits } from "./automerge.ts";
+import { loadConfig, protectedGlobs } from "./config.ts";
 import { lastDone, logRun } from "./events.ts";
 import { must, run } from "./exec.ts";
 import { loadDecisions } from "./ledger.ts";
@@ -20,6 +21,8 @@ export type { Shot } from "./rounds.ts";
 export type PacketInput = {
   task: Task; intent: string; doneNote?: string; test?: string[]; assumptions?: string[]; stat: string; verdict: Verdict; round: number;
   decisions: string[]; shots: Shot[]; shotsNote?: string; buildsOn?: Task; draft?: PrDraft; automerge?: boolean;
+  // Defaults to low and nothing protected, like the config.
+  maxRisk?: Verdict["risk"]; protectedFiles?: string[];
 };
 
 export function section(md: string, heading: string): string {
@@ -81,7 +84,7 @@ export function renderPacket(p: PacketInput & { models: Models; cost?: number })
     "",
     "## AI Usage",
     "",
-    p.automerge ? "AI wrote this change. A person set its scope, and Foreman merges it once its checks pass." : "AI wrote this change. A person set its scope and merges it.",
+    foremanMerges(p.automerge === true, p.verdict.risk, p.maxRisk ?? "low", p.protectedFiles) ? "AI wrote this change. A person set its scope, and Foreman merges it once its checks pass." : "AI wrote this change. A person set its scope and merges it.",
     "",
     `**Tools and models used:** Claude Code with Foreman. Worker: ${names(p.models.worker)}. Reviewer: ${names(p.models.reviewer)}.${p.cost ? ` Cost: about $${p.cost.toFixed(2)} at list prices.` : ""}`,
     "",
@@ -169,7 +172,7 @@ export function deliver(repo: Repo, id: string, opts: { dryRun?: boolean; title?
     shotsNote = undefined;
   }
   const packet = join(taskDir(repo, id), "pr.md");
-  writeFileSync(packet, renderPacket({ task, intent: section(brief, "Intent"), doneNote, test: done?.test, assumptions: done?.assumptions, stat, verdict, round, decisions, shots, shotsNote, buildsOn, draft: verdict.pr?.description.trim() ? verdict.pr : undefined, automerge: loadPlan(repo)?.automerge === true, models: { worker: transcripts(repo, task).models(), reviewer: [...new Set(rounds(repo, task).flatMap((r) => r.models))] }, cost: taskCost(repo, task).total }));
+  writeFileSync(packet, renderPacket({ task, intent: section(brief, "Intent"), doneNote, test: done?.test, assumptions: done?.assumptions, stat, verdict, round, decisions, shots, shotsNote, buildsOn, draft: verdict.pr?.description.trim() ? verdict.pr : undefined, automerge: loadPlan(repo)?.automerge === true, maxRisk: maxRisk(repo), protectedFiles: protectedHits(protectedGlobs(loadConfig(repo)), changedFiles(repo, task.base, task.branch)), models: { worker: transcripts(repo, task).models(), reviewer: [...new Set(rounds(repo, task).flatMap((r) => r.models))] }, cost: taskCost(repo, task).total }));
 
   if (opts.dryRun) return { packet, title, note: `wrote the PR packet to ${packet}${titleNote}` };
   if (!origin) return { packet, title, note: `this repo has no origin remote, so nothing was pushed. The PR packet is at ${packet}${titleNote}` };

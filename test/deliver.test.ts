@@ -3,7 +3,9 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { deliver, modelName, renderPacket, section } from "../src/deliver.ts";
 import { appendEvent, readEvents } from "../src/events.ts";
+import { saveConfig } from "../src/config.ts";
 import { must } from "../src/exec.ts";
+import { savePlan } from "../src/plan.ts";
 import type { Verdict } from "../src/rounds.ts";
 import { spawn } from "../src/spawn.ts";
 import { findTask, updateTask } from "../src/state.ts";
@@ -63,6 +65,30 @@ test("with automerge on, the packet says Foreman merges the PR", () => {
   const { repo } = setup(["T1"]);
   const md = renderPacket({ task: findTask(repo, "T1"), intent: "Greet.", stat: "", verdict: approve, round: 1, decisions: [], shots: [], automerge: true, models: { worker: [], reviewer: [] } });
   expect(md).toContain("AI wrote this change. A person set its scope, and Foreman merges it once its checks pass.");
+});
+
+test("a PR above maxRisk, or one that touches a protected path, says a person merges it", () => {
+  const { repo } = setup(["T1"]);
+  const packet = (extra: object) => renderPacket({ task: findTask(repo, "T1"), intent: "Greet.", stat: "", verdict: approve, round: 1, decisions: [], shots: [], automerge: true, models: { worker: [], reviewer: [] }, ...extra });
+  const person = "AI wrote this change. A person set its scope and merges it.";
+  expect(packet({ verdict: { ...approve, risk: "medium" } })).toContain(person);
+  expect(packet({ verdict: { ...approve, risk: "medium" }, maxRisk: "medium" })).toContain("Foreman merges it once its checks pass");
+  expect(packet({ protectedFiles: ["migrations/0004.sql"] })).toContain(person);
+  expect(packet({ protectedFiles: [] })).toContain(person);
+});
+
+test("deliver checks the branch's files against the protect list", () => {
+  const { repo, commit } = setup(["T1"]);
+  commit("T1");
+  writeRound(repo, "T1", 1, { verdict: approve });
+  updateTask(repo, "T1", { reviews: 1 });
+  savePlan(repo, { title: "Greet", automerge: true, tasks: [] });
+  const usage = () => readFileSync(deliver(repo, "T1", { dryRun: true, title: "feat: greet" }).packet, "utf8");
+  expect(usage()).toContain("Foreman merges it once its checks pass");
+  saveConfig(repo, { protect: ["*.txt"] });
+  expect(usage()).toContain("A person set its scope and merges it.");
+  saveConfig(repo, { protect: ["migrations/**"] });
+  expect(usage()).toContain("Foreman merges it once its checks pass");
 });
 
 test("deliver refuses until the latest review approves, then writes the packet", () => {

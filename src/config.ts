@@ -7,10 +7,12 @@ import type { ShotsConfig } from "./shots.ts";
 import type { Budget, Price } from "./cost.ts";
 import { jsonStore } from "./store.ts";
 
-export type Config = { adr?: AdrConvention; context?: string; screenshots?: ShotsConfig; maxWorkers?: number; prScreenshots?: "branch" | "local"; budget?: Budget; prices?: Record<string, Price>; stallMinutes?: number; stackTasks?: boolean; test?: string; testMinutes?: number; answerMinutes?: number; workerModel?: string; reviewerModel?: string; orchestratorModel?: string; never?: string[]; telegram?: { when?: string }; automerge?: { allowNoChecks?: boolean; maxRisk?: "low" | "medium" | "high" } };
+export type Config = { adr?: AdrConvention; context?: string; screenshots?: ShotsConfig; maxWorkers?: number; prScreenshots?: "branch" | "local"; budget?: Budget; prices?: Record<string, Price>; stallMinutes?: number; stackTasks?: boolean; test?: string; testMinutes?: number; answerMinutes?: number; workerModel?: string; reviewerModel?: string; orchestratorModel?: string; never?: string[]; protect?: string[]; telegram?: { when?: string }; automerge?: { allowNoChecks?: boolean; maxRisk?: "low" | "medium" | "high" } };
 
 // Blank entries would print as empty bullets under a heading that promises rules.
 export const neverRules = (config: Config): string[] => (config.never ?? []).map((r) => r.trim()).filter(Boolean);
+
+export const protectedGlobs = (config: Config): string[] => (config.protect ?? []).map((g) => g.trim()).filter(Boolean);
 
 const configStore = (repo: Repo) => jsonStore<Config>(join(repo.foreman, "config.json"), () => ({}));
 
