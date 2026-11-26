@@ -19,11 +19,11 @@ Here's my backlog: BACKLOG.md. The deadline is tomorrow. Do it as cheaply as you
 
 ## :firecracker: The problem
 
-Open five Claude Code sessions and you still have to review five PRs. Which one goes first? What did each worker assume? Do the changes work together? Congratulations - you've become the bottleneck.
+A single Claude Code session won't chomp through that backlog. Five Claude Code sessions might, but you still have to review every PR. Which one goes first? What did each worker assume? Do the changes work together? **Congratulations - you've become the bottleneck**.
 
 ## :sparkles: Features
 
-### It runs while you're away
+### Foreman runs while you're away
 
 - :money_with_wings: Stops workers that exceed task or plan budgets.
 - :zzz: Restarts hung workers.
@@ -31,7 +31,7 @@ Open five Claude Code sessions and you still have to review five PRs. Which one 
 - :hourglass_flowing_sand: Makes routine decisions when you don't answer.
 - :speech_balloon: Pings you on Telegram when you choose.
 
-### The work arrives ready to review
+### Foreman ensures the work arrives ready to review
 
 - :clipboard: Reviews each task and rates its risk before opening a PR.
 - :camera: Captures before and after screenshots of web and macOS apps.
@@ -39,7 +39,7 @@ Open five Claude Code sessions and you still have to review five PRs. Which one 
 - :link: Tests open PRs together for conflicts and failing tests.
 - :memo: Lists PRs in review order, with test steps and assumptions.
 
-### It stays inside your rules
+### Foreman stays inside your rules
 
 - :policeman: Checks each change against your `never` list.
 - :lock: Blocks edit tools outside each task's owned paths.
