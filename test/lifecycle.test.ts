@@ -57,6 +57,17 @@ describe("spawn", () => {
     expect(readFileSync(join(repo.foreman, "tasks", "T2", "brief.md"), "utf8")).not.toContain("Never do these");
   });
 
+  test("lists the protected paths in the brief, and nothing when protect isn't set", () => {
+    const repo = tempRepo();
+    saveConfig(repo, { protect: ["migrations/**", ".github/**"] });
+    spawned("T1", undefined, repo);
+    expect(readFileSync(join(repo.foreman, "tasks", "T1", "brief.md"), "utf8")).toContain("- Protected paths: `migrations/**`, `.github/**`. You can edit these");
+
+    saveConfig(repo, { protect: [] });
+    spawned("T2", undefined, repo);
+    expect(readFileSync(join(repo.foreman, "tasks", "T2", "brief.md"), "utf8")).not.toContain("Protected paths");
+  });
+
   test("labels the tab with the id and the start of the title", () => {
     const { term } = spawned();
     expect(term.labels).toEqual(["W1 · T1"]);
