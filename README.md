@@ -60,6 +60,45 @@ Foreman is a CLI and a Claude Code plugin. `foreman up` starts Claude Code with 
 - Foreman never merges unless you turn on [automerge](#auto-merging-prs) and merges its own PRs
 - It keeps its state in `.foreman/`, out of git, and picks up from there after a restart
 
+### What Foreman guarantees
+
+Some of Foreman's rules are checked by its own code, and some are instructions the agents are asked to follow. A model can ignore an instruction, so only the first list is a guarantee.
+
+**Enforced in code**
+
+- A worker's Edit and Write calls are refused outside its task's owned paths, inside `.foreman/` and anywhere else in your repo. Outside the repo they only work in the system temp folder
+- A worker's Bash commands are refused when they redirect output (`>`, `>>`) or `tee` into a file outside its owned paths, inside `.foreman/` or elsewhere in your repo. This check is best effort. It reads the command's words, so it misses files a program writes itself, such as `sed -i`, `cp` or a script
+- A worker running outside its own worktree has every Edit, Write and Bash call refused
+- The orchestrator's Edit and Write calls are refused outside `.foreman/` and inside `.foreman/worktrees/`. Its Bash commands aren't checked for writes
+- The orchestrator, workers and the reviewer are refused `git push`, `gh pr merge`, `gh pr review --approve` and `gh api` calls to a PR's merge endpoint. This is also best effort. It sees plain, chained, quoted and `bash -c` forms, but not a push from inside a script file or a git alias
+- The orchestrator and workers can't run the `foreman` command, so they can't raise their own budget or switch automerge on from the CLI
+- The reviewer runs with Read, Grep and Glob only, so it can't change files or run commands
+- `deliver` refuses to push a branch or open a PR until the task's latest review is an approval
+- Without automerge on for the plan, Foreman never merges a PR
+- Automerge only merges a PR from a `foreman/<task>` branch that targets the task's base branch, isn't a draft and whose latest review is an approval
+- Automerge waits while a check is pending or failing, and merges with `--match-head-commit`, so a push after the checks ran never merges
+- Automerge waits on a PR with no checks, unless `automerge.allowNoChecks` is on
+- Automerge waits on a PR the reviewer rated above `automerge.maxRisk`
+- Automerge waits on a PR that changes a file matching `protect`, and on any PR whose changed files it can't list while `protect` is set
+- `teardown` refuses to remove a worktree or branch with unmerged work unless told to discard it
+- While the orchestrator's watch task runs, Foreman stops a worker when its task or the plan goes over budget, restarts one that stays quiet for twice `stallMinutes` and pauses every worker at the usage limit
+- The orchestrator can't end its turn with tasks in flight and no watch task running. Foreman lets it through after 3 tries and warns you instead
+
+**Asked of the agents**
+
+- The orchestrator never writes code, including through Bash
+- The orchestrator only turns automerge on when you say Foreman can merge
+- Every session follows your `never` list. Foreman puts it in the orchestrator's context and in every brief, and the reviewer treats breaking one as an issue
+- The reviewer won't approve a PR that one of your `never` rules about merging covers
+- The reviewer judges whether a change matches its intent, and the risk level automerge reads is the reviewer's own rating
+- Workers stay inside the brief's intent and note extra ideas in their report instead
+- Workers propose a decision instead of changing a shared type, an API or a convention on their own
+- Workers follow your repo's ADRs and the accepted decisions
+- Workers commit only on their own `foreman/<task>` branch
+- Workers don't work around a refused call, and wait for you to allow or skip it
+- Workers run your tests before they report done
+- Questions about money or lost work always wait for you, and the orchestrator never makes that call itself
+
 ### Why not Claude Code's agent teams?
 
 Agent teams are great for research and review inside one session. Foreman is built for unattended builds that end in PRs, so it needs things teams doesn't offer:
@@ -181,7 +220,15 @@ Runs up to 5 workers at once until the current plan finishes. The next plan goes
 foreman automerge on
 ```
 
-Foreman merges each task's PR itself once the reviewer approves it and every check passes on GitHub. A PR with no checks merges once it's approved. When a check fails, Foreman doesn't merge and sends the worker to fix it. You can also tell the orchestrator _"feel free to merge"_.
+Foreman merges each task's PR itself once the reviewer approves it and every check passes on GitHub. When a check fails, Foreman doesn't merge and sends the worker to fix it. You can also tell the orchestrator _"feel free to merge"_.
+
+Some PRs stay with you even with automerge on. The orchestrator tells you once about each one:
+
+- A PR with no checks, unless `automerge.allowNoChecks` is on
+- A PR the reviewer rated above `automerge.maxRisk`, which is low unless you change it. It shows under "Ready to merge" in `foreman status` and the status pane
+- A PR that changes a file matching `protect`. Workers can still edit those files
+
+`foreman automerge on` lists the risk level, the protected paths and whether `allowNoChecks` is on.
 
 Foreman only merges its own task PRs, from `foreman/<task>` branches. Release PRs, the decisions PR and your own PRs stay with you. Your `never` list still applies. The reviewer won't approve a PR that a rule about merging covers, such as "Merge a PR that changes a migration", and switching automerge on lists those rules. A PR built on another task's branch waits until that task merges. Merges use squash when the repo allows it. `foreman automerge off` hands merging back to you, and `foreman status` shows when it's on.
 
@@ -242,6 +289,8 @@ Settings live in `.foreman/config.json` in your repo, and every one is optional.
   "screenshots": { "adapter": "web", "start": "npm run dev -- --port {port}", "url": "http://localhost:{port}" },
   "prScreenshots": "local",
   "never": ["Merge a release PR. I cut every release."],
+  "automerge": { "allowNoChecks": false, "maxRisk": "low" },
+  "protect": ["migrations/**", ".github/**"],
   "telegram": { "when": "only when a question has waited 10 minutes, or the run is finished" }
 }
 ```
@@ -261,6 +310,9 @@ Settings live in `.foreman/config.json` in your repo, and every one is optional.
 | `screenshots` | How to run your app for before and after screenshots |
 | `prScreenshots` | `"local"` lists screenshot paths in the PR. `"branch"` pushes them to a `foreman-screenshots` branch so they show on GitHub |
 | `never` | Things Foreman must never do in this repo, one plain sentence each. The orchestrator sees the list when it starts, every brief lists it and the reviewer treats a change that breaks one as an issue |
+| `automerge.allowNoChecks` | `true` lets automerge merge an approved PR that has no checks, for repos with no CI. Off by default, so such a PR stays with you |
+| `automerge.maxRisk` | The highest risk the reviewer can give a PR that automerge still merges: `"low"`, `"medium"` or `"high"`. Defaults to `"low"`, and a value Foreman doesn't recognise counts as `"low"` |
+| `protect` | Globs for files automerge never merges a change to, such as `migrations/**`. No default. A PR that touches one stays with you. Workers can still edit them |
 | `telegram` | Turns on pings through Claude Code's Telegram plugin. `when` says in your own words when the orchestrator should ping you. [docs/agents.md](docs/agents.md) covers setting up the plugin |
 
 For a macOS app, `screenshots` builds the app instead of starting a server:
