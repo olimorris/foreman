@@ -7,13 +7,13 @@ import { recordSession, sessionsFile, transcriptDir } from "../src/transcripts.t
 import { budgetOverview } from "../src/overview.ts";
 import { gatherPane, spendByTask } from "../src/pane.ts";
 import { gather } from "../src/summary.ts";
-import { loadPlan, planPath } from "../src/plan.ts";
+import { loadPlan, parsePlan, planPath, savePlan } from "../src/plan.ts";
 import { loadTasks } from "../src/state.ts";
 import { ensureForeman } from "../src/paths.ts";
 import { saveLimit } from "../src/limits.ts";
 import { statusView } from "../src/status.ts";
 import { PLAIN } from "../src/style.ts";
-import { tempRepo } from "./helpers.ts";
+import { tempRepo, writeRound } from "./helpers.ts";
 import { recordBlocks } from "../src/permissions.ts";
 
 const task = (id: string, status: string, extra: object = {}) => ({ id, status, title: `feat: build ${id}`, branch: `foreman/${id}`, base: "main", worktree: `/w/${id}`, owns: [], socket: "", createdAt: "", ...extra });
@@ -93,4 +93,24 @@ test("after foreman budget reset, status, the pane and the summary show the same
   expect(shown()).toEqual({ budget: "$4.00", status: "$4.00", pane: 4, summary: 4, plan: 4 });
   resetBudget(repo, new Date("2026-11-21T12:00:00Z"));
   expect(shown()).toEqual({ budget: "$0.00", status: "$0.00", pane: 0, summary: 0, plan: 0 });
+});
+
+test("status lists open PRs under Ready to merge, and says when automerge leaves one with the user for its risk", () => {
+  const repo = tempRepo();
+  ensureForeman(repo);
+  writeFileSync(join(repo.foreman, "tasks.json"), JSON.stringify({ tasks: [task("T1", "pr-open", { pr: 41, reviews: 1 }), task("T2", "pr-open", { pr: 42, reviews: 1 })] }));
+  const verdict = (risk: "low" | "medium") => ({ verdict: "approve" as const, summary: "", issues: [], risk, risk_note: "", decisions_touched: [] });
+  writeRound(repo, "T1", 1, { verdict: verdict("medium") });
+  writeRound(repo, "T2", 1, { verdict: verdict("low") });
+  const view = () => statusView(repo, PLAIN, true).split("\n");
+  expect(view()).not.toContain("Needs you");
+  expect(view().join("\n")).not.toContain("waits for you");
+  savePlan(repo, { ...parsePlan("# Plan\n"), automerge: true });
+  const lines = view();
+  const at = (s: string) => lines.findIndex((l) => l.startsWith(s));
+  expect(at("Ready to merge")).toBeLessThan(at("  T1"));
+  expect(lines[at("  T1") + 1]).toMatch(/^ +waits for you: risk medium is above maxRisk low$/);
+  expect(lines[at("  T2") + 1] ?? "").not.toContain("waits for you");
+  saveConfig(repo, { automerge: { maxRisk: "medium" } });
+  expect(view().join("\n")).not.toContain("waits for you");
 });

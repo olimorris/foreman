@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { allowNoChecks, automerge, automergeOn, checksOf, mergeMethod, type Check } from "../src/automerge.ts";
+import { allowNoChecks, automerge, automergeOn, checksOf, maxRisk, mergeMethod, riskHold, type Check, type Risk } from "../src/automerge.ts";
 import { saveConfig } from "../src/config.ts";
 import { UsageError } from "../src/help.ts";
 import { loadPlan, parsePlan, savePlan } from "../src/plan.ts";
@@ -17,8 +17,15 @@ const open = (extra: Partial<PrState> = {}): PrState => ({ state: "OPEN", commen
 const tracked: TrackedPr[] = [{ key: "T1", number: 41, base: "main" }];
 const start: Cursor = { events: {}, exited: [], main: "aaa" };
 
-function probes(pr: PrState, opts: { on?: boolean; approved?: boolean; noChecks?: boolean } = {}): Probes {
-  return { events: () => [], mainSha: () => "aaa", alive: () => true, pr: () => pr, automerge: () => opts.on ?? true, approved: () => opts.approved ?? true, allowNoChecks: () => opts.noChecks ?? false };
+type Opts = { on?: boolean; approved?: boolean; noChecks?: boolean; risk?: Risk | null; max?: Risk };
+
+// risk null stands for an old verdict written before the reviewer gave one.
+function probes(pr: PrState, opts: Opts = {}): Probes {
+  const verdict = { verdict: opts.approved === false ? ("changes" as const) : ("approve" as const), ...(opts.risk === null ? {} : { risk: opts.risk ?? "low" }) };
+  return {
+    events: () => [], mainSha: () => "aaa", alive: () => true, pr: () => pr, automerge: () => opts.on ?? true, verdict: () => verdict,
+    allowNoChecks: () => opts.noChecks ?? false, ...(opts.max ? { maxRisk: () => opts.max! } : {}),
+  };
 }
 
 describe("merging approved PRs", () => {
@@ -84,6 +91,32 @@ describe("merging approved PRs", () => {
     expect(scan([task("T1")], start, probes(open({ checks: [{ name: "test", state: "fail" }] }), { on: false }), tracked).reasons).toEqual([]);
   });
 
+  test("a PR at or below maxRisk merges, and one above it waits", () => {
+    const merged = [{ id: "T1", number: 41, sha: "abc" }];
+    expect(scan([task("T1")], start, probes(open(), { risk: "medium", max: "medium" }), tracked).merge).toEqual(merged);
+    expect(scan([task("T1")], start, probes(open(), { risk: "low", max: "medium" }), tracked).merge).toEqual(merged);
+    expect(scan([task("T1")], start, probes(open(), { risk: "high", max: "medium" }), tracked)).toMatchObject({ merge: [], reasons: ["too-risky T1 #41: high, above maxRisk medium"] });
+    expect(scan([task("T1")], start, probes(open(), { risk: "high", max: "high" }), tracked).merge).toEqual(merged);
+  });
+
+  test("with no maxRisk only a low risk PR merges, and a verdict without a risk counts as medium", () => {
+    expect(scan([task("T1")], start, probes(open(), { risk: "low" }), tracked).merge).toHaveLength(1);
+    expect(scan([task("T1")], start, probes(open(), { risk: "medium" }), tracked)).toMatchObject({ merge: [], reasons: ["too-risky T1 #41: medium, above maxRisk low"] });
+    expect(scan([task("T1")], start, probes(open(), { risk: null }), tracked)).toMatchObject({ merge: [], reasons: ["too-risky T1 #41: medium, above maxRisk low"] });
+  });
+
+  test("a PR above maxRisk is reported once, and merges if a later round lowers its risk", () => {
+    const first = scan([task("T1")], start, probes(open(), { risk: "medium" }), tracked);
+    expect(scan([task("T1")], first.cursor, probes(open({ sha: "def" }), { risk: "medium" }), tracked)).toMatchObject({ merge: [], reasons: [] });
+    expect(scan([task("T1")], first.cursor, probes(open(), { risk: "low" }), tracked).merge).toHaveLength(1);
+  });
+
+  test("a PR above maxRisk with a failing check goes back to its worker first", () => {
+    const failing = open({ checks: [{ name: "test", state: "fail" }] });
+    expect(scan([task("T1")], start, probes(failing, { risk: "high" }), tracked).reasons).toEqual(["check-failed T1 #41: test"]);
+    expect(scan([task("T1")], start, probes(open({ checks: [{ name: "test", state: "pending" }] }), { risk: "high" }), tracked).reasons).toEqual([]);
+  });
+
   test("a head the merge was refused for isn't tried again", () => {
     expect(scan([task("T1")], { ...start, unmergeable: { "41": "abc" } }, probes(open()), tracked).merge).toEqual([]);
   });
@@ -130,7 +163,7 @@ describe("foreman automerge", () => {
     const repo = tempRepo();
     savePlan(repo, parsePlan(PLAN));
     expect(automerge(repo, [])[0]).toStartWith("Automerge is off");
-    expect(automerge(repo, ["on"])).toEqual([expect.stringMatching(/^Automerge is on until this plan finishes/)]);
+    expect(automerge(repo, ["on"])).toEqual([expect.stringMatching(/^Automerge is on until this plan finishes/), expect.stringMatching(/low risk/)]);
     savePlan(repo, { ...loadPlan(repo)!, approvedAt: "now" });
     expect(automergeOn(repo)).toBe(true);
     expect(automerge(repo, ["off"])[0]).toStartWith("Automerge is off");
@@ -159,18 +192,37 @@ describe("foreman automerge", () => {
     const repo = tempRepo();
     savePlan(repo, parsePlan(PLAN));
     saveConfig(repo, { never: ["Merge a release PR. I cut every release.", "Push to main"] });
-    expect(automerge(repo, ["on"]).slice(1)).toEqual(["Your never list mentions merging, and it still applies:", "  - Merge a release PR. I cut every release."]);
+    expect(automerge(repo, ["on"]).slice(2)).toEqual(["Your never list mentions merging, and it still applies:", "  - Merge a release PR. I cut every release."]);
     expect(automerge(repo, ["off"])).toHaveLength(1);
+  });
+
+  test("switching it on names the risk level in force, low unless maxRisk says otherwise", () => {
+    const repo = tempRepo();
+    savePlan(repo, parsePlan(PLAN));
+    expect(maxRisk(repo)).toBe("low");
+    expect(automerge(repo, ["on"])[1]).toStartWith("It only merges PRs the reviewer rated low risk. Medium and high risk PRs stay with you");
+    saveConfig(repo, { automerge: { maxRisk: "medium" } });
+    expect(automerge(repo, ["on"])[1]).toStartWith("It merges PRs the reviewer rated low or medium risk");
+    expect(automerge(repo, [])[1]).toStartWith("It merges PRs the reviewer rated low or medium risk");
+    saveConfig(repo, { automerge: { maxRisk: "Medium" as Risk } });
+    expect(maxRisk(repo)).toBe("low");
+  });
+
+  test("status and the pane say why an approved PR above maxRisk waits", () => {
+    expect(riskHold({ verdict: "approve", risk: "medium" }, "low")).toBe("waits for you: risk medium is above maxRisk low");
+    expect(riskHold({ verdict: "approve" }, "low")).toBe("waits for you: risk medium is above maxRisk low");
+    expect(riskHold({ verdict: "approve", risk: "medium" }, "medium")).toBeUndefined();
+    expect(riskHold({ verdict: "changes", risk: "high" }, "low")).toBeUndefined();
   });
 
   test("switching it on mentions allowNoChecks only when it's set", () => {
     const repo = tempRepo();
     savePlan(repo, parsePlan(PLAN));
-    expect(automerge(repo, ["on"])).toHaveLength(1);
+    expect(automerge(repo, ["on"])).toHaveLength(2);
     expect(allowNoChecks(repo)).toBe(false);
     saveConfig(repo, { automerge: { allowNoChecks: true } });
     expect(allowNoChecks(repo)).toBe(true);
-    expect(automerge(repo, ["on"])[1]).toStartWith("automerge.allowNoChecks is on in .foreman/config.json");
+    expect(automerge(repo, ["on"])[2]).toStartWith("automerge.allowNoChecks is on in .foreman/config.json");
   });
 
   test("needs a plan, and takes only on or off", () => {

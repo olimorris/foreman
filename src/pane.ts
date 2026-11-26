@@ -19,9 +19,10 @@ import { writeJson } from "./store.ts";
 import { STALL_MINUTES, watcherArmed } from "./watch.ts";
 import { blockParts, openBlocks, type PermissionBlock } from "./permissions.ts";
 import { permissionLabel } from "./status.ts";
+import { maxRisk, riskHold } from "./automerge.ts";
 import { clip } from "./text.ts";
 
-export type PaneTask = { task: Task; title: string; spent: number; risk?: Verdict["risk"]; note?: string; activity?: Activity; closed?: boolean };
+export type PaneTask = { task: Task; title: string; spent: number; risk?: Verdict["risk"]; hold?: string; note?: string; activity?: Activity; closed?: boolean };
 export type OpenDecision = { id: string; title: string; by: string };
 export type Recent = { at: number; text: string };
 export type PaneInput = {
@@ -116,8 +117,10 @@ export function renderPane(p: PaneInput, width: number, colour = false, height =
     return [head(t, usd(t.spent)), detail(a.idle ? "idle" : a.what, a.idle ? q.tone : "cyan", q.text, q.tone)];
   }));
 
-  section("Ready to merge", active.filter((t) => t.task.status === "pr-open").map((t) =>
-    head(t, `#${t.task.pr ?? "?"}${t.risk ? ` risk ${t.risk}` : ""}`, t.risk === "high" ? "red" : t.risk === "medium" ? "yellow" : "green")));
+  section("Ready to merge", active.filter((t) => t.task.status === "pr-open").flatMap((t) => [
+    head(t, `#${t.task.pr ?? "?"}${t.risk ? ` risk ${t.risk}` : ""}`, t.risk === "high" ? "red" : t.risk === "medium" ? "yellow" : "green"),
+    ...(t.hold ? [detail(t.hold, "yellow")] : []),
+  ]));
 
   const done = p.tasks.filter((t) => isMerged(t.task));
   const tail: string[] = [];
@@ -146,6 +149,7 @@ export function gatherPane(repo: Repo, now = Date.now(), costs: Map<string, numb
   const tasks = loadTasks(repo);
   const plan = loadPlan(repo);
   const max = maxWorkers(repo);
+  const ceiling = maxRisk(repo);
   const recent: Recent[] = [];
   const paneTasks = tasks.map((task): PaneTask => {
     const events = readEvents(repo, task.id);
@@ -153,11 +157,14 @@ export function gatherPane(repo: Repo, now = Date.now(), costs: Map<string, numb
     recent.push({ at: Date.parse(task.createdAt), text: `${task.id} started${task.worker ? ` on ${task.worker}` : ""}` });
     if (task.mergedAt) recent.push({ at: Date.parse(task.mergedAt), text: `${task.id} merged${task.pr ? ` #${task.pr}` : ""}` });
     const lastNote = [...events].reverse().find((e) => e.type === task.status)?.note;
+    const verdict = latest(repo, task)?.verdict;
+    const hold = plan?.automerge && task.status === "pr-open" ? riskHold(verdict, ceiling) : undefined;
     return {
       task,
       title: plainTitle(task.title ?? plan?.tasks.find((t) => t.id === task.id)?.title ?? ""),
       spent: costs.get(task.id) ?? 0,
-      risk: latest(repo, task)?.verdict?.risk,
+      risk: verdict?.risk,
+      ...(hold ? { hold } : {}),
       note: lastNote,
       activity: task.status === "running" ? transcripts(repo, task).activity() : undefined,
       closed: task.status === "running" && closed.has(task.id),
