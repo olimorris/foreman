@@ -138,7 +138,7 @@ When your session-start context says Telegram pings are on, the user can't alway
 
 ## Decisions
 
-The repo's ADR folder has one writer: you, through the batched docs PR. Workers only propose. Accepted decisions reach workers straight away through the ledger and a message, and reach the repo when the user merges the decisions PR.
+The repo's ADR folder has one writer: you, through the batched docs PR. Workers only propose. Accepted decisions reach workers straight away through the ledger and a message, and reach the repo when the user merges the decisions PR. You open that PR yourself, without asking, once a few decisions are accepted and again when the plan finishes.
 
 ## Skills
 
