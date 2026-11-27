@@ -1,6 +1,6 @@
 # Roadmap
 
-The README promises a run that finishes while you're away, work that arrives as PRs and a repo that stays inside your rules. This is the work that makes each of those promises true.
+The README promises a run that finishes while you're away, work that arrives as PRs you can try in one command, a repo that stays inside your rules and a Foreman that gets better with every run. This is the work that makes each of those promises true.
 
 ## 1. Overnight runs finish without you
 
@@ -38,7 +38,49 @@ The watcher runs as a task inside the orchestrator's session. If that session ex
 - When the reviewer sends work back twice and it still isn't approved, Foreman opens a draft PR labelled as not approved, with the reviewer's notes, instead of waiting for you.
 - The summary gives a reason for every task that has no PR.
 
-## 2. Costs that make sense
+## 2. Reviewing the night's work faster
+
+Today, trying a PR means switching branches, installing and starting the app by hand, every time.
+
+### Try a PR with one command
+
+Most of the parts already exist: worktrees, the `start` command and a port for each worktree.
+
+- `foreman try 41` checks out the branch of PR 41 in a worktree.
+- It installs the PR's dependencies and starts the app with the `install`, `start` and `url` from `screenshots` in `.foreman/config.json`.
+- You can follow the worker's test steps right away, without touching your own checkout.
+
+## 3. Rules that are actually checked
+
+### A separate rules check for the never list
+
+The reviewer judges whether a change meets its intent. Checking the never list is a different job, and the orchestrator shouldn't do it either.
+
+- A separate read-only session checks each approved change against every rule in the never list.
+- It answers each rule with pass or fail, and the evidence for a fail.
+- Its report wakes the orchestrator, which sends a failure back to the worker or asks you when the worker can't fix it.
+- `deliver` refuses to open a PR until the rules check passes, the same way it waits for the reviewer's approval.
+- The PR lists each rule and its result.
+- The reviewer stops checking the never list.
+
+### Better flaky test detection
+
+- The baseline runs the tests twice, so a test that fails one run in three is missed about half the time.
+- After the two runs, the baseline reruns only the failing tests three more times.
+- A PR check that fails and then passes on a rerun is noted as flaky.
+
+## 4. Foreman gets better each run
+
+### Learn from your edits
+
+Foreman ships work, then you change it. Those changes show what your skills are missing.
+
+- After you merge, Foreman compares what it shipped with what you changed before or after merging.
+- It also reads what the reviewer kept sending back.
+- Once a run finishes, it suggests changes to your skills, such as "you renamed three test files to the `*.spec.ts` pattern, so add that to your skill". Your skills live in `.foreman/skills` and `~/.config/foreman/skills`.
+- You approve each suggestion the way you approve a decision, through the decision ledger. Nothing changes your skills until you do.
+
+## 5. Costs that make sense
 
 ### Say what the budget measures
 
@@ -61,26 +103,7 @@ The watcher runs as a task inside the orchestrator's session. If that session ex
 - The README's settings table says Sonnet is the default.
 - Not decided yet: whether a change Sonnet rates medium or high risk, or one that touches `protect` paths, also gets a second review on Opus.
 
-## 3. Rules that are actually checked
-
-### A separate rules check for the never list
-
-The reviewer judges whether a change meets its intent. Checking the never list is a different job, and the orchestrator shouldn't do it either.
-
-- A separate read-only session checks each approved change against every rule in the never list.
-- It answers each rule with pass or fail, and the evidence for a fail.
-- Its report wakes the orchestrator, which sends a failure back to the worker or asks you when the worker can't fix it.
-- `deliver` refuses to open a PR until the rules check passes, the same way it waits for the reviewer's approval.
-- The PR lists each rule and its result.
-- The reviewer stops checking the never list.
-
-### Better flaky test detection
-
-- The baseline runs the tests twice, so a test that fails one run in three is missed about half the time.
-- After the two runs, the baseline reruns only the failing tests three more times.
-- A PR check that fails and then passes on a rerun is noted as flaky.
-
-## 4. Reach
+## 6. Reach
 
 ### More terminals and Linux
 
