@@ -1,6 +1,9 @@
 node_modules/
 .foreman/
 
+# The roadmap is a private planning note and stays local.
+docs/roadmap.md
+
 # Only the images the README shows are kept. Design sources and drafts stay local.
 assets/*
 !assets/foreman-banner-dark.png
