@@ -40,11 +40,11 @@ Replace `/path/to/foreman-my-change` with your worktree. Any `foreman` command w
 ## Run the checks
 
 ```sh
-bun test
+bun run test
 bun run typecheck
 ```
 
-These two are the gate. GitHub Actions fails every job on a billing error for now, so CI tells you nothing.
+These two are the gate. `bun run test` runs the test files in parallel, which takes about 18 seconds where a bare `bun test` takes over a minute. GitHub Actions fails every job on a billing error for now, so CI tells you nothing.
 
 ### Writing tests
 
