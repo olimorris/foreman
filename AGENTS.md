@@ -11,7 +11,7 @@ Foreman is a Claude Code plugin: one orchestrator session runs worker sessions i
 
 ## Checks
 
-- `bun test` and `bun run typecheck` are the gate. GitHub Actions fails every job on a billing error for now, so CI tells you nothing.
+- `bun run test` and `bun run typecheck` are the gate. `bun run test` runs the test files in parallel, about four times faster than a bare `bun test`, which runs them one at a time. GitHub Actions fails every job on a billing error for now, so CI tells you nothing.
 - Tests drive pure functions with `tempRepo()` and `fakeTerminal()` from `test/helpers.ts`, never real tabs or `claude` sessions. Code the watcher calls takes its outside world as probes, like `scan` in `src/watch.ts`.
 
 ## Rules
