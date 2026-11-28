@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.3.0](https://github.com/olimorris/foreman/compare/v0.2.0...v0.3.0) (2026-11-28)
+
+
+### Features
+
+* block merge, approve and force-push commands in the hook ([#89](https://github.com/olimorris/foreman/issues/89)) ([021c191](https://github.com/olimorris/foreman/commit/021c191f5598effd089f7e13484648fde16130a2))
+* list protected paths in every brief ([#92](https://github.com/olimorris/foreman/issues/92)) ([69bc5d9](https://github.com/olimorris/foreman/commit/69bc5d9be0682f0b9d222e86ca5ed66f9bd15c72))
+* never automerge a PR that touches protected paths ([#91](https://github.com/olimorris/foreman/issues/91)) ([6edc351](https://github.com/olimorris/foreman/commit/6edc3515673c88d73a274b97826902be7ae9dc52))
+* only automerge PRs at or below a risk level ([#90](https://github.com/olimorris/foreman/issues/90)) ([e2dcce2](https://github.com/olimorris/foreman/commit/e2dcce22c4b6d21f99186e231aaac752e7e142ed))
+* reset the plan's budget count with foreman budget reset ([#79](https://github.com/olimorris/foreman/issues/79)) ([daafa4c](https://github.com/olimorris/foreman/commit/daafa4c275e8b11adfc69d6531047dba0aad6892))
+* show what's coming next in the status pane ([#83](https://github.com/olimorris/foreman/issues/83)) ([2dfdc1c](https://github.com/olimorris/foreman/commit/2dfdc1c1f6aae896aeb54f7885e6cc8f4009f974))
+
+
+### Bug Fixes
+
+* answer an already-running watch or together call without waking the orchestrator ([#84](https://github.com/olimorris/foreman/issues/84)) ([703e279](https://github.com/olimorris/foreman/commit/703e2792764f39916e0b8c59480a907bc32e22ab))
+* hold automerge on a PR that has no checks ([#88](https://github.com/olimorris/foreman/issues/88)) ([bb59611](https://github.com/olimorris/foreman/commit/bb5961157ebbd3cf44ace233cefd488b343ad4ee))
+* let the reviewer read the user's global skills ([#77](https://github.com/olimorris/foreman/issues/77)) ([27c9f0c](https://github.com/olimorris/foreman/commit/27c9f0c9ed0243aa0f05a4f99967577c82936b36))
+* show the plan's own spend in status, the pane and the summary ([#80](https://github.com/olimorris/foreman/issues/80)) ([d17659f](https://github.com/olimorris/foreman/commit/d17659f6dd61651ce45f56c000992a7c3ce3eb6e))
+* wake the orchestrator only for lines that need it, and fix sync for stacked tasks ([#82](https://github.com/olimorris/foreman/issues/82)) ([1ae060d](https://github.com/olimorris/foreman/commit/1ae060d2482bffae4a8c3384f774e7ef98b9f412))
+
+
+### Reverts
+
+* say what Foreman guarantees in the README ([#95](https://github.com/olimorris/foreman/issues/95)) ([804239a](https://github.com/olimorris/foreman/commit/804239ac1a8e5f2c4bed423ad1a5f9bf7fbb46bc))
+
 ## [0.2.0](https://github.com/olimorris/foreman/compare/v0.1.0...v0.2.0) (2026-11-25)
 
 
